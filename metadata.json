@@ -1,6 +1,6 @@
 {
-  "name": "애망 시그널",
-  "description": "애플과 망고의 산뜻하고 안전한 안심케어, 실시간 부모님 돌돔 및 폭파형 오프라인 약속 공유 메신저 서비스",
+  "name": "애플망고톡",
+  "description": "친구 실시간 위치 공유 & 부모님 안심 케어 메신저 — Apple Mango Talk",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

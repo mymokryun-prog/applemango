@@ -28,7 +28,7 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'aemang-location-encryption
 const EMERGENCY_API_KEY = process.env.EMERGENCY_API_KEY || 'fake-119-api-key'; // For production: real 119 API key
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@amang.com';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@applemangotalk.app';
 
 // Emergency service config (simulation)
 const EMERGENCY_API_ENDPOINT = process.env.EMERGENCY_API_ENDPOINT || 'https://api.119emergency.go.kr/v1/dispatch';
@@ -339,10 +339,10 @@ const messages: any[] = [
   {
     id: 'msg-init-1',
     senderId: 'bot-ai',
-    senderName: '애망봇 (AI)',
+    senderName: '망고봇 🥭',
     senderAvatar: '🤖',
     senderColor: '#EF4444',
-    text: '🍎🥭 애망 시그널에 오신 것을 환영합니다! 실시간 위치 공유와 안부 확인, 일회성 약속방 자동 종료 서비스를 체험해 보세요. @애망봇 을 부르시면 근처 만남 추천과 안심 루트 조율을 도와드려요!',
+    text: '🍎🥭 애플망고톡에 오신 것을 환영합니다! 실시간 위치 공유와 안부 확인, 일회성 약속방 자동 종료 서비스를 체험해 보세요. @망고봇 을 부르시면 근처 만남 추천과 안심 루트 조율을 도와드려요!',
     timestamp: new Date(Date.now() - 3600000).toISOString(),
   },
   {
@@ -374,7 +374,7 @@ const friends: Record<string, any> = {
     color: '#3B82F6',
     lat: HONGDAE_LAT,
     lng: HONGDAE_LNG,
-    statusMsg: '애망 시그널 켜는 중! 🍎🥭',
+    statusMsg: '애플망고톡 켜는 중! 🍎🥭',
     isOnline: true,
     battery: 89,
     speed: 0,
@@ -474,7 +474,7 @@ const friends: Record<string, any> = {
 const appointments: any[] = [
   {
     id: 'promise-1',
-    title: '🍎 애망 시그널 홍대 정기모임',
+    title: '🍎 애플망고톡 홍대 정기모임',
     placeName: '홍대입구역 9번출구 앞',
     lat: 37.5568,
     lng: 126.9238,
@@ -495,7 +495,7 @@ const notifications: any[] = [
     id: 'notif-1',
     type: 'promise',
     title: '새로운 약속 생성됨',
-    message: '지우 님이 [애망 시그널 정기모임] 일정 투표를 생성했습니다.',
+    message: '지우 님이 [애플망고톡 정기모임] 일정 투표를 생성했습니다.',
     timestamp: new Date(Date.now() - 1700000).toISOString(),
     read: false,
   },
@@ -513,7 +513,7 @@ const notifications: any[] = [
 const dbRooms: Record<string, any> = {
   'room-friends': {
     id: 'room-friends',
-    name: '애망 단짝친구들',
+    name: '애플망고 단짝방',
     emoji: '🥭',
     type: 'friends',
     trackingStyle: 'temporary',
@@ -525,7 +525,7 @@ const dbRooms: Record<string, any> = {
   },
   'room-family': {
     id: 'room-family',
-    name: '애망 안심가족방',
+    name: '애플망고 가족방',
     emoji: '🏠',
     type: 'family',
     trackingStyle: 'continuous',
@@ -537,7 +537,7 @@ const dbRooms: Record<string, any> = {
         senderName: '시스템',
         senderAvatar: '⚙️',
         senderColor: '#6B7280',
-        text: '🏠 애망 안심가족 대화방이 활성화되었습니다. 상시 위치 공유를 통해 안심하고 자녀와 부모님의 위치를 확인하고 소통하세요! 🍎🥭',
+        text: '🏠 애플망고 가족 대화방이 활성화되었습니다. 상시 위치 공유를 통해 안심하고 자녀와 부모님의 위치를 확인하고 소통하세요! 🍎🥭',
         timestamp: new Date(Date.now() - 3600000).toISOString(),
         isSystem: true
       },
@@ -568,7 +568,7 @@ const dbRooms: Record<string, any> = {
         color: '#3B82F6',
         lat: HONGDAE_LAT,
         lng: HONGDAE_LNG,
-        statusMsg: '애망 시그널 켜는 중! 🍎',
+        statusMsg: '애플망고톡 켜는 중! 🍎',
         isOnline: true,
         battery: 89,
         speed: 0,
@@ -680,7 +680,7 @@ const dbRooms: Record<string, any> = {
   },
   'room-work': {
     id: 'room-work',
-    name: '애망 연구소',
+    name: '애플망고 직장방',
     emoji: '👔',
     type: 'work',
     messages: [
@@ -690,7 +690,7 @@ const dbRooms: Record<string, any> = {
         senderName: '시스템',
         senderAvatar: '⚙️',
         senderColor: '#6B7280',
-        text: '👔 신속 보고 채널 "애망 연구소"가 생성되었습니다. 외근 후 빠른 정산, 긴급 보고, 티타임 미팅을 시작해볼까요! 🍎🥭',
+        text: '👔 신속 보고 채널 "애플망고 직장방"가 생성되었습니다. 외근 후 빠른 정산, 긴급 보고, 티타임 미팅을 시작해볼까요! 🍎🥭',
         timestamp: new Date(Date.now() - 3600000).toISOString(),
         isSystem: true
       },
@@ -721,7 +721,7 @@ const dbRooms: Record<string, any> = {
         color: '#3B82F6',
         lat: HONGDAE_LAT,
         lng: HONGDAE_LNG,
-        statusMsg: '애망 시그널 켜는 중! 🍎',
+        statusMsg: '애플망고톡 켜는 중! 🍎',
         isOnline: true,
         battery: 89,
         speed: 0,
@@ -833,7 +833,7 @@ const dbRooms: Record<string, any> = {
   },
   'room-care': {
     id: 'room-care',
-    name: '애망 안심효도방',
+    name: '애플망고 효도방',
     emoji: '👵',
     type: 'care',
     trackingStyle: 'continuous',
@@ -845,7 +845,7 @@ const dbRooms: Record<string, any> = {
         senderName: '시스템',
         senderAvatar: '⚙️',
         senderColor: '#6B7280',
-        text: '👵 실시간 부모님 안심 케어 채널 "애망 안심효도방"이 활성화되었습니다. 부모님의 실시간 위치와 활력 지표(심박수, 스마트밴드 배터리)를 확인하고 비상 상황 발생 시 🚨 119 긴급요구 버튼을 통해 빠른 대처가 가능합니다! 🍎🥭',
+        text: '👵 실시간 부모님 안심 케어 채널 "애플망고 효도방"이 활성화되었습니다. 부모님의 실시간 위치와 활력 지표(심박수, 스마트밴드 배터리)를 확인하고 비상 상황 발생 시 🚨 119 긴급요구 버튼을 통해 빠른 대처가 가능합니다! 🍎🥭',
         timestamp: new Date(Date.now() - 3600000).toISOString(),
         isSystem: true
       },
@@ -876,7 +876,7 @@ const dbRooms: Record<string, any> = {
         color: '#3B82F6',
         lat: 37.5565,
         lng: 126.9242,
-        statusMsg: '애망 시그널 켜는 중! 🍎🥭',
+        statusMsg: '애플망고톡 켜는 중! 🍎🥭',
         isOnline: true,
         battery: 89,
         heartRate: 72,
@@ -1401,7 +1401,7 @@ async function startServer() {
     try {
       const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: { q, format: 'json', limit: 8, countrycodes: 'kr', 'accept-language': 'ko' },
-        headers: { 'User-Agent': 'AemangSignal/1.0 (support@amang.kr)', 'Accept-Language': 'ko,en' },
+        headers: { 'User-Agent': 'AppleMangoTalk/1.0 (support@applemangotalk.app)', 'Accept-Language': 'ko,en' },
         timeout: 7000,
       });
       const places = (data as any[]).map((item: any) => {
@@ -1554,7 +1554,7 @@ async function startServer() {
       friend.isPendingInvite = false;
       friend.isOnline = true;
       friend.name = `${friend.realName || friend.name} (합류)`;
-      friend.statusMsg = `안심 애망 시그널 가입완료! 실시간 이동 감지 중 🧭`;
+      friend.statusMsg = `안심 애플망고톡 가입완료! 실시간 이동 감지 중 🧭`;
       friend.updatedAt = new Date().toISOString();
 
       // Send accept notification
@@ -1634,12 +1634,12 @@ async function startServer() {
 
     room.messages.push(newMsg);
 
-    // AI Mentions Handler (@애망봇)
-    if (text && (text.includes('@애망봇') || text.includes('@ai') || text.includes('@애망bot'))) {
-      const prompt = `사용자가 실시간 친구 모임 및 안심 가로등 앱 '애망 시그널' 내에서 다음과 같은 메시지를 보냈습니다: "${text}".
+    // AI Mentions Handler (@망고봇)
+    if (text && (text.includes('@망고봇') || text.includes('@ai') || text.includes('@애망bot'))) {
+      const prompt = `사용자가 실시간 친구 모임 및 안심 가로등 앱 '애플망고톡' 내에서 다음과 같은 메시지를 보냈습니다: "${text}".
       이전 대화 목록: ${JSON.stringify(room.messages.slice(-5))}
       참여 친구들의 현재 위치: ${JSON.stringify(Object.values(room.friends).map((f: any) => ({ name: f.name, lat: f.lat, lng: f.lng, status: f.statusMsg })))}
-      질문에 맞게 친절하고 위트 있는 애망봇 캐릭터(말투에 '🍎' 이나 '🥭' 를 섞어서 친근한 한국어로 작성)로 다음 질문에 매장 추천, 안심 조율 팁, 또는 피드백을 제공해 주세요. 3문장 이내로 컴팩트하고 유익하게 조언해주세요.`;
+      질문에 맞게 친절하고 위트 있는 @망고봇 캐릭터(말투에 '🍎' 이나 '🥭' 를 섞어서 친근한 한국어로 작성)로 다음 질문에 매장 추천, 안심 조율 팁, 또는 피드백을 제공해 주세요. 3문장 이내로 컴팩트하고 유익하게 조언해주세요.`;
 
       let aiText = '';
       if (ai) {
@@ -1648,7 +1648,7 @@ async function startServer() {
             model: 'gemini-3.5-flash',
             contents: prompt,
             config: {
-              systemInstruction: 'You are the playful and smart assistant chatbot of "Amang Signal" (AppleMango Signal) named @애망봇. You suggest meeting spots, coordinate plans, check elder companion safety, and speak in a sweet fruits loving tone in Korean!',
+              systemInstruction: 'You are the playful and smart assistant chatbot of "Amang Signal" (AppleMango Signal) named @망고봇. You suggest meeting spots, coordinate plans, check elder companion safety, and speak in a sweet fruits loving tone in Korean!',
             }
           });
           aiText = aiResponse.text || '애망! 🍎🥭 머리가 살짝 혼란스럽네요! 근처 상쾌한 "애플망고 피크닉 쉼터"나 디저트 카페에서 소통해볼까요?';
@@ -1668,7 +1668,7 @@ async function startServer() {
       const botMsg = {
         id: `msg-bot-${Date.now()}`,
         senderId: 'bot-ai',
-        senderName: '애망봇 (AI)',
+        senderName: '망고봇 🥭',
         senderAvatar: '🤖',
         senderColor: '#EF4444',
         text: aiText,
@@ -1680,8 +1680,8 @@ async function startServer() {
         room.notifications.unshift({
           id: `notif-${Date.now()}`,
           type: 'chat',
-          title: '애망봇 멘션 답변',
-          message: '애망봇이 채팅방에 기발한 귀가/모임 조율 조언을 남겼습니다! 🍎',
+          title: '@망고봇 멘션 답변',
+          message: '@망고봇이 채팅방에 기발한 귀가/모임 조율 조언을 남겼습니다! 🍎',
           timestamp: new Date().toISOString(),
           read: false,
         });
@@ -1747,7 +1747,7 @@ async function startServer() {
         id: `notif-invite-${Date.now()}`,
         type: 'invite',
         title: '새로운 친구 참가!',
-        message: `${room.friends[friendId].name} 님이 애망 시그널에 초대 수락하여 참가했습니다!`,
+        message: `${room.friends[friendId].name} 님이 애플망고톡에 초대 수락하여 참가했습니다!`,
         timestamp: new Date().toISOString(),
         read: false
       });
@@ -2019,7 +2019,7 @@ async function startServer() {
 
   app.post('/api/push/send', tryCatch(async (req, res) => {
     const { title, body, data } = req.body;
-    await broadcastPushNotification(title || '애망 시그널', body || '알림이 도착했습니다.', data || {});
+    await broadcastPushNotification(title || '애플망고톡', body || '알림이 도착했습니다.', data || {});
     res.json({ success: true });
   }));
 
@@ -2101,7 +2101,7 @@ async function startServer() {
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
     if (!ai) {
       return res.json({
-        advice: '🍎 애망 시그널! 구글 AI가 설정되어 있지 않아 위트 가이드를 출력합니다. 경의선 숲길 책거리가 모임 장소로 산뜻하고 아주 안전합니다! 🍎'
+        advice: '🍎 애플망고톡! 구글 AI가 설정되어 있지 않아 위트 가이드를 출력합니다. 경의선 숲길 책거리가 모임 장소로 산뜻하고 아주 안전합니다! 🍎'
       });
     }
 
@@ -2110,7 +2110,7 @@ async function startServer() {
         model: 'gemini-3.5-flash',
         contents: `사용자가 친구들과 만날 만한 특별한 장소나 코스를 맛깔나게 추천해 달라고 제안했습니다. 메세지: "${message}".
         이 방은 [${room.name}] 방이며 유형은 "${room.type}"입니다.
-        서울 홍대 인근이며, 애망 시그널 특유의 산뜻하고 안심 가득한 톤앤매너로(말끝에 과일🍎 이나 🥭을 소량 섞어서) 3문장 이내로 근사하게 추천해주시되, 이 방의 성격(가족, 친구, 혹은 부모님 안심)에 어울리는 추천 코스를 맛집이나 공원 등 구체적인 지명과 함께 묘사해 주세요.`
+        서울 홍대 인근이며, 애플망고톡 특유의 산뜻하고 안심 가득한 톤앤매너로(말끝에 과일🍎 이나 🥭을 소량 섞어서) 3문장 이내로 근사하게 추천해주시되, 이 방의 성격(가족, 친구, 혹은 부모님 안심)에 어울리는 추천 코스를 맛집이나 공원 등 구체적인 지명과 함께 묘사해 주세요.`
       });
       res.json({ advice: result.text || '🍎 홍대 맛집 골목 혹은 경의선 숲길 책거리가 조율하기 좋은 최고의 쉼터망고! 🥭' });
     } catch (err: any) {

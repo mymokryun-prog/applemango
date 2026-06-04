@@ -59,7 +59,7 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [regPhone, setRegPhone] = useState('010-1234-5678');
   const [regRealName, setRegRealName] = useState('김민수');
-  const [regAlias, setRegAlias] = useState('애망민수');
+  const [regAlias, setRegAlias] = useState('애플망고');
 
   const [recentCreatedRoomName, setRecentCreatedRoomName] = useState<string | null>(null);
   const [pendingDeleteRoomId, setPendingDeleteRoomId] = useState<string | null>(null);
@@ -135,7 +135,7 @@ export default function App() {
       const permission = await requestNotificationPermission();
       setNotificationPermission(permission);
       if (permission === 'granted') {
-        await showLocalNotification('애망 시그널 알림 허용 완료', {
+        await showLocalNotification('애플망고톡 알림 허용 완료', {
           body: '중요한 알림을 실시간으로 받을 수 있습니다.',
           icon: '/icons/icon-192.svg'
         });
@@ -1456,7 +1456,7 @@ export default function App() {
                 <label className="text-xs font-semibold text-gray-600">앱 내 닉네임</label>
                 <input
                   type="text"
-                  placeholder="예: 애망민수"
+                  placeholder="예: 애플망고"
                   value={regAlias}
                   onChange={(e) => setRegAlias(e.target.value)}
                   className="bg-gray-50 border border-gray-200 text-sm px-4 py-3 rounded-2xl focus:outline-none focus:border-rose-400"

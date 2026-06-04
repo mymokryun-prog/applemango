@@ -1,5 +1,5 @@
 {
-  "name": "애망 시그널 개발 환경",
+  "name": "애플망고톡 개발 환경",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
   "postCreateCommand": "npm install",
   "forwardPorts": [3000],
