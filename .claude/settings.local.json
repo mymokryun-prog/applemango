@@ -15,7 +15,15 @@
       "Bash(git commit -m '카카오맵 키를 런타임에 로드 \\(빌드 변수 의존 제거\\) *)",
       "Bash(npm list *)",
       "Bash(npm install *)",
-      "Bash(git commit -m '앱 아이콘 새 디자인 + PNG 지원 추가 *)"
+      "Bash(git commit -m '앱 아이콘 새 디자인 + PNG 지원 추가 *)",
+      "Bash(where chrome *)",
+      "Bash(where \"chrome.exe\")",
+      "Read(//c/Program Files/Google/Chrome/Application/**)",
+      "Bash(mkdir -p public/icons)",
+      "Bash('C:/Program Files/Google/Chrome/Application/chrome.exe' --headless=new --no-sandbox --window-size=1024,1024 --screenshot=public/icons/icon-1024.png --hide-scrollbars file:///C:/애망/애망-시그널/scripts/make-icons.html)",
+      "Bash(git commit -m '앱 아이콘 PNG 추가 \\(192/512/1024/apple-touch\\) *)",
+      "Bash(git commit -m '빌드 도구를 dependencies로 이동 \\(Render 배포 수정\\) *)",
+      "Bash(git commit -m '데모 데이터 전체 제거 + 실제 유저 ID 시스템 *)"
     ]
   }
 }

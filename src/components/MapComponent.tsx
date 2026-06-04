@@ -287,8 +287,9 @@ export default function MapComponent({
         <span className="text-4xl">🗺️</span>
         <p className="text-sm font-semibold leading-relaxed">카카오맵을 불러오지 못했습니다.</p>
         <p className="text-xs text-gray-400 leading-relaxed">
-          Koyeb 대시보드 → 서비스 → Environment Variables<br />
-          <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">KAKAO_MAP_KEY</code> 추가 후 Redeploy
+          Render 대시보드 → Environment 탭<br />
+          <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">KAKAO_MAP_KEY</code> = 카카오 JavaScript 앱 키<br />
+          추가 후 Manual Deploy 실행
         </p>
         <button
           onClick={() => { sdkPromise = null; setSdkState('loading'); loadKakaoSDK().then(() => setSdkState('ready')).catch(() => setSdkState('error')); }}

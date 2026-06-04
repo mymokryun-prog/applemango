@@ -41,8 +41,12 @@ export default function App() {
   // Navigation active state
   const [activeTab, setActiveTab] = useState<'map' | 'chat' | 'appointments' | 'friends' | 'notifications'>('map');
   
-  // Simulated Multi-user Toggle profile state
-  const [activeProfileId, setActiveProfileId] = useState<string>('user-minsu');
+  // 전화번호 기반 사용자 ID (로컬 저장)
+  const [activeProfileId, setActiveProfileId] = useState<string>(() => {
+    const phone = localStorage.getItem('aemang_phone');
+    if (phone) return 'user-' + phone.replace(/\D/g, '');
+    return 'user-guest-' + Math.random().toString(36).slice(2, 8);
+  });
 
   // Room states
   const [rooms, setRooms] = useState<any[]>([]);
@@ -251,18 +255,24 @@ export default function App() {
 
   // 온보딩 완료 핸들러
   const handleOnboardingComplete = async (phone: string, name: string, nickname: string, fruit: string) => {
+    const newUserId = 'user-' + phone.replace(/\D/g, '');
     try {
-      await fetch('/api/friends/profile', {
+      const res = await fetch('/api/friends/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, realName: name, alias: nickname, avatar: fruit })
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.token) localStorage.setItem('aemang_token', data.token);
+      }
     } catch (_) { /* 서버 없어도 로컬 진행 */ }
     localStorage.setItem('apmt_v3_registered', 'true');
     localStorage.setItem('aemang_phone', phone);
     localStorage.setItem('aemang_name', name);
     localStorage.setItem('aemang_nickname', nickname);
     localStorage.setItem('aemang_fruit', fruit);
+    setActiveProfileId(newUserId);
     setShowOnboarding(false);
     fetchAllStates(activeRoomId);
   };
