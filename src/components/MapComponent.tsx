@@ -3,10 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Friend, Appointment } from '../types';
-import { Search, Loader2, X } from 'lucide-react';
+import { Search, Loader2, X, MapPin } from 'lucide-react';
+
+declare global {
+  interface Window { kakao: any; }
+}
 
 interface MapComponentProps {
   friends: Friend[];
@@ -23,324 +26,303 @@ interface MapComponentProps {
 
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
 
-export default function MapComponent({
-  friends,
-  appointments,
-  activeProfileId,
-  selectedFriendId,
-  selectedPromiseId,
-  onMapClick,
-  tempPromiseCoords,
-  myGpsCoords = null,
-  centerOnMyGpsOnce = false,
-  onMyGpsCentered,
-}: MapComponentProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMapInstanceRef = useRef<L.Map | null>(null);
-  const markerGroupRef = useRef<L.LayerGroup | null>(null);
-  const polylineGroupRef = useRef<L.LayerGroup | null>(null);
+// ─── Kakao SDK 싱글턴 로더 ───────────────────────────────────────────────────
+let sdkPromise: Promise<void> | null = null;
 
-  // 지도 내 장소 검색 상태
+function loadKakaoSDK(): Promise<void> {
+  if (sdkPromise) return sdkPromise;
+  sdkPromise = new Promise((resolve, reject) => {
+    if (window.kakao?.maps) { resolve(); return; }
+
+    const appKey = (import.meta as any).env?.VITE_KAKAO_MAP_KEY ?? '';
+    if (!appKey) {
+      reject(new Error('VITE_KAKAO_MAP_KEY 환경변수가 없습니다.'));
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
+    script.async = true;
+    script.onload = () => window.kakao.maps.load(resolve);
+    script.onerror = () => { sdkPromise = null; reject(new Error('카카오맵 SDK 로드 실패')); };
+    document.head.appendChild(script);
+  });
+  return sdkPromise;
+}
+
+// ─── 마커 HTML 빌더 ─────────────────────────────────────────────────────────
+function buildFriendHTML(friend: Friend, isSelected: boolean, isMe: boolean): string {
+  const ring = isSelected
+    ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)'
+    : '';
+  const border = isMe ? 'border:2px dashed #EAB308' : 'border:2px solid #111';
+  const statusSnippet = friend.statusMsg
+    ? `<div style="background:#fff;color:#374151;font-size:8px;font-weight:600;border:1px solid #E5E7EB;border-radius:6px;padding:1px 5px;margin-bottom:2px;max-width:72px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${friend.statusMsg.slice(0, 9)}${friend.statusMsg.length > 9 ? '…' : ''}</div>`
+    : '';
+  const hrBadge = friend.heartRate
+    ? `<div style="position:absolute;top:-3px;left:-10px;background:#EF4444;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1">♥${friend.heartRate}</div>`
+    : '';
+  return `
+    <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;user-select:none">
+      ${statusSnippet}
+      <div style="position:relative;width:28px;height:28px;background:${friend.color};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring}">
+        ${friend.avatar}
+        ${hrBadge}
+        <div style="position:absolute;bottom:-3px;right:-7px;background:#1F2937;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1">${friend.battery}%</div>
+        <div style="position:absolute;top:0;right:0;width:8px;height:8px;background:${friend.isOnline ? '#34D399' : '#9CA3AF'};border:1.5px solid #fff;border-radius:50%"></div>
+      </div>
+      <div style="background:#fff;border:1px solid #D1D5DB;color:#111;font-size:8px;font-weight:600;padding:1px 5px;border-radius:4px;margin-top:2px;white-space:nowrap;font-family:sans-serif">${friend.name.split(' ')[0]}${friend.speed > 0 ? ` ·${Math.round(friend.speed)}k` : ''}</div>
+    </div>`;
+}
+
+function buildAppointmentHTML(title: string, isSelected: boolean): string {
+  const scale = isSelected ? 'transform:scale(1.12)' : '';
+  return `
+    <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;${scale}">
+      <div style="width:36px;height:36px;background:#FBBF24;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:2px 2px 0 #111">📍</div>
+      <div style="background:#111;color:#FDE68A;font-size:10px;font-weight:900;padding:2px 6px;border-radius:6px;margin-top:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${title.length > 9 ? title.slice(0, 9) + '…' : title}</div>
+    </div>`;
+}
+
+// ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
+export default function MapComponent({
+  friends, appointments, activeProfileId,
+  selectedFriendId, selectedPromiseId,
+  onMapClick, tempPromiseCoords,
+  myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
+}: MapComponentProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const overlaysRef = useRef<any[]>([]);
+  const polylinesRef = useRef<any[]>([]);
+
+  const [sdkState, setSdkState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [mapSearch, setMapSearch] = useState('');
   const [mapResults, setMapResults] = useState<PlaceResult[]>([]);
-  const [isMapSearching, setIsMapSearching] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
-  const mapSearchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // SDK 로드
+  useEffect(() => {
+    loadKakaoSDK()
+      .then(() => setSdkState('ready'))
+      .catch(() => setSdkState('error'));
+  }, []);
+
+  // 지도 초기화
+  useEffect(() => {
+    if (sdkState !== 'ready' || !mapContainerRef.current || mapRef.current) return;
+    const { kakao } = window;
+    const map = new kakao.maps.Map(mapContainerRef.current, {
+      center: new kakao.maps.LatLng(37.5565, 126.9242),
+      level: 4,
+    });
+    mapRef.current = map;
+
+    kakao.maps.event.addListener(map, 'click', (e: any) => {
+      onMapClick(e.latLng.getLat(), e.latLng.getLng());
+    });
+  }, [sdkState, onMapClick]);
+
+  // 마커/경로 업데이트
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || sdkState !== 'ready') return;
+    const { kakao } = window;
+
+    overlaysRef.current.forEach(o => o.setMap(null));
+    overlaysRef.current = [];
+    polylinesRef.current.forEach(p => p.setMap(null));
+    polylinesRef.current = [];
+
+    // 친구 이동 경로
+    friends.forEach(friend => {
+      if (!friend.route || friend.route.length < 2) return;
+      const path = friend.route.map(([la, ln]: [number, number]) => new kakao.maps.LatLng(la, ln));
+      const poly = new kakao.maps.Polyline({
+        path,
+        strokeWeight: selectedFriendId === friend.id ? 3 : 1.5,
+        strokeColor: friend.color,
+        strokeOpacity: selectedFriendId === friend.id ? 0.85 : 0.35,
+        strokeStyle: 'solid',
+      });
+      poly.setMap(map);
+      polylinesRef.current.push(poly);
+    });
+
+    // 약속 마커
+    appointments.forEach(app => {
+      const overlay = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(app.lat, app.lng),
+        content: buildAppointmentHTML(app.title, selectedPromiseId === app.id),
+        yAnchor: 1,
+        zIndex: 3,
+      });
+      overlay.setMap(map);
+      overlaysRef.current.push(overlay);
+    });
+
+    // 임시 핀 (약속 위치 지정)
+    if (tempPromiseCoords) {
+      const content = `
+        <div style="display:flex;flex-direction:column;align-items:center">
+          <div style="width:32px;height:32px;background:#EF4444;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;animation:bounce 1s infinite">⭐️</div>
+          <div style="background:#111;color:#FCA5A5;font-size:9px;font-weight:900;padding:1px 5px;border-radius:5px;margin-top:2px;font-family:sans-serif">여기 소집</div>
+        </div>`;
+      const overlay = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1]),
+        content, yAnchor: 1, zIndex: 4,
+      });
+      overlay.setMap(map);
+      overlaysRef.current.push(overlay);
+    }
+
+    // 친구 마커
+    friends.forEach(friend => {
+      const overlay = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(friend.lat, friend.lng),
+        content: buildFriendHTML(friend, selectedFriendId === friend.id, friend.id === activeProfileId),
+        yAnchor: 1,
+        zIndex: selectedFriendId === friend.id ? 5 : 2,
+      });
+      overlay.setMap(map);
+      overlaysRef.current.push(overlay);
+    });
+  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, sdkState]);
+
+  // 선택된 항목으로 이동
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || sdkState !== 'ready') return;
+    const { kakao } = window;
+
+    if (selectedFriendId) {
+      const f = friends.find(fr => fr.id === selectedFriendId);
+      if (f) { map.panTo(new kakao.maps.LatLng(f.lat, f.lng)); map.setLevel(4); }
+    } else if (selectedPromiseId) {
+      const a = appointments.find(ap => ap.id === selectedPromiseId);
+      if (a) { map.panTo(new kakao.maps.LatLng(a.lat, a.lng)); map.setLevel(4); }
+    } else if (tempPromiseCoords) {
+      map.panTo(new kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1]));
+    }
+  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords, sdkState]);
+
+  // GPS 위치로 최초 이동
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || sdkState !== 'ready' || !myGpsCoords || !centerOnMyGpsOnce) return;
+    if (selectedFriendId || selectedPromiseId) return;
+    const { kakao } = window;
+    map.panTo(new kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]));
+    map.setLevel(4);
+    onMyGpsCentered?.();
+  }, [myGpsCoords, centerOnMyGpsOnce, sdkState, selectedFriendId, selectedPromiseId, onMyGpsCentered]);
+
+  // 카카오 장소 검색
+  const searchPlaces = useCallback((query: string) => {
+    if (!query.trim() || sdkState !== 'ready') {
+      setMapResults([]);
+      setShowResults(false);
+      return;
+    }
+    setIsSearching(true);
+    setShowResults(true);
+    const ps = new window.kakao.maps.services.Places();
+    const center = mapRef.current?.getCenter();
+    ps.keywordSearch(
+      query,
+      (data: any[], status: string) => {
+        setIsSearching(false);
+        if (status === window.kakao.maps.services.Status.OK) {
+          setMapResults(data.slice(0, 8).map((item: any) => ({
+            name: item.place_name,
+            address: item.road_address_name || item.address_name,
+            lat: parseFloat(item.y),
+            lng: parseFloat(item.x),
+          })));
+        } else {
+          setMapResults([]);
+        }
+      },
+      { location: center, sort: window.kakao.maps.services.SortBy?.DISTANCE }
+    );
+  }, [sdkState]);
 
   useEffect(() => {
-    if (mapSearchDebounce.current) clearTimeout(mapSearchDebounce.current);
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
     if (!mapSearch.trim()) { setMapResults([]); setShowResults(false); return; }
+    searchDebounce.current = setTimeout(() => searchPlaces(mapSearch), 500);
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
+  }, [mapSearch, searchPlaces]);
 
-    setIsMapSearching(true);
-    setShowResults(true);
-    mapSearchDebounce.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/places/search?q=${encodeURIComponent(mapSearch)}`);
-        const data: PlaceResult[] = await res.json();
-        setMapResults(data);
-      } catch { setMapResults([]); }
-      finally { setIsMapSearching(false); }
-    }, 600);
-
-    return () => { if (mapSearchDebounce.current) clearTimeout(mapSearchDebounce.current); };
-  }, [mapSearch]);
-
-  const handleSelectMapResult = (place: PlaceResult) => {
-    const map = leafletMapInstanceRef.current;
-    if (map) map.flyTo([place.lat, place.lng], 17, { animate: true, duration: 1.0 });
+  const handleSelectResult = (place: PlaceResult) => {
+    const map = mapRef.current;
+    if (map && sdkState === 'ready') {
+      map.panTo(new window.kakao.maps.LatLng(place.lat, place.lng));
+      map.setLevel(3);
+    }
     onMapClick(place.lat, place.lng);
     setMapSearch('');
     setShowResults(false);
-    setMapResults([]);
   };
 
-  // Initialize Map
-  useEffect(() => {
-    if (!mapRef.current || leafletMapInstanceRef.current) return;
+  // ─── 렌더 ─────────────────────────────────────────────────────────────────
+  if (sdkState === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-gray-50 text-gray-500 gap-3 p-8 text-center">
+        <span className="text-4xl">🗺️</span>
+        <p className="text-sm font-semibold leading-relaxed">
+          카카오맵을 불러오지 못했습니다.<br />
+          <span className="text-xs text-gray-400">Koyeb 환경변수에 <code className="bg-gray-100 px-1 rounded">VITE_KAKAO_MAP_KEY</code>를 설정해 주세요.</span>
+        </p>
+      </div>
+    );
+  }
 
-    // Centered around Hongdae (Seoul, South Korea)
-    const initialLat = 37.5565;
-    const initialLng = 126.9242;
-
-    const map = L.map(mapRef.current, {
-      center: [initialLat, initialLng],
-      zoom: 15,
-      zoomControl: false, // Position customly later
-      attributionControl: false // keep tidy
-    });
-
-    // Elegant Light-colored Tile layer working beautifully in Korea
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-    }).addTo(map);
-
-    L.control.zoom({ position: 'topright' }).addTo(map);
-
-    leafletMapInstanceRef.current = map;
-    markerGroupRef.current = L.layerGroup().addTo(map);
-    polylineGroupRef.current = L.layerGroup().addTo(map);
-
-    // Map click listener
-    map.on('click', (e: L.LeafletMouseEvent) => {
-      onMapClick(e.latlng.lat, e.latlng.lng);
-    });
-
-    return () => {
-      if (leafletMapInstanceRef.current) {
-        leafletMapInstanceRef.current.remove();
-        leafletMapInstanceRef.current = null;
-      }
-    };
-  }, []);
-
-  // Sync / render markers and route tracks
-  useEffect(() => {
-    const map = leafletMapInstanceRef.current;
-    const markerGroup = markerGroupRef.current;
-    const polylineGroup = polylineGroupRef.current;
-
-    if (!map || !markerGroup || !polylineGroup) return;
-
-    // Clear previous elements
-    markerGroup.clearLayers();
-    polylineGroup.clearLayers();
-
-    // 1. Draw Simulated Paths/Route Tracing (경로 추적 기능)
-    friends.forEach(friend => {
-      // If we are tracking or if they have more routes
-      if (friend.route && friend.route.length > 0) {
-        const isSelected = selectedFriendId === friend.id;
-        const color = friend.color;
-        const polyline = L.polyline(friend.route, {
-          color: color,
-          weight: isSelected ? 4 : 2,
-          opacity: isSelected ? 0.9 : 0.45,
-          dashArray: isSelected ? '5, 8' : '1, 5',
-          lineCap: 'round'
-        });
-        polylineGroup.addLayer(polyline);
-
-        // Add visual direction arrows or dots at track nodes for gorgeous look
-        friend.route.forEach((coord, idx) => {
-          if (idx === friend.routeIndex) return; // skip current
-          const dot = L.circleMarker(coord, {
-            radius: isSelected ? 3 : 2,
-            color: color,
-            fillColor: '#FFFFFF',
-            fillOpacity: 1,
-            weight: 1.5
-          });
-          polylineGroup.addLayer(dot);
-        });
-      }
-    });
-
-    // 2. Add appointments on map (약속 위치 공유)
-    appointments.forEach(app => {
-      const isSelected = selectedPromiseId === app.id;
-      const pulseClass = isSelected ? 'scale-110 shadow-lg' : '';
-
-      const promiseIcon = L.divIcon({
-        className: 'custom-promise-marker',
-        html: `
-          <div class="flex flex-col items-center ${pulseClass}">
-            <div class="relative flex items-center justify-center w-9 h-9 bg-yellow-400 text-black rounded-full border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-              <span class="text-base text-black">📍</span>
-              <div class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full border border-black animate-ping"></div>
-            </div>
-            <div class="px-2 py-0.5 bg-black text-yellow-450 text-yellow-400 text-[10px] rounded-lg shadow-[1.5px_1.5px_0px_0px_rgba(251,191,36,1)] whitespace-nowrap mt-1 border border-black font-black">
-              ${app.title.length > 10 ? app.title.substring(0, 10) + '...' : app.title}
-            </div>
-          </div>
-        `,
-        iconSize: [40, 50],
-        iconAnchor: [20, 45]
-      });
-
-      const marker = L.marker([app.lat, app.lng], { icon: promiseIcon });
-      marker.bindTooltip(`
-        <div class="font-sans text-xs p-1">
-          <p class="font-black text-yellow-600">${app.title}</p>
-          <p class="text-slate-900 font-bold">📍 ${app.placeName}</p>
-          <p class="text-slate-700 font-mono text-[10px] font-bold">🕒 ${app.datetime}</p>
+  if (sdkState === 'loading') {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-50">
+        <div className="flex flex-col items-center gap-2 text-gray-400">
+          <Loader2 className="w-7 h-7 animate-spin" />
+          <span className="text-sm">카카오맵 불러오는 중…</span>
         </div>
-      `, { permanent: false, direction: 'top' });
-
-      markerGroup.addLayer(marker);
-    });
-
-    // 3. Add temporary flag marker for click promise creation
-    if (tempPromiseCoords) {
-      const tempIcon = L.divIcon({
-        className: 'temp-marker',
-        html: `
-          <div class="flex flex-col items-center animate-bounce">
-            <div class="flex items-center justify-center w-8 h-8 bg-rose-500 text-white rounded-full border-2 border-black shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)]">
-              <span class="text-sm">⭐️</span>
-            </div>
-            <div class="px-2 py-0.5 bg-black text-rose-300 text-[9.5px] rounded-lg shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] font-black border border-black mt-1">
-              여기 소집
-            </div>
-          </div>
-        `,
-        iconSize: [36, 46],
-        iconAnchor: [18, 41]
-      });
-
-      const tempMarker = L.marker(tempPromiseCoords, { icon: tempIcon });
-      markerGroup.addLayer(tempMarker);
-    }
-
-    // 4. Draw customizable Friends markers dynamically
-    friends.forEach(friend => {
-      const isSelected = selectedFriendId === friend.id;
-      const isActiveUser = friend.id === activeProfileId;
-      const ringColorClass = isSelected ? 'ring-4 ring-offset-2 ring-black scale-110 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]' : '';
-      const borderClass = isActiveUser ? 'border-dashed border-yellow-500' : 'border-black';
-
-      const friendIcon = L.divIcon({
-        className: 'custom-friend-marker',
-        html: `
-          <div class="flex flex-col items-center transition-all duration-300">
-            <!-- Bubble Message (상태메시지 - 작게) -->
-            ${friend.statusMsg ? `
-              <div class="absolute bottom-11 bg-white text-[8px] font-semibold text-gray-700 border border-gray-200 shadow-sm rounded-lg px-1.5 py-0.5 max-w-[80px] truncate text-center select-none font-sans z-50" style="white-space:nowrap">
-                ${friend.statusMsg.substring(0, 8)}${friend.statusMsg.length > 8 ? '…' : ''}
-              </div>
-            ` : ''}
-
-            <!-- Avatar (작게) -->
-            <div class="relative w-7 h-7 rounded-full ${ringColorClass} flex items-center justify-center shadow-sm border-2 ${borderClass}" style="background-color: ${friend.color}">
-              <div class="text-sm">${friend.avatar}</div>
-
-              <!-- Battery Badge -->
-              <div class="absolute -bottom-1 -right-1.5 px-0.5 bg-gray-800 text-white rounded-full text-[6px] font-bold leading-none">
-                ${friend.battery}%
-              </div>
-
-              <!-- Heartrate Badge -->
-              ${friend.heartRate ? `
-                <div class="absolute -top-0.5 -left-2.5 px-1 py-0 bg-rose-500 text-white rounded-full text-[6px] font-bold leading-none animate-pulse">
-                  ♥${friend.heartRate}
-                </div>
-              ` : ''}
-
-              <!-- Online status -->
-              <div class="absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${friend.isOnline ? 'bg-emerald-400' : 'bg-gray-400'}"></div>
-            </div>
-
-            <!-- Name Tag (작게) -->
-            <div class="px-1.5 py-0.5 mt-0.5 bg-white text-black border border-gray-300 text-[8px] font-semibold rounded-md shadow-sm whitespace-nowrap font-sans select-none">
-              ${friend.name.split(' ')[0]}${friend.speed > 0 ? ` ·${Math.round(friend.speed)}k` : ''}
-            </div>
-          </div>
-        `,
-        iconSize: [36, 44],
-        iconAnchor: [18, 38]
-      });
-
-      const marker = L.marker([friend.lat, friend.lng], { icon: friendIcon });
-      
-      marker.bindTooltip(`
-        <div class="font-sans text-xs p-1 select-none">
-          <p class="font-bold flex items-center gap-1">
-            <span>${friend.avatar} ${friend.name}</span>
-            <span class="text-[9px] bg-amber-100 text-amber-800 rounded px-1">${friend.isOnline ? '온라인' : '오프라인'}</span>
-          </p>
-          <p class="text-gray-500 font-serif text-[10px] mt-0.5">“${friend.statusMsg}”</p>
-          <div class="grid grid-cols-2 gap-x-2 mt-1 pt-1 border-t border-gray-100 text-[10px] text-gray-400 font-mono">
-            <span>속도: ${friend.speed} km/h</span>
-            <span>방향: ${friend.heading}</span>
-          </div>
-        </div>
-      `, { permanent: false, direction: 'top' });
-
-      markerGroup.addLayer(marker);
-    });
-
-  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords]);
-
-  // Center / fly to selected item dynamically
-  useEffect(() => {
-    const map = leafletMapInstanceRef.current;
-    if (!map) return;
-
-    if (selectedFriendId) {
-      const friend = friends.find(f => f.id === selectedFriendId);
-      if (friend) {
-        map.flyTo([friend.lat, friend.lng], 16, { animate: true, duration: 1.2 });
-      }
-    } else if (selectedPromiseId) {
-      const app = appointments.find(a => a.id === selectedPromiseId);
-      if (app) {
-        map.flyTo([app.lat, app.lng], 16, { animate: true, duration: 1.2 });
-      }
-    } else if (tempPromiseCoords) {
-      map.flyTo(tempPromiseCoords, 16, { animate: true, duration: 1.0 });
-    }
-  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords]);
-
-  // First GPS fix: center map on my location
-  useEffect(() => {
-    const map = leafletMapInstanceRef.current;
-    if (!map || !myGpsCoords || !centerOnMyGpsOnce) return;
-    if (selectedFriendId || selectedPromiseId) return;
-
-    map.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
-    onMyGpsCentered?.();
-  }, [myGpsCoords, centerOnMyGpsOnce, selectedFriendId, selectedPromiseId, onMyGpsCentered]);
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full h-full">
       {/* 지도 컨테이너 */}
-      <div id="banana-talk-leaflet-map" ref={mapRef} className="w-full h-full z-10" />
+      <div ref={mapContainerRef} className="w-full h-full" />
 
-      {/* 지도 내 장소 검색바 */}
+      {/* 검색바 */}
       <div className="absolute top-3 left-3 right-12 z-30">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          {isMapSearching
+          {isSearching
             ? <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 animate-spin pointer-events-none" />
             : mapSearch
-              ? <button onClick={() => { setMapSearch(''); setShowResults(false); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+              ? <button onClick={() => { setMapSearch(''); setShowResults(false); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-4 h-4" />
+                </button>
               : null
           }
           <input
             type="text"
             value={mapSearch}
             onChange={e => setMapSearch(e.target.value)}
-            placeholder="장소 검색 (예: 강남역, 카페)"
+            placeholder="장소 검색 (카카오맵)"
             className="w-full bg-white/95 backdrop-blur border border-gray-200 shadow-md rounded-2xl py-2.5 pl-9 pr-9 text-sm focus:outline-none focus:border-amber-400"
           />
         </div>
 
-        {/* 검색 결과 드롭다운 */}
         {showResults && mapResults.length > 0 && (
-          <div className="mt-1 bg-white border border-gray-100 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+          <div className="mt-1 bg-white border border-gray-100 rounded-2xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
             {mapResults.map((place, idx) => (
-              <button key={idx} type="button" onClick={() => handleSelectMapResult(place)}
+              <button key={idx} type="button" onClick={() => handleSelectResult(place)}
                 className="w-full text-left px-4 py-2.5 hover:bg-amber-50 border-b border-gray-50 last:border-0 flex items-start gap-2.5 transition">
-                <span className="text-amber-400 mt-0.5 shrink-0">📍</span>
+                <MapPin className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-semibold text-gray-800 truncate">{place.name}</p>
                   <p className="text-[11px] text-gray-400 truncate">{place.address}</p>
@@ -349,8 +331,7 @@ export default function MapComponent({
             ))}
           </div>
         )}
-
-        {showResults && !isMapSearching && mapSearch && mapResults.length === 0 && (
+        {showResults && !isSearching && mapSearch && mapResults.length === 0 && (
           <div className="mt-1 bg-white border border-gray-100 rounded-2xl shadow-lg px-4 py-3 text-center text-xs text-gray-400">
             검색 결과가 없습니다
           </div>
@@ -359,7 +340,7 @@ export default function MapComponent({
 
       {/* 안내 뱃지 */}
       <div className="absolute bottom-4 left-4 bg-yellow-400 text-slate-950 font-black border-2 border-black text-[9.5px] px-3 py-2 rounded-xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] z-20 pointer-events-none flex items-center gap-1.5">
-        <span className="w-2.5 h-2.5 rounded-full bg-black border border-white animate-pulse"></span>
+        <span className="w-2.5 h-2.5 rounded-full bg-black border border-white animate-pulse" />
         <span>지도를 터치하면 소집 장소로 지정됩니다 🧭</span>
       </div>
     </div>

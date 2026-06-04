@@ -75,21 +75,43 @@ export default function SchedulePanel({
     setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/places/search?q=${encodeURIComponent(searchQuery)}`);
-        if (!res.ok) throw new Error('search failed');
-        const data: PlaceResult[] = await res.json();
-        setSearchResults(data.length > 0 ? data : LOCAL_PLACES.filter(p =>
-          p.name.includes(searchQuery) || p.address.includes(searchQuery)
-        ));
+        // 카카오 Places SDK 우선 사용, 없으면 서버 Nominatim
+        if ((window as any).kakao?.maps?.services) {
+          const ps = new (window as any).kakao.maps.services.Places();
+          ps.keywordSearch(
+            searchQuery,
+            (data: any[], status: string) => {
+              setIsSearching(false);
+              if (status === (window as any).kakao.maps.services.Status.OK && data.length > 0) {
+                setSearchResults(data.slice(0, 8).map((item: any) => ({
+                  name: item.place_name,
+                  address: item.road_address_name || item.address_name,
+                  lat: parseFloat(item.y),
+                  lng: parseFloat(item.x),
+                })));
+              } else {
+                setSearchResults(LOCAL_PLACES.filter(p =>
+                  p.name.includes(searchQuery) || p.address.includes(searchQuery)
+                ));
+              }
+            }
+          );
+        } else {
+          const res = await fetch(`/api/places/search?q=${encodeURIComponent(searchQuery)}`);
+          if (!res.ok) throw new Error('search failed');
+          const data: PlaceResult[] = await res.json();
+          setSearchResults(data.length > 0 ? data : LOCAL_PLACES.filter(p =>
+            p.name.includes(searchQuery) || p.address.includes(searchQuery)
+          ));
+          setIsSearching(false);
+        }
       } catch {
-        // 네트워크 오류 시 로컬 필터링
         setSearchResults(LOCAL_PLACES.filter(p =>
           p.name.includes(searchQuery) || p.address.includes(searchQuery)
         ));
-      } finally {
         setIsSearching(false);
       }
-    }, 600);
+    }, 500);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
