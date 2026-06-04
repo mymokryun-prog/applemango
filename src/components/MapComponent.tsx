@@ -27,26 +27,39 @@ interface MapComponentProps {
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
 
 // ─── Kakao SDK 싱글턴 로더 ───────────────────────────────────────────────────
+// 키를 서버 /api/config 에서 런타임에 가져옴 → Koyeb 환경변수 변경 시 재빌드 불필요
 let sdkPromise: Promise<void> | null = null;
+
+async function fetchKakaoKey(): Promise<string> {
+  // 1순위: 빌드 타임 변수 (로컬 개발용)
+  const buildKey = (import.meta as any).env?.VITE_KAKAO_MAP_KEY as string | undefined;
+  if (buildKey) return buildKey;
+  // 2순위: 서버 런타임 설정 API
+  try {
+    const res = await fetch('/api/config');
+    const data = await res.json();
+    return data.kakaoMapKey || '';
+  } catch {
+    return '';
+  }
+}
 
 function loadKakaoSDK(): Promise<void> {
   if (sdkPromise) return sdkPromise;
-  sdkPromise = new Promise((resolve, reject) => {
-    if (window.kakao?.maps) { resolve(); return; }
-
-    const appKey = (import.meta as any).env?.VITE_KAKAO_MAP_KEY ?? '';
-    if (!appKey) {
-      reject(new Error('VITE_KAKAO_MAP_KEY 환경변수가 없습니다.'));
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
-    script.async = true;
-    script.onload = () => window.kakao.maps.load(resolve);
-    script.onerror = () => { sdkPromise = null; reject(new Error('카카오맵 SDK 로드 실패')); };
-    document.head.appendChild(script);
-  });
+  sdkPromise = (async () => {
+    if (window.kakao?.maps) return;
+    const appKey = await fetchKakaoKey();
+    if (!appKey) throw new Error('카카오맵 키가 없습니다. Koyeb 환경변수에 KAKAO_MAP_KEY를 설정하세요.');
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
+      script.async = true;
+      script.onload = () => window.kakao.maps.load(resolve);
+      script.onerror = () => { sdkPromise = null; reject(new Error('카카오맵 SDK 로드 실패')); };
+      document.head.appendChild(script);
+    });
+  })();
+  sdkPromise.catch(() => { sdkPromise = null; });
   return sdkPromise;
 }
 
@@ -272,10 +285,17 @@ export default function MapComponent({
     return (
       <div className="flex flex-col items-center justify-center h-full bg-gray-50 text-gray-500 gap-3 p-8 text-center">
         <span className="text-4xl">🗺️</span>
-        <p className="text-sm font-semibold leading-relaxed">
-          카카오맵을 불러오지 못했습니다.<br />
-          <span className="text-xs text-gray-400">Koyeb 환경변수에 <code className="bg-gray-100 px-1 rounded">VITE_KAKAO_MAP_KEY</code>를 설정해 주세요.</span>
+        <p className="text-sm font-semibold leading-relaxed">카카오맵을 불러오지 못했습니다.</p>
+        <p className="text-xs text-gray-400 leading-relaxed">
+          Koyeb 대시보드 → 서비스 → Environment Variables<br />
+          <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">KAKAO_MAP_KEY</code> 추가 후 Redeploy
         </p>
+        <button
+          onClick={() => { sdkPromise = null; setSdkState('loading'); loadKakaoSDK().then(() => setSdkState('ready')).catch(() => setSdkState('error')); }}
+          className="mt-2 bg-amber-400 hover:bg-amber-500 text-black font-bold px-4 py-2 rounded-xl text-sm transition"
+        >
+          다시 시도
+        </button>
       </div>
     );
   }

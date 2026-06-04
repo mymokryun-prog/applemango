@@ -1271,9 +1271,16 @@ async function startServer() {
     }
   });
 
-  // 헬스체크 (Railway, uptime monitor용)
+  // 헬스체크
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString(), rooms: Object.keys(dbRooms).length });
+  });
+
+  // 프론트엔드 런타임 설정 — 빌드 없이 카카오 키 전달
+  app.get('/api/config', (_req, res) => {
+    res.json({
+      kakaoMapKey: process.env.KAKAO_MAP_KEY || process.env.VITE_KAKAO_MAP_KEY || '',
+    });
   });
 
   // API Endpoints
