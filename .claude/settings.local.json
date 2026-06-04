@@ -8,7 +8,10 @@
       "Bash(git config *)",
       "Bash(git remote *)",
       "Bash(git branch *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(npm run *)",
+      "Bash(node *)",
+      "Bash(git commit -m 'Koyeb 배포 준비: Procfile, engines 추가 *)"
     ]
   }
 }
