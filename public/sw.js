@@ -1,4 +1,4 @@
-const CACHE_NAME = 'amang-signal-cache-v1';
+const CACHE_NAME = 'applemangotalk-cache-v3';
 const OFFLINE_URL = '/offline.html';
 const ASSETS = [
   '/',
@@ -76,13 +76,13 @@ self.addEventListener('sync', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let payload = { title: '애망 시그널', body: '새로운 알림이 도착했습니다.', data: {} };
+  let payload = { title: '애플망고톡', body: '새로운 알림이 도착했습니다.', data: {} };
 
   if (event.data) {
     try {
       payload = event.data.json();
     } catch (error) {
-      payload = { title: '애망 시그널', body: event.data.text(), data: {} };
+      payload = { title: '애플망고톡', body: event.data.text(), data: {} };
     }
   }
 
@@ -146,13 +146,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (event.request.mode === 'navigate') {
+  // 네비게이션 및 JS/CSS는 항상 네트워크 우선 → 배포 즉시 반영
+  const url = new URL(event.request.url);
+  const isAsset = url.pathname.startsWith('/assets/') || url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+
+  if (event.request.mode === 'navigate' || isAsset) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
           return response;
         })
-        .catch(() => caches.match(OFFLINE_URL))
+        .catch(() => caches.match(event.request).then(r => r || caches.match(OFFLINE_URL)))
     );
     return;
   }
