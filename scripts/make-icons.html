@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>애플망고톡 아이콘 생성기</title>
+<style>
+  body { font-family: sans-serif; background: #fff8eb; display: flex; flex-direction: column; align-items: center; padding: 30px; gap: 20px; }
+  h1 { color: #f57c00; margin: 0; }
+  .preview { border: 2px solid #f57c00; border-radius: 20px; overflow: hidden; box-shadow: 0 8px 30px #0002; }
+  .btns { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  button { background: #ff6d00; color: white; border: none; padding: 12px 24px; border-radius: 50px; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform .1s; }
+  button:hover { transform: scale(1.05); background: #e65100; }
+  .note { font-size: 12px; color: #888; text-align: center; max-width: 420px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<h1>🍎🥭 애플망고톡 아이콘 생성기</h1>
+<p style="color:#666;margin:0">버튼을 클릭하면 PNG 파일이 자동으로 다운로드됩니다</p>
+
+<canvas id="preview" class="preview" width="256" height="256"></canvas>
+
+<div class="btns">
+  <button onclick="download(192,  'icon-192.png')">192×192 (PWA Android)</button>
+  <button onclick="download(512,  'icon-512.png')">512×512 (PWA 스플래시)</button>
+  <button onclick="download(1024, 'icon-1024.png')">1024×1024 (고해상도)</button>
+  <button onclick="download(180,  'apple-touch-icon.png')">180×180 (iOS 홈화면)</button>
+  <button onclick="downloadAll()" style="background:#2e7d32">📦 전체 한 번에 다운로드</button>
+</div>
+
+<p class="note">
+  다운로드된 파일을 <code>public/icons/</code> 폴더에 복사하세요.<br>
+  iOS Safari: 홈화면 추가 시 <b>apple-touch-icon.png</b>가 아이콘으로 사용됩니다.<br>
+  Android Chrome: <b>icon-192.png</b>와 <b>icon-512.png</b>가 사용됩니다.
+</p>
+
+<script>
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF5722"/>
+      <stop offset="45%" stop-color="#FF9800"/>
+      <stop offset="100%" stop-color="#FFC107"/>
+    </linearGradient>
+    <radialGradient id="mango" cx="38%" cy="28%" r="72%">
+      <stop offset="0%"   stop-color="#FFE066"/>
+      <stop offset="55%"  stop-color="#FFA726"/>
+      <stop offset="100%" stop-color="#E65100"/>
+    </radialGradient>
+    <radialGradient id="shine" cx="32%" cy="22%" r="55%">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 배경 -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="220" fill="url(#shine)"/>
+  <rect x="0" y="0" width="1024" height="450" rx="220" fill="white" fill-opacity="0.07"/>
+
+  <!-- 망고 몸체 -->
+  <ellipse cx="512" cy="505" rx="275" ry="305"
+           fill="url(#mango)"
+           filter="drop-shadow(0 14px 22px #0000003a)"/>
+  <!-- 망고 광택 -->
+  <ellipse cx="415" cy="388" rx="92" ry="64" fill="white" fill-opacity="0.36"
+           transform="rotate(-25 415 388)"/>
+
+  <!-- 줄기 -->
+  <path d="M512 202 Q516 238 512 265"
+        stroke="#5D4037" stroke-width="22" fill="none" stroke-linecap="round"/>
+
+  <!-- 큰 잎 -->
+  <path d="M508 208 C478 146 542 110 572 156 C596 194 556 220 508 208Z" fill="#43A047"/>
+  <path d="M512 210 Q550 173 548 146"
+        stroke="#2E7D32" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <!-- 작은 잎 -->
+  <path d="M506 216 C476 168 438 160 432 188 C426 216 466 226 506 216Z"
+        fill="#66BB6A" fill-opacity="0.85"/>
+
+  <!-- 사과 뱃지 (왼쪽 위) -->
+  <g transform="translate(142 142) scale(0.48)">
+    <ellipse cx="120" cy="172" rx="110" ry="118" fill="#EF5350"
+             filter="drop-shadow(0 6px 12px #0000003a)"/>
+    <ellipse cx="78"  cy="116" rx="44" ry="30" fill="white" fill-opacity="0.3"
+             transform="rotate(-20 78 116)"/>
+    <path d="M116 60 C96 18 150 -4 174 34 C194 64 154 80 116 60Z" fill="#43A047"/>
+    <path d="M120 62 Q150 36 148 16"
+          stroke="#2E7D32" stroke-width="8" fill="none" stroke-linecap="round"/>
+    <path d="M120 62 Q122 84 122 100"
+          stroke="#5D4037" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <!-- 사과 얼굴 -->
+    <ellipse cx="88"  cy="190" rx="14" ry="16" fill="#3E2723"/>
+    <ellipse cx="152" cy="190" rx="14" ry="16" fill="#3E2723"/>
+    <circle  cx="95"  cy="183" r="6"  fill="white"/>
+    <circle  cx="159" cy="183" r="6"  fill="white"/>
+    <path d="M76 216 Q120 244 164 216"
+          stroke="#3E2723" stroke-width="9" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- 망고 눈 -->
+  <ellipse cx="415" cy="508" rx="34" ry="40" fill="#3E2723"/>
+  <ellipse cx="609" cy="508" rx="34" ry="40" fill="#3E2723"/>
+  <circle  cx="428" cy="494" r="13" fill="white"/>
+  <circle  cx="622" cy="494" r="13" fill="white"/>
+  <circle  cx="436" cy="498" r="6"  fill="white" fill-opacity="0.7"/>
+  <circle  cx="630" cy="498" r="6"  fill="white" fill-opacity="0.7"/>
+
+  <!-- 볼 홍조 -->
+  <ellipse cx="315" cy="566" rx="54" ry="34" fill="#FF8A80" fill-opacity="0.72"/>
+  <ellipse cx="709" cy="566" rx="54" ry="34" fill="#FF8A80" fill-opacity="0.72"/>
+
+  <!-- 입 -->
+  <path d="M400 600 Q512 682 624 600"
+        stroke="#3E2723" stroke-width="22" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M400 600 Q512 664 624 600 Q512 638 400 600Z"
+        fill="white" fill-opacity="0.6"/>
+
+  <!-- 하단 말풍선 -->
+  <rect x="280" y="844" width="464" height="100" rx="50"
+        fill="#00000020"/>
+  <!-- 말풍선 원 -->
+  <circle cx="368" cy="892" r="42" fill="white" fill-opacity="0.9"/>
+  <path d="M352 926 L338 954 L378 934Z" fill="white" fill-opacity="0.88"/>
+  <!-- 점 세 개 -->
+  <circle cx="352" cy="891" r="7" fill="#FF6D00"/>
+  <circle cx="368" cy="891" r="7" fill="#FF6D00"/>
+  <circle cx="384" cy="891" r="7" fill="#FF6D00"/>
+  <!-- 톡 글자 -->
+  <text x="618" y="912" text-anchor="middle"
+        font-family="'Arial Black','Helvetica Neue',Arial,sans-serif"
+        font-size="78" font-weight="900"
+        fill="white" fill-opacity="0.96">톡</text>
+</svg>`;
+
+function renderToCanvas(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  return new Promise(resolve => {
+    const img = new Image();
+    const blob = new Blob([SVG], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      resolve(canvas);
+    };
+    img.src = url;
+  });
+}
+
+// 미리보기 렌더링
+renderToCanvas(256).then(c => {
+  const preview = document.getElementById('preview');
+  const ctx = preview.getContext('2d');
+  ctx.drawImage(c, 0, 0);
+});
+
+async function download(size, filename) {
+  const canvas = await renderToCanvas(size);
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = filename;
+  a.click();
+  console.log('다운로드:', filename);
+}
+
+async function downloadAll() {
+  const files = [
+    [192,  'icon-192.png'],
+    [512,  'icon-512.png'],
+    [1024, 'icon-1024.png'],
+    [180,  'apple-touch-icon.png'],
+  ];
+  for (const [size, name] of files) {
+    await download(size, name);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  alert('✅ 4개 파일 다운로드 완료!\npublic/icons/ 폴더에 복사하세요.');
+}
+</script>
+</body>
+</html>

@@ -12,7 +12,10 @@
       "Bash(npm run *)",
       "Bash(node *)",
       "Bash(git commit -m 'Koyeb 배포 준비: Procfile, engines 추가 *)",
-      "Bash(git commit -m '카카오맵 키를 런타임에 로드 \\(빌드 변수 의존 제거\\) *)"
+      "Bash(git commit -m '카카오맵 키를 런타임에 로드 \\(빌드 변수 의존 제거\\) *)",
+      "Bash(npm list *)",
+      "Bash(npm install *)",
+      "Bash(git commit -m '앱 아이콘 새 디자인 + PNG 지원 추가 *)"
     ]
   }
 }

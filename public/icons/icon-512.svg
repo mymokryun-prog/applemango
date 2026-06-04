@@ -1,6 +1,103 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="120" fill="#f59e0b" />
-  <circle cx="256" cy="256" r="170" fill="#ef4444" stroke="#000" stroke-width="20" />
-  <path d="M195 158 C177 112 228 86 270 106" fill="#10b981" stroke="#000" stroke-width="20" stroke-linecap="round" />
-  <circle cx="286" cy="267" r="28" fill="#fde047" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="512" height="512">
+  <defs>
+    <!-- 배경 그라디언트 -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FF5722"/>
+      <stop offset="40%"  stop-color="#FF9800"/>
+      <stop offset="100%" stop-color="#FFC107"/>
+    </linearGradient>
+    <!-- 망고 몸체 그라디언트 -->
+    <radialGradient id="mangoGrad" cx="40%" cy="30%" r="70%">
+      <stop offset="0%"   stop-color="#FFE066"/>
+      <stop offset="60%"  stop-color="#FFA726"/>
+      <stop offset="100%" stop-color="#E65100"/>
+    </radialGradient>
+    <!-- 빛 반사 -->
+    <radialGradient id="shine" cx="35%" cy="25%" r="50%">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 그림자 필터 -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="20" flood-color="#00000033"/>
+    </filter>
+    <!-- 내부 글로우 -->
+    <filter id="innerGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- ── 배경: 둥근 사각형 ── -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#bgGrad)"/>
+  <!-- 배경 광택 -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#shine)"/>
+  <!-- 배경 하이라이트 줄 -->
+  <rect x="0" y="0" width="1024" height="480" rx="220" ry="220" fill="white" fill-opacity="0.06"/>
+
+  <!-- ── 망고 몸체 (중앙) ── -->
+  <g filter="url(#shadow)">
+    <ellipse cx="512" cy="510" rx="280" ry="310" fill="url(#mangoGrad)"/>
+    <!-- 망고 광택 -->
+    <ellipse cx="420" cy="400" rx="95" ry="65" fill="white" fill-opacity="0.38" transform="rotate(-25 420 400)"/>
+  </g>
+
+  <!-- ── 줄기 ── -->
+  <path d="M512 205 Q516 240 512 270" stroke="#5D4037" stroke-width="22" fill="none" stroke-linecap="round"/>
+
+  <!-- ── 잎사귀 ── -->
+  <path d="M510 210 C480 148 542 112 572 158 C596 196 558 222 510 210Z" fill="#43A047"/>
+  <path d="M512 212 Q550 175 548 148" stroke="#2E7D32" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <!-- 작은 잎 -->
+  <path d="M508 218 C478 168 440 162 434 190 C428 218 468 228 508 218Z" fill="#66BB6A" fill-opacity="0.85"/>
+
+  <!-- ── 사과 장식 (왼쪽 위) ── -->
+  <g transform="translate(148, 155) scale(0.52)">
+    <ellipse cx="120" cy="170" rx="108" ry="116" fill="#EF5350"/>
+    <ellipse cx="80" cy="115" rx="42" ry="30" fill="white" fill-opacity="0.32" transform="rotate(-20 80 115)"/>
+    <path d="M116 60 C96 18 148 -2 172 34 C192 62 152 78 116 60Z" fill="#43A047"/>
+    <path d="M120 61 Q148 36 146 18" stroke="#2E7D32" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <path d="M120 61 Q122 82 122 96" stroke="#5D4037" stroke-width="8" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- ── 얼굴: 눈 ── -->
+  <ellipse cx="415" cy="508" rx="34" ry="40" fill="#3E2723"/>
+  <ellipse cx="609" cy="508" rx="34" ry="40" fill="#3E2723"/>
+  <!-- 눈 하이라이트 -->
+  <circle cx="428" cy="494" r="13" fill="white"/>
+  <circle cx="622" cy="494" r="13" fill="white"/>
+  <!-- 눈동자 반짝 -->
+  <circle cx="436" cy="498" r="6"  fill="white" fill-opacity="0.7"/>
+  <circle cx="630" cy="498" r="6"  fill="white" fill-opacity="0.7"/>
+
+  <!-- ── 볼 홍조 ── -->
+  <ellipse cx="318" cy="568" rx="52" ry="34" fill="#FF8A80" fill-opacity="0.72"/>
+  <ellipse cx="706" cy="568" rx="52" ry="34" fill="#FF8A80" fill-opacity="0.72"/>
+
+  <!-- ── 입 (웃음) ── -->
+  <path d="M400 600 Q512 678 624 600" stroke="#3E2723" stroke-width="22" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 이빨 -->
+  <path d="M400 600 Q512 660 624 600 Q512 636 400 600Z" fill="white" fill-opacity="0.65"/>
+
+  <!-- ── 하단 텍스트 배경 ── -->
+  <rect x="262" y="840" width="500" height="110" rx="55" fill="#00000022"/>
+
+  <!-- ── 하단 텍스트: 애플망고톡 ── -->
+  <!-- "톡" 큰 글자 느낌: 말풍선 아이콘 -->
+  <circle cx="380" cy="895" r="46" fill="white" fill-opacity="0.92"/>
+  <circle cx="380" cy="895" r="46" fill="white" fill-opacity="0.92"/>
+  <!-- 말풍선 꼬리 -->
+  <path d="M360 932 L345 960 L385 938Z" fill="white" fill-opacity="0.88"/>
+
+  <!-- 말풍선 안 점 (대화 표시) -->
+  <circle cx="364" cy="893" r="7" fill="#FF6D00"/>
+  <circle cx="380" cy="893" r="7" fill="#FF6D00"/>
+  <circle cx="396" cy="893" r="7" fill="#FF6D00"/>
+
+  <!-- 우측 텍스트 -->
+  <text x="620" y="910" text-anchor="middle"
+        font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif"
+        font-size="76" font-weight="900"
+        fill="white" fill-opacity="0.96"
+        letter-spacing="-2">톡</text>
 </svg>
