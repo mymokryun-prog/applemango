@@ -3,13 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import L from 'leaflet';
 import { Friend, Appointment } from '../types';
 import { Search, Loader2, X, MapPin } from 'lucide-react';
-
-declare global {
-  interface Window { kakao: any; }
-}
 
 interface MapComponentProps {
   friends: Friend[];
@@ -26,296 +23,214 @@ interface MapComponentProps {
 
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
 
-// ─── Kakao SDK 싱글턴 로더 ───────────────────────────────────────────────────
-// 키를 서버 /api/config 에서 런타임에 가져옴 → Koyeb 환경변수 변경 시 재빌드 불필요
-let sdkPromise: Promise<void> | null = null;
-
-async function fetchKakaoKey(): Promise<string> {
-  // 1순위: 빌드 타임 변수 (로컬 개발용)
-  const buildKey = (import.meta as any).env?.VITE_KAKAO_MAP_KEY as string | undefined;
-  if (buildKey) return buildKey;
-  // 2순위: 서버 런타임 설정 API
-  try {
-    const res = await fetch('/api/config');
-    const data = await res.json();
-    return data.kakaoMapKey || '';
-  } catch {
-    return '';
-  }
-}
-
-function loadKakaoSDK(): Promise<void> {
-  if (sdkPromise) return sdkPromise;
-  sdkPromise = (async () => {
-    if (window.kakao?.maps) return;
-    const appKey = await fetchKakaoKey();
-    if (!appKey) throw new Error('카카오맵 키가 없습니다. Koyeb 환경변수에 KAKAO_MAP_KEY를 설정하세요.');
-    await new Promise<void>((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
-      script.async = true;
-      script.onload = () => window.kakao.maps.load(resolve);
-      script.onerror = () => { sdkPromise = null; reject(new Error('카카오맵 SDK 로드 실패')); };
-      document.head.appendChild(script);
-    });
-  })();
-  sdkPromise.catch(() => { sdkPromise = null; });
-  return sdkPromise;
-}
-
-// ─── 마커 HTML 빌더 ─────────────────────────────────────────────────────────
-function buildFriendHTML(friend: Friend, isSelected: boolean, isMe: boolean): string {
-  const ring = isSelected
-    ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)'
-    : '';
+// ─── 마커 HTML ───────────────────────────────────────────────────────────────
+function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
+  const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
   const border = isMe ? 'border:2px dashed #EAB308' : 'border:2px solid #111';
-  const statusSnippet = friend.statusMsg
-    ? `<div style="background:#fff;color:#374151;font-size:8px;font-weight:600;border:1px solid #E5E7EB;border-radius:6px;padding:1px 5px;margin-bottom:2px;max-width:72px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${friend.statusMsg.slice(0, 9)}${friend.statusMsg.length > 9 ? '…' : ''}</div>`
-    : '';
   const hrBadge = friend.heartRate
-    ? `<div style="position:absolute;top:-3px;left:-10px;background:#EF4444;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1">♥${friend.heartRate}</div>`
+    ? `<div style="position:absolute;top:-4px;left:-10px;background:#EF4444;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">♥${friend.heartRate}</div>`
     : '';
-  return `
-    <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;user-select:none">
-      ${statusSnippet}
-      <div style="position:relative;width:28px;height:28px;background:${friend.color};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring}">
-        ${friend.avatar}
-        ${hrBadge}
-        <div style="position:absolute;bottom:-3px;right:-7px;background:#1F2937;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1">${friend.battery}%</div>
-        <div style="position:absolute;top:0;right:0;width:8px;height:8px;background:${friend.isOnline ? '#34D399' : '#9CA3AF'};border:1.5px solid #fff;border-radius:50%"></div>
-      </div>
-      <div style="background:#fff;border:1px solid #D1D5DB;color:#111;font-size:8px;font-weight:600;padding:1px 5px;border-radius:4px;margin-top:2px;white-space:nowrap;font-family:sans-serif">${friend.name.split(' ')[0]}${friend.speed > 0 ? ` ·${Math.round(friend.speed)}k` : ''}</div>
-    </div>`;
+  const statusSnippet = friend.statusMsg
+    ? `<div style="background:#fff;color:#374151;font-size:7px;font-weight:600;border:1px solid #E5E7EB;border-radius:5px;padding:1px 4px;margin-bottom:2px;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${friend.statusMsg.slice(0, 9)}${friend.statusMsg.length > 9 ? '…' : ''}</div>`
+    : '';
+  return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+    ${statusSnippet}
+    <div style="position:relative;width:28px;height:28px;background:${friend.color};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring}">
+      ${friend.avatar}
+      ${hrBadge}
+      <div style="position:absolute;bottom:-4px;right:-7px;background:#1F2937;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">${friend.battery}%</div>
+      <div style="position:absolute;top:0;right:0;width:8px;height:8px;background:${friend.isOnline ? '#34D399' : '#9CA3AF'};border:1.5px solid #fff;border-radius:50%"></div>
+    </div>
+    <div style="background:#fff;border:1px solid #D1D5DB;color:#111;font-size:7px;font-weight:600;padding:1px 5px;border-radius:4px;margin-top:2px;white-space:nowrap;font-family:sans-serif">${friend.name.split(' ')[0]}${friend.speed > 0 ? ` ·${Math.round(friend.speed)}k` : ''}</div>
+  </div>`;
 }
 
-function buildAppointmentHTML(title: string, isSelected: boolean): string {
-  const scale = isSelected ? 'transform:scale(1.12)' : '';
-  return `
-    <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;${scale}">
-      <div style="width:36px;height:36px;background:#FBBF24;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:2px 2px 0 #111">📍</div>
-      <div style="background:#111;color:#FDE68A;font-size:10px;font-weight:900;padding:2px 6px;border-radius:6px;margin-top:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${title.length > 9 ? title.slice(0, 9) + '…' : title}</div>
-    </div>`;
-}
-
-// ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 export default function MapComponent({
   friends, appointments, activeProfileId,
   selectedFriendId, selectedPromiseId,
   onMapClick, tempPromiseCoords,
   myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
 }: MapComponentProps) {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const overlaysRef = useRef<any[]>([]);
-  const polylinesRef = useRef<any[]>([]);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const markerGroupRef = useRef<L.LayerGroup | null>(null);
+  const polyGroupRef = useRef<L.LayerGroup | null>(null);
 
-  const [sdkState, setSdkState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [mapSearch, setMapSearch] = useState('');
   const [mapResults, setMapResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
-  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // SDK 로드
+  // ── 지도 초기화 ──────────────────────────────────────────────────────────
   useEffect(() => {
-    loadKakaoSDK()
-      .then(() => setSdkState('ready'))
-      .catch(() => setSdkState('error'));
+    if (!mapRef.current || mapInstanceRef.current) return;
+
+    const map = L.map(mapRef.current, {
+      center: [37.5565, 126.9242],
+      zoom: 15,
+      zoomControl: false,
+      attributionControl: false,
+    });
+
+    // VWorld 한국 공식 지도 (1순위) → CartoDB 폴백
+    const vworld = L.tileLayer(
+      'https://xdworld.vworld.kr/2d/Base/service/{z}/{x}/{y}.png',
+      { maxZoom: 19, errorTileUrl: '' }
+    );
+
+    const carto = L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      { maxZoom: 19, subdomains: 'abcd' }
+    );
+
+    // VWorld 로드 실패 시 CartoDB로 자동 전환
+    vworld.on('tileerror', () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.removeLayer(vworld);
+        carto.addTo(mapInstanceRef.current);
+      }
+    });
+    vworld.addTo(map);
+
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    map.on('click', (e: L.LeafletMouseEvent) => {
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    });
+
+    mapInstanceRef.current = map;
+    markerGroupRef.current = L.layerGroup().addTo(map);
+    polyGroupRef.current = L.layerGroup().addTo(map);
+
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+    };
   }, []);
 
-  // 지도 초기화
+  // ── 마커 + 경로 업데이트 ─────────────────────────────────────────────────
   useEffect(() => {
-    if (sdkState !== 'ready' || !mapContainerRef.current || mapRef.current) return;
-    const { kakao } = window;
-    const map = new kakao.maps.Map(mapContainerRef.current, {
-      center: new kakao.maps.LatLng(37.5565, 126.9242),
-      level: 4,
-    });
-    mapRef.current = map;
+    const map = mapInstanceRef.current;
+    const mg = markerGroupRef.current;
+    const pg = polyGroupRef.current;
+    if (!map || !mg || !pg) return;
 
-    kakao.maps.event.addListener(map, 'click', (e: any) => {
-      onMapClick(e.latLng.getLat(), e.latLng.getLng());
-    });
-  }, [sdkState, onMapClick]);
+    mg.clearLayers();
+    pg.clearLayers();
 
-  // 마커/경로 업데이트
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || sdkState !== 'ready') return;
-    const { kakao } = window;
-
-    overlaysRef.current.forEach(o => o.setMap(null));
-    overlaysRef.current = [];
-    polylinesRef.current.forEach(p => p.setMap(null));
-    polylinesRef.current = [];
-
-    // 친구 이동 경로
-    friends.forEach(friend => {
-      if (!friend.route || friend.route.length < 2) return;
-      const path = friend.route.map(([la, ln]: [number, number]) => new kakao.maps.LatLng(la, ln));
-      const poly = new kakao.maps.Polyline({
-        path,
-        strokeWeight: selectedFriendId === friend.id ? 3 : 1.5,
-        strokeColor: friend.color,
-        strokeOpacity: selectedFriendId === friend.id ? 0.85 : 0.35,
-        strokeStyle: 'solid',
+    // 경로 선
+    friends.forEach(f => {
+      if (!f.route || f.route.length < 2) return;
+      const poly = L.polyline(f.route as L.LatLngTuple[], {
+        color: f.color,
+        weight: selectedFriendId === f.id ? 4 : 2,
+        opacity: selectedFriendId === f.id ? 0.85 : 0.4,
       });
-      poly.setMap(map);
-      polylinesRef.current.push(poly);
+      pg.addLayer(poly);
     });
 
     // 약속 마커
     appointments.forEach(app => {
-      const overlay = new kakao.maps.CustomOverlay({
-        position: new kakao.maps.LatLng(app.lat, app.lng),
-        content: buildAppointmentHTML(app.title, selectedPromiseId === app.id),
-        yAnchor: 1,
-        zIndex: 3,
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="display:flex;flex-direction:column;align-items:center">
+          <div style="width:36px;height:36px;background:#FBBF24;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:2px 2px 0 #111">📍</div>
+          <div style="background:#111;color:#FDE68A;font-size:9px;font-weight:900;padding:2px 6px;border-radius:5px;margin-top:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${app.title.length > 9 ? app.title.slice(0, 9) + '…' : app.title}</div>
+        </div>`,
+        iconSize: [40, 52],
+        iconAnchor: [20, 48],
       });
-      overlay.setMap(map);
-      overlaysRef.current.push(overlay);
+      const m = L.marker([app.lat, app.lng], { icon });
+      m.bindTooltip(`<b>${app.title}</b><br>📍 ${app.placeName}<br>🕒 ${app.datetime}`, { direction: 'top' });
+      mg.addLayer(m);
     });
 
-    // 임시 핀 (약속 위치 지정)
+    // 임시 핀
     if (tempPromiseCoords) {
-      const content = `
-        <div style="display:flex;flex-direction:column;align-items:center">
-          <div style="width:32px;height:32px;background:#EF4444;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;animation:bounce 1s infinite">⭐️</div>
-          <div style="background:#111;color:#FCA5A5;font-size:9px;font-weight:900;padding:1px 5px;border-radius:5px;margin-top:2px;font-family:sans-serif">여기 소집</div>
-        </div>`;
-      const overlay = new kakao.maps.CustomOverlay({
-        position: new kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1]),
-        content, yAnchor: 1, zIndex: 4,
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="display:flex;flex-direction:column;align-items:center;animation:bounce 1s infinite">
+          <div style="width:32px;height:32px;background:#EF4444;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px">⭐️</div>
+          <div style="background:#111;color:#FCA5A5;font-size:8px;font-weight:900;padding:1px 5px;border-radius:4px;margin-top:2px;font-family:sans-serif">여기 소집</div>
+        </div>`,
+        iconSize: [36, 46],
+        iconAnchor: [18, 42],
       });
-      overlay.setMap(map);
-      overlaysRef.current.push(overlay);
+      mg.addLayer(L.marker(tempPromiseCoords, { icon }));
     }
 
     // 친구 마커
-    friends.forEach(friend => {
-      const overlay = new kakao.maps.CustomOverlay({
-        position: new kakao.maps.LatLng(friend.lat, friend.lng),
-        content: buildFriendHTML(friend, selectedFriendId === friend.id, friend.id === activeProfileId),
-        yAnchor: 1,
-        zIndex: selectedFriendId === friend.id ? 5 : 2,
+    friends.forEach(f => {
+      const icon = L.divIcon({
+        className: '',
+        html: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
+        iconSize: [36, 48],
+        iconAnchor: [18, 42],
       });
-      overlay.setMap(map);
-      overlaysRef.current.push(overlay);
+      const m = L.marker([f.lat, f.lng], { icon, zIndexOffset: selectedFriendId === f.id ? 1000 : 0 });
+      m.bindTooltip(
+        `<b>${f.avatar} ${f.name}</b><br>"${f.statusMsg}"<br>속도: ${f.speed}km/h · ${f.heading}`,
+        { direction: 'top' }
+      );
+      mg.addLayer(m);
     });
-  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, sdkState]);
+  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords]);
 
-  // 선택된 항목으로 이동
+  // ── 포커스 이동 ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || sdkState !== 'ready') return;
-    const { kakao } = window;
-
+    const map = mapInstanceRef.current;
+    if (!map) return;
     if (selectedFriendId) {
       const f = friends.find(fr => fr.id === selectedFriendId);
-      if (f) { map.panTo(new kakao.maps.LatLng(f.lat, f.lng)); map.setLevel(4); }
+      if (f) map.flyTo([f.lat, f.lng], 16, { animate: true, duration: 1.2 });
     } else if (selectedPromiseId) {
       const a = appointments.find(ap => ap.id === selectedPromiseId);
-      if (a) { map.panTo(new kakao.maps.LatLng(a.lat, a.lng)); map.setLevel(4); }
+      if (a) map.flyTo([a.lat, a.lng], 16, { animate: true, duration: 1.2 });
     } else if (tempPromiseCoords) {
-      map.panTo(new kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1]));
+      map.flyTo(tempPromiseCoords, 16, { animate: true, duration: 1.0 });
     }
-  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords, sdkState]);
+  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords]);
 
-  // GPS 위치로 최초 이동
+  // ── 최초 GPS 이동 ────────────────────────────────────────────────────────
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || sdkState !== 'ready' || !myGpsCoords || !centerOnMyGpsOnce) return;
+    const map = mapInstanceRef.current;
+    if (!map || !myGpsCoords || !centerOnMyGpsOnce) return;
     if (selectedFriendId || selectedPromiseId) return;
-    const { kakao } = window;
-    map.panTo(new kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]));
-    map.setLevel(4);
+    map.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
     onMyGpsCentered?.();
-  }, [myGpsCoords, centerOnMyGpsOnce, sdkState, selectedFriendId, selectedPromiseId, onMyGpsCentered]);
+  }, [myGpsCoords, centerOnMyGpsOnce]);
 
-  // 카카오 장소 검색
-  const searchPlaces = useCallback((query: string) => {
-    if (!query.trim() || sdkState !== 'ready') {
-      setMapResults([]);
-      setShowResults(false);
-      return;
-    }
+  // ── 장소 검색 (Nominatim) ────────────────────────────────────────────────
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!mapSearch.trim()) { setMapResults([]); setShowResults(false); return; }
+
     setIsSearching(true);
     setShowResults(true);
-    const ps = new window.kakao.maps.services.Places();
-    const center = mapRef.current?.getCenter();
-    ps.keywordSearch(
-      query,
-      (data: any[], status: string) => {
-        setIsSearching(false);
-        if (status === window.kakao.maps.services.Status.OK) {
-          setMapResults(data.slice(0, 8).map((item: any) => ({
-            name: item.place_name,
-            address: item.road_address_name || item.address_name,
-            lat: parseFloat(item.y),
-            lng: parseFloat(item.x),
-          })));
-        } else {
-          setMapResults([]);
-        }
-      },
-      { location: center, sort: window.kakao.maps.services.SortBy?.DISTANCE }
-    );
-  }, [sdkState]);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/places/search?q=${encodeURIComponent(mapSearch)}`);
+        const data: PlaceResult[] = await res.json();
+        setMapResults(data);
+      } catch { setMapResults([]); }
+      finally { setIsSearching(false); }
+    }, 500);
 
-  useEffect(() => {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    if (!mapSearch.trim()) { setMapResults([]); setShowResults(false); return; }
-    searchDebounce.current = setTimeout(() => searchPlaces(mapSearch), 500);
-    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
-  }, [mapSearch, searchPlaces]);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [mapSearch]);
 
   const handleSelectResult = (place: PlaceResult) => {
-    const map = mapRef.current;
-    if (map && sdkState === 'ready') {
-      map.panTo(new window.kakao.maps.LatLng(place.lat, place.lng));
-      map.setLevel(3);
-    }
+    const map = mapInstanceRef.current;
+    if (map) map.flyTo([place.lat, place.lng], 17, { animate: true, duration: 1.0 });
     onMapClick(place.lat, place.lng);
     setMapSearch('');
     setShowResults(false);
   };
 
-  // ─── 렌더 ─────────────────────────────────────────────────────────────────
-  if (sdkState === 'error') {
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-gray-50 text-gray-500 gap-3 p-8 text-center">
-        <span className="text-4xl">🗺️</span>
-        <p className="text-sm font-semibold leading-relaxed">카카오맵을 불러오지 못했습니다.</p>
-        <p className="text-xs text-gray-400 leading-relaxed">
-          Render 대시보드 → Environment 탭<br />
-          <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">KAKAO_MAP_KEY</code> = 카카오 JavaScript 앱 키<br />
-          추가 후 Manual Deploy 실행
-        </p>
-        <button
-          onClick={() => { sdkPromise = null; setSdkState('loading'); loadKakaoSDK().then(() => setSdkState('ready')).catch(() => setSdkState('error')); }}
-          className="mt-2 bg-amber-400 hover:bg-amber-500 text-black font-bold px-4 py-2 rounded-xl text-sm transition"
-        >
-          다시 시도
-        </button>
-      </div>
-    );
-  }
-
-  if (sdkState === 'loading') {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-50">
-        <div className="flex flex-col items-center gap-2 text-gray-400">
-          <Loader2 className="w-7 h-7 animate-spin" />
-          <span className="text-sm">카카오맵 불러오는 중…</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="relative w-full h-full">
-      {/* 지도 컨테이너 */}
-      <div ref={mapContainerRef} className="w-full h-full" />
+      <div ref={mapRef} className="w-full h-full z-10" />
 
       {/* 검색바 */}
       <div className="absolute top-3 left-3 right-12 z-30">
@@ -333,7 +248,7 @@ export default function MapComponent({
             type="text"
             value={mapSearch}
             onChange={e => setMapSearch(e.target.value)}
-            placeholder="장소 검색 (카카오맵)"
+            placeholder="장소 검색 (예: 강남역, 홍대 카페)"
             className="w-full bg-white/95 backdrop-blur border border-gray-200 shadow-md rounded-2xl py-2.5 pl-9 pr-9 text-sm focus:outline-none focus:border-amber-400"
           />
         </div>
