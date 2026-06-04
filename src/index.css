@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Vibrant Palette / Neo-Brutalist utility classes */
+.vibrant-border {
+  border: 2px solid #000000;
+}
+
+.vibrant-shadow-sm {
+  box-shadow: 2px 2px 0px 0px #000000;
+}
+
+.vibrant-shadow-md {
+  box-shadow: 4px 4px 0px 0px #000000;
+}
+
+.vibrant-shadow-lg {
+  box-shadow: 6px 6px 0px 0px #000000;
+}
+
+.vibrant-shadow-yellow {
+  box-shadow: 4px 4px 0px 0px #FBBF24;
+}
+
+.vibrant-active-btn {
+  transition: all 0.1s ease;
+}
+
+.vibrant-active-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0px 0px 0px 0px #000000;
+}
+
+/* Custom leaflet scroll and appearance fixes */
+.leaflet-container {
+  font-family: inherit;
+}
+
+/* Custom fade scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 9999px;
+  border: 1.5px solid transparent;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+

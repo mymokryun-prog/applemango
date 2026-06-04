@@ -1,0 +1,1614 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import MobileFrame from './components/MobileFrame';
+import MapComponent from './components/MapComponent';
+import ChatRoom from './components/ChatRoom';
+import SchedulePanel from './components/SchedulePanel';
+import FriendListPanel from './components/FriendListPanel';
+import NotificationPanel from './components/NotificationPanel';
+import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
+import { Friend, Message, Appointment, NotificationAlert } from './types';
+import { Map, MessageSquare, Calendar, Users, Bell, RefreshCw } from 'lucide-react';
+import {
+  queueOfflineAction,
+  getOutboxCount,
+  registerBackgroundSync,
+  requestNotificationPermission,
+  showLocalNotification,
+  syncOutbox
+} from './offlineSync';
+import {
+  getPushSubscription,
+  subscribeToPushManager,
+  unsubscribeFromPushManager
+} from './pushSubscription';
+import { useRealtimeLocation } from './hooks/useRealtimeLocation';
+import type { LocationUpdatedPayload } from './realtime/types';
+
+// 앱 로고 — ApmtLogo를 OnboardingScreen에서 재사용
+export { ApmtLogo as AppleMangoLogo };
+
+export default function App() {
+  // 온보딩 상태
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
+    return !localStorage.getItem('apmt_v3_registered');
+  });
+
+  // Navigation active state
+  const [activeTab, setActiveTab] = useState<'map' | 'chat' | 'appointments' | 'friends' | 'notifications'>('map');
+  
+  // Simulated Multi-user Toggle profile state
+  const [activeProfileId, setActiveProfileId] = useState<string>('user-minsu');
+
+  // Room states
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState<string>('room-friends');
+
+  // New room generation form states
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomEmoji, setNewRoomEmoji] = useState('🍎');
+  const [newRoomType, setNewRoomType] = useState<'friends' | 'family' | 'work' | 'care' | 'custom'>('friends');
+  const [newRoomTrackingStyle, setNewRoomTrackingStyle] = useState<'continuous' | 'temporary'>('temporary');
+
+  // Interactive user registration states ("핸펀번호, 이름, 가명")
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [regPhone, setRegPhone] = useState('010-1234-5678');
+  const [regRealName, setRegRealName] = useState('김민수');
+  const [regAlias, setRegAlias] = useState('애망민수');
+
+  const [recentCreatedRoomName, setRecentCreatedRoomName] = useState<string | null>(null);
+  const [pendingDeleteRoomId, setPendingDeleteRoomId] = useState<string | null>(null);
+  const [deleteRoomConfirmKey, setDeleteRoomConfirmKey] = useState('');
+  const [isRoomEditMode, setIsRoomEditMode] = useState(false); // 방 편집 모드
+  const roomNavRef = useRef<HTMLDivElement | null>(null);
+
+  // Precision remote heart rate check simulator states ("할머니 심박수 체크")
+  const [measuringTarget, setMeasuringTarget] = useState<Friend | null>(null);
+  const [isMeasuringHeartRate, setIsMeasuringHeartRate] = useState(false);
+  const [measurementProgress, setMeasurementProgress] = useState(0);
+  const [measuredBpm, setMeasuredBpm] = useState<number | null>(null);
+
+  // Application Data States
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [notifications, setNotifications] = useState<NotificationAlert[]>([]);
+  
+  // Selection states (for focusing on specific people or appointments)
+  const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null);
+  const [selectedPromiseId, setSelectedPromiseId] = useState<string | null>(null);
+  
+  // Leaflet map selected coordinate for potential appointment creation
+  const [tempPromiseCoords, setTempPromiseCoords] = useState<[number, number] | null>(null);
+  
+  // Manual refreshing spin indicators
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  );
+  const [outboxCount, setOutboxCount] = useState<number>(0);
+  const [vapidPublicKey, setVapidPublicKey] = useState<string>('');
+  const [isPushSubscribed, setIsPushSubscribed] = useState(false);
+  const lastNotifiedIdRef = useRef<string | null>(null);
+  const hasCenteredOnGpsRef = useRef(false);
+
+  // 119 Emergency calling states
+  const [emergencyTarget, setEmergencyTarget] = useState<Friend | null>(null);
+  const [isDialing119, setIsDialing119] = useState(false);
+  const [dialingStatus, setDialingStatus] = useState<'calling' | 'connected' | 'completed'>('calling');
+  const [dialingTimeCounter, setDialingTimeCounter] = useState(0);
+
+  const handleEmergency119 = async (friend: Friend) => {
+    setEmergencyTarget(friend);
+    setIsDialing119(true);
+    setDialingStatus('calling');
+    setDialingTimeCounter(0);
+    
+    // Auto post message to the active chat room notifying that 119 has been dispatched
+    try {
+      await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: 'system',
+          senderName: '시스템',
+          senderAvatar: '🚨',
+          senderColor: '#DC2626',
+          text: `🚨 [위급 상황 발생] 119 긴급 연동 기능이 활성화되었습니다!\n- 성함: ${friend.name}\n- 현재 실시간 좌표: (위도 ${friend.lat.toFixed(4)}, 경도 ${friend.lng.toFixed(4)})\n- 현재 상태 지표: 심박수 ${friend.heartRate || 74}bpm, 배터리 ${friend.battery}%\n- 소방구급대 및 기동 차량이 복지관/가옥 근방으로 긴급 기동 중입니다!`,
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRequestNotificationPermission = async () => {
+    try {
+      const permission = await requestNotificationPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        await showLocalNotification('애망 시그널 알림 허용 완료', {
+          body: '중요한 알림을 실시간으로 받을 수 있습니다.',
+          icon: '/icons/icon-192.svg'
+        });
+        await initializePushSubscription();
+      }
+    } catch (error) {
+      console.error('Notification permission request failed:', error);
+    }
+  };
+
+  const fetchVapidPublicKey = async (): Promise<string> => {
+    try {
+      const response = await fetch('/api/push/vapidPublicKey');
+      if (!response.ok) {
+        throw new Error('Failed to fetch VAPID key');
+      }
+      const data = await response.json();
+      return data.publicKey || '';
+    } catch (error) {
+      console.error('VAPID public key fetch error:', error);
+      return '';
+    }
+  };
+
+  const registerPushSubscription = async (subscription: PushSubscription) => {
+    try {
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription, roomId: activeRoomId, userId: activeProfileId })
+      });
+      setIsPushSubscribed(true);
+    } catch (error) {
+      console.error('Push subscription registration failed:', error);
+      setIsPushSubscribed(false);
+    }
+  };
+
+  const initializePushSubscription = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || notificationPermission !== 'granted') {
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const existingSubscription = await getPushSubscription(registration);
+      const publicKey = vapidPublicKey || await fetchVapidPublicKey();
+      if (!publicKey) {
+        return;
+      }
+      setVapidPublicKey(publicKey);
+
+      if (existingSubscription) {
+        await registerPushSubscription(existingSubscription);
+        setIsPushSubscribed(true);
+        return;
+      }
+
+      const newSubscription = await subscribeToPushManager(registration, publicKey);
+      await registerPushSubscription(newSubscription);
+    } catch (error) {
+      console.error('Push initialization failed:', error);
+      setIsPushSubscribed(false);
+    }
+  };
+
+  const unsubscribePush = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const unsubscribed = await unsubscribeFromPushManager(registration);
+      if (unsubscribed) {
+        setIsPushSubscribed(false);
+      }
+    } catch (error) {
+      console.error('Push unsubscribe failed:', error);
+    }
+  };
+
+  const queueOrSend = async (endpoint: string, body: any, showQueuedNotification = true) => {
+    if (!isOnline) {
+      await queueOfflineAction(endpoint, body);
+      await registerBackgroundSync();
+      setOutboxCount(await getOutboxCount());
+      if (notificationPermission === 'granted' && showQueuedNotification) {
+        await showLocalNotification('오프라인 큐에 저장됨', {
+          body: '네트워크 연결 복구 시 자동으로 전송됩니다.',
+          icon: '/icons/icon-192.svg'
+        });
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        throw new Error('Request failed');
+      }
+    } catch (err) {
+      console.warn('Direct send failed, queuing for later sync:', err);
+      await queueOfflineAction(endpoint, body);
+      await registerBackgroundSync();
+      setOutboxCount(await getOutboxCount());
+    }
+  };
+
+  // 온보딩 완료 핸들러
+  const handleOnboardingComplete = async (phone: string, name: string, nickname: string, fruit: string) => {
+    try {
+      await fetch('/api/friends/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, realName: name, alias: nickname, avatar: fruit })
+      });
+    } catch (_) { /* 서버 없어도 로컬 진행 */ }
+    localStorage.setItem('apmt_v3_registered', 'true');
+    localStorage.setItem('aemang_phone', phone);
+    localStorage.setItem('aemang_name', name);
+    localStorage.setItem('aemang_nickname', nickname);
+    localStorage.setItem('aemang_fruit', fruit);
+    setShowOnboarding(false);
+    fetchAllStates(activeRoomId);
+  };
+
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOnline(true);
+      try {
+        await syncOutbox();
+      } catch (err) {
+        console.warn('Background sync attempt failed:', err);
+      }
+      setOutboxCount(await getOutboxCount());
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const initializeOfflineState = async () => {
+      setNotificationPermission(typeof Notification !== 'undefined' ? Notification.permission : 'default');
+      setOutboxCount(await getOutboxCount());
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        await initializePushSubscription();
+      }
+    };
+    initializeOfflineState();
+  }, []);
+
+  useEffect(() => {
+    const latestNotification = notifications[0];
+    if (!latestNotification || notificationPermission !== 'granted') return;
+    if (lastNotifiedIdRef.current === latestNotification.id) return;
+
+    lastNotifiedIdRef.current = latestNotification.id;
+    showLocalNotification(latestNotification.title, {
+      body: latestNotification.message,
+      icon: '/icons/icon-192.svg',
+      tag: latestNotification.id
+    });
+  }, [notifications, notificationPermission]);
+
+  const handleSocketLocationUpdated = useCallback((payload: LocationUpdatedPayload) => {
+    setFriends((prev) =>
+      prev.map((f) =>
+        f.id === payload.friendId
+          ? {
+              ...f,
+              lat: payload.lat,
+              lng: payload.lng,
+              ...(payload.statusMsg !== undefined ? { statusMsg: payload.statusMsg } : {}),
+              ...(payload.speed !== undefined ? { speed: payload.speed } : {}),
+              ...(payload.heading !== undefined ? { heading: payload.heading } : {}),
+              ...(payload.battery !== undefined ? { battery: payload.battery } : {}),
+              ...(payload.heartRate !== undefined ? { heartRate: payload.heartRate } : {}),
+              ...(payload.route !== undefined ? { route: payload.route } : {}),
+              ...(payload.routeIndex !== undefined ? { routeIndex: payload.routeIndex } : {}),
+              ...(payload.updatedAt !== undefined ? { updatedAt: payload.updatedAt } : {}),
+              ...(payload.isOnline !== undefined ? { isOnline: payload.isOnline } : {}),
+            }
+          : f
+      )
+    );
+  }, []);
+
+  const {
+    isSocketConnected,
+    gpsStatus,
+    gpsError,
+    myCoords,
+    lastSentAt,
+    requestGpsPermission,
+    stepsToday,
+    pedometerAvailable,
+    requestPedometerPermission,
+  } = useRealtimeLocation({
+    roomId: activeRoomId,
+    userId: activeProfileId,
+    enabled: !showOnboarding,
+    onLocationUpdated: handleSocketLocationUpdated,
+  });
+
+  // Active profile object
+  const activeProfile = friends.find(f => f.id === activeProfileId) || friends[0] || {
+    id: 'user-minsu',
+    name: '나 (민수)',
+    avatar: '🟢',
+    color: '#3B82F6',
+    lat: 37.5565,
+    lng: 126.9242
+  };
+
+  // 1. Fetch data from Server
+  const fetchAllStates = async (targetRoomId = activeRoomId) => {
+    try {
+      const [friendsRes, chatRes, appRes, notifRes, roomsRes] = await Promise.all([
+        fetch(`/api/friends?roomId=${targetRoomId}`),
+        fetch(`/api/chat?roomId=${targetRoomId}`),
+        fetch(`/api/appointments?roomId=${targetRoomId}`),
+        fetch(`/api/notifications?roomId=${targetRoomId}`),
+        fetch('/api/rooms')
+      ]);
+
+      if (roomsRes.ok) {
+        const rData = await roomsRes.json();
+        setRooms(rData);
+      }
+      if (friendsRes.ok) {
+        const data = await friendsRes.json();
+        setFriends(data);
+        // Realign if current profile is missing in the newly fetched list
+        if (data.length > 0 && !data.some((f: any) => f.id === activeProfileId)) {
+          setActiveProfileId(data[0].id);
+        }
+      }
+      if (chatRes.ok) {
+        const data = await chatRes.json();
+        setMessages(data);
+      }
+      if (appRes.ok) {
+        const data = await appRes.json();
+        setAppointments(data);
+      }
+      if (notifRes.ok) {
+        const data = await notifRes.json();
+        setNotifications(data);
+      }
+    } catch (err) {
+      console.warn('Real-time API fetch warning (running local simulated fallback):', err);
+    }
+  };
+
+  // Trigger when active room ID changes
+  useEffect(() => {
+    fetchAllStates(activeRoomId);
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    if (!roomNavRef.current) return;
+    // active-room 클래스 또는 마지막 버튼으로 스크롤
+    const activeButton = roomNavRef.current.querySelector<HTMLButtonElement>('button.active-room');
+    if (activeButton) {
+      activeButton.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    } else {
+      // active-room 클래스가 없으면 끝으로 스크롤 (새 방 생성 직후)
+      roomNavRef.current.scrollLeft = roomNavRef.current.scrollWidth;
+    }
+  }, [rooms, activeRoomId]);
+
+  // Sync chat/appointments/notifications — slower when Socket is live (locations via GPS events)
+  useEffect(() => {
+    const pollMs = isSocketConnected ? 20000 : 5000;
+    const interval = setInterval(() => fetchAllStates(activeRoomId), pollMs);
+    return () => clearInterval(interval);
+  }, [activeRoomId, isSocketConnected]);
+
+  useEffect(() => {
+    hasCenteredOnGpsRef.current = false;
+  }, [activeRoomId]);
+
+  // Handle dial timing simulation
+  useEffect(() => {
+    let timer: any;
+    if (isDialing119 && dialingStatus === 'calling') {
+      timer = setTimeout(() => {
+        setDialingStatus('connected');
+      }, 3000);
+    } else if (isDialing119 && dialingStatus === 'connected') {
+      timer = setInterval(() => {
+        setDialingTimeCounter(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      clearTimeout(timer);
+      clearInterval(timer);
+    };
+  }, [isDialing119, dialingStatus]);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchAllStates(activeRoomId);
+    setTimeout(() => setIsRefreshing(false), 600);
+  };
+
+  // 2. Action triggers linked to Express REST endpoints
+  const handleSendMessage = async (text: string, locationShared?: { lat: number; lng: number; placeName: string }) => {
+    const activeFriendObj = friends.find(f => f.id === activeProfileId);
+    if (!activeFriendObj) return;
+
+    const payload = {
+      senderId: activeProfileId,
+      senderName: activeFriendObj.name,
+      senderAvatar: activeFriendObj.avatar,
+      senderColor: activeFriendObj.color,
+      text,
+      locationShared,
+      roomId: activeRoomId
+    };
+
+    await queueOrSend('/api/chat', payload);
+    fetchAllStates(activeRoomId);
+  };
+
+  const handleUpdateAppointment = async (id: string, title: string, placeName: string, lat: number, lng: number, datetime: string) => {
+    try {
+      await queueOrSend('/api/appointments/update', {
+        id,
+        title,
+        placeName,
+        lat,
+        lng,
+        datetime,
+        roomId: activeRoomId
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteFriend = async (id: string) => {
+    try {
+      await fetch('/api/friends/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateAppointment = async (
+    title: string, 
+    placeName: string, 
+    datetime: string,
+    customLat?: number,
+    customLng?: number
+  ) => {
+    const activeFriendObj = friends.find(f => f.id === activeProfileId) || { name: '나 (민수)' };
+    const finalLat = customLat !== undefined ? customLat : (tempPromiseCoords ? tempPromiseCoords[0] : null);
+    const finalLng = customLng !== undefined ? customLng : (tempPromiseCoords ? tempPromiseCoords[1] : null);
+
+    if (finalLat === null || finalLng === null) {
+      alert('지도 위를 클릭하여 소집 위치를 지정하거나, 우측 상단의 장소 검색창에서 식당/주소를 검색한 후 생성해 주세요!');
+      return;
+    }
+
+    try {
+      await queueOrSend('/api/appointments', {
+        title,
+        placeName,
+        lat: finalLat,
+        lng: finalLng,
+        datetime,
+        creatorName: activeFriendObj.name,
+        roomId: activeRoomId
+      });
+      setTempPromiseCoords(null);
+      setActiveTab('map'); // Switch focus back to Map trace immediately
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleVote = async (promiseId: string, vote: 'yes' | 'no' | 'maybe') => {
+    try {
+      await fetch('/api/appointments/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: promiseId,
+          friendId: activeProfileId,
+          vote,
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleInviteFriend = async (name: string, emoji: string, color: string, phone: string) => {
+    try {
+      const response = await fetch('/api/friends/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          avatar: emoji,
+          color,
+          phone,
+          roomId: activeRoomId,
+          creatorName: activeProfile.name
+        })
+      });
+      if (response.ok) {
+        fetchAllStates(activeRoomId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAcceptInvite = async (id: string) => {
+    try {
+      const response = await fetch('/api/friends/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          roomId: activeRoomId
+        })
+      });
+      if (response.ok) {
+        fetchAllStates(activeRoomId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleManualMoveFriend = async (id: string, latOffset: number, lngOffset: number) => {
+    const friend = friends.find(f => f.id === id);
+    if (!friend) return;
+
+    try {
+      await fetch('/api/friends/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: friend.id,
+          lat: friend.lat + latOffset,
+          lng: friend.lng + lngOffset,
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateStatusMsg = async (id: string, text: string) => {
+    try {
+      await fetch('/api/friends/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          statusMsg: text,
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleTogglePedometer = async (id: string, enabled: boolean) => {
+    try {
+      await queueOrSend('/api/friends/pedometer', {
+        id,
+        pedometerEnabled: enabled,
+        roomId: activeRoomId
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error('Pedometer toggle failed:', err);
+    }
+  };
+
+  const handleToggleHeartRate = async (id: string, enabled: boolean) => {
+    try {
+      await queueOrSend('/api/friends/heartRate', {
+        id,
+        heartRateEnabled: enabled,
+        roomId: activeRoomId
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error('Heart rate toggle failed:', err);
+    }
+  };
+
+  const handleMarkAllNotificationsAsRead = async () => {
+    try {
+      await fetch('/api/notifications/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateRoom = async (
+    name: string, 
+    emoji: string, 
+    type: 'friends' | 'family' | 'work' | 'care' | 'custom',
+    trackingStyle: 'continuous' | 'temporary'
+  ) => {
+    if (!name.trim()) {
+      alert('새로운 모임 그룹 이름을 입력해 주세요.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          emoji,
+          type,
+          trackingStyle
+        })
+      });
+      if (res.ok) {
+        const newRoom = await res.json();
+        // 즉시 탭에 추가
+        setRooms(prev => [...prev.filter(r => r.id !== newRoom.id), newRoom]);
+        setActiveRoomId(newRoom.id);
+        setIsCreatingRoom(false);
+        setNewRoomName('');
+        setNewRoomEmoji('🍎');
+        setNewRoomType('friends');
+        setNewRoomTrackingStyle('temporary');
+        setRecentCreatedRoomName(newRoom.name);
+        setTimeout(() => setRecentCreatedRoomName(null), 5000);
+        // 서버에서 전체 방 목록 명시적 재조회
+        fetch('/api/rooms').then(r => r.json()).then(data => setRooms(data)).catch(() => {});
+        fetchAllStates(newRoom.id);
+      } else {
+        const errorText = await res.text();
+        alert(`그룹 생성에 실패했습니다. ${res.status}: ${errorText}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('그룹 생성 중 오류가 발생했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.');
+    }
+  };
+
+  const handleSaveProfile = async (phone: string, realName: string, alias: string) => {
+    try {
+      await fetch('/api/friends/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, realName, alias })
+      });
+      localStorage.setItem('apmt_v3_registered', 'true');
+      setShowOnboarding(false);
+      setShowProfileModal(false);
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDisbandRoom = async (roomId: string) => {
+    const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
+    
+    if (!isSystemRoom) {
+      const confirmExplode = window.confirm('💣 정말로 이 안심 모임그룹방을 완전히 폭파(삭제)하시겠습니까?\n대화 기록 및 약속 위치 공유 등 방 안의 모든 정보가 복구 불가능하게 파괴됩니다!');
+      if (!confirmExplode) return;
+    } else {
+      const confirmDisband = window.confirm('🔒 이 기본 안심 모임방의 위치 공조를 완료(종료)하시겠습니까?\n방과 대화 기록은 유지되지만 실시간 위치 전송이 전면 중단됩니다.');
+      if (!confirmDisband) return;
+    }
+
+    try {
+      const response = await fetch('/api/rooms/disband', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId })
+      });
+      if (response.ok) {
+        const result = await response.json();
+        if (result.deleted || !isSystemRoom) {
+          alert('💥 안심 모임그룹방이 완전히 폭파되어 삭제되었습니다!');
+          const remain = rooms.filter(r => r.id !== roomId);
+          if (remain.length > 0) {
+            const nextRoomId = remain[0].id;
+            setActiveRoomId(nextRoomId);
+            fetchAllStates(nextRoomId);
+          } else {
+            setActiveRoomId('room-friends');
+            fetchAllStates('room-friends');
+          }
+        } else {
+          alert('🔒 모임 약속 완료 및 실시간 위치 동기화 수집이 긴급 해제되었습니다. 프라이버시가 안전하게 보호됩니다!');
+          fetchAllStates(roomId);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const confirmDeleteRoom = async () => {
+    if (!pendingDeleteRoomId) return;
+    const roomToRemove = rooms.find((room) => room.id === pendingDeleteRoomId);
+    if (!roomToRemove) { setPendingDeleteRoomId(null); return; }
+    if (deleteRoomConfirmKey.trim() !== roomToRemove.name) {
+      alert('삭제하려면 방 이름을 정확히 입력해 주세요.');
+      return;
+    }
+    try {
+      const response = await fetch('/api/rooms/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId: pendingDeleteRoomId })
+      });
+      if (response.ok) {
+        const remain = rooms.filter(r => r.id !== pendingDeleteRoomId);
+        const nextRoomId = remain.length > 0 ? remain[0].id : 'room-friends';
+        setActiveRoomId(nextRoomId);
+        setPendingDeleteRoomId(null);
+        setDeleteRoomConfirmKey('');
+        fetchAllStates(nextRoomId);
+      } else {
+        const errorText = await response.text();
+        alert(`삭제 실패: ${errorText}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('그룹 삭제 중 오류가 발생했습니다. 다시 시도해 주세요.');
+    }
+  };
+
+  const cancelDeleteRoom = () => {
+    setPendingDeleteRoomId(null);
+    setDeleteRoomConfirmKey('');
+  };
+
+  const handleDeleteRoom = (roomId: string) => {
+    setPendingDeleteRoomId(roomId);
+    setDeleteRoomConfirmKey('');
+  };
+
+  const handleLeaveRoom = async () => {
+    if (!window.confirm('이 그룹에서 탈퇴하시겠습니까?')) return;
+    try {
+      await fetch('/api/friends/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: activeProfileId, roomId: activeRoomId })
+      });
+      const otherRoom = rooms.find(r => r.id !== activeRoomId);
+      const nextRoomId = otherRoom?.id || 'room-friends';
+      setActiveRoomId(nextRoomId);
+      fetchAllStates(nextRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleTriggerHeartRateMeasure = (friend: Friend) => {
+    setMeasuringTarget(friend);
+    setIsMeasuringHeartRate(true);
+    setMeasurementProgress(0);
+    setMeasuredBpm(null);
+
+    // Simulate an ECG heart rate check over 4 seconds
+    const intervalTime = 100; // ms
+    const totalSteps = 30; // 3 seconds
+    let currentStep = 0;
+
+    const timer = setInterval(async () => {
+      currentStep++;
+      const progressPercent = Math.min(Math.round((currentStep / totalSteps) * 100), 100);
+      setMeasurementProgress(progressPercent);
+
+      if (currentStep >= totalSteps) {
+        clearInterval(timer);
+        // Generate valid normal pulse
+        const targetBpm = Math.floor(65 + Math.random() * 20); // 65 ~ 84 bpm
+        setMeasuredBpm(targetBpm);
+
+        try {
+          await queueOrSend('/api/friends/heartRate', {
+            id: friend.id,
+            heartRateEnabled: true,
+            heartRate: targetBpm,
+            roomId: activeRoomId
+          });
+          fetchAllStates(activeRoomId);
+        } catch (err) {
+          console.error('Heart rate submission failed:', err);
+        }
+
+        // Log telemetry message in the Chat
+        fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderId: 'system',
+            senderName: '원격 헬스케어',
+            senderAvatar: '💓',
+            senderColor: '#EC4899',
+            text: `💓 [스마트밴드 원격 심박수 측정 결과]\n- 대상: ${friend.name}\n- 분석 결과: 정밀 심박수 ${targetBpm} bpm (안정 범위)\n- 진단 상태: 정상 맥박동 수치 및 양호 부착이 확인되었습니다. 안심하셔도 좋습니다!`,
+            roomId: activeRoomId
+          })
+        }).then(() => fetchAllStates(activeRoomId));
+      }
+    }, intervalTime);
+  };
+
+  // Coordinate interactions (pans map smoothly)
+  const handleFocusLocation = (lat: number, lng: number) => {
+    setSelectedFriendId(null);
+    setSelectedPromiseId(null);
+    setTempPromiseCoords([lat, lng]);
+    setActiveTab('map');
+  };
+
+  const handleMapTouchClick = (lat: number, lng: number) => {
+    // Drop potential coordinate pins to make schedule appointment easier
+    setTempPromiseCoords([lat, lng]);
+    setSelectedFriendId(null);
+    setSelectedPromiseId(null);
+  };
+
+  // 온보딩 화면 (최초 실행 시)
+  if (showOnboarding) {
+    return (
+      <MobileFrame>
+        <OnboardingScreen onComplete={handleOnboardingComplete} />
+      </MobileFrame>
+    );
+  }
+
+  return (
+    <MobileFrame>
+      {/* 1. App Header — KakaoTalk + Apple Find My 스타일 */}
+      <div className="bg-white shrink-0 select-none" style={{ boxShadow: '0 1px 0 #f0f0f0' }}>
+        {!isOnline && (
+          <div className="bg-red-500 text-white text-xs px-4 py-2 font-semibold flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse shrink-0" />
+            오프라인 모드 — 캐시된 앱으로 실행 중
+          </div>
+        )}
+
+        {gpsStatus === 'denied' && (
+          <div className="bg-amber-500 text-white text-xs px-4 py-2 font-semibold flex items-center justify-between gap-2">
+            <span>📍 위치 권한이 꺼져 있어 실시간 공유가 되지 않습니다.</span>
+            <button
+              type="button"
+              onClick={requestGpsPermission}
+              className="shrink-0 bg-white text-amber-700 px-2 py-1 rounded-lg text-[10px] font-bold"
+            >
+              다시 허용
+            </button>
+          </div>
+        )}
+
+        {gpsStatus === 'requesting' && (
+          <div className="bg-sky-50 text-sky-800 text-[10px] px-4 py-1.5 font-medium flex items-center gap-2 border-b border-sky-100">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0" />
+            <span>{gpsError || '위치 확인 중… (PC는 Wi-Fi 위치를 사용할 수 있습니다)'}</span>
+          </div>
+        )}
+
+        {(gpsStatus === 'watching' || gpsStatus === 'degraded') && (
+          <div className={`text-[10px] px-4 py-1.5 font-semibold flex items-center gap-2 border-b ${
+            gpsStatus === 'degraded'
+              ? 'bg-sky-50 text-sky-800 border-sky-100'
+              : 'bg-emerald-50 text-emerald-800 border-emerald-100'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              isSocketConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+            }`} />
+            <span className="flex-1">
+              {gpsStatus === 'degraded'
+                ? (isSocketConnected ? '대략적 위치 공유 중 (Wi-Fi/IP)' : '위치 켜짐 · 서버 연결 중…')
+                : (isSocketConnected ? 'GPS 실시간 공유 중' : 'GPS 켜짐 · 서버 연결 중…')}
+              {lastSentAt
+                ? ` · ${new Date(lastSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                : ''}
+            </span>
+            {stepsToday > 0 && (
+              <span className="flex items-center gap-0.5 text-[10px] font-bold shrink-0 text-emerald-700">
+                👣 {stepsToday.toLocaleString()}보
+              </span>
+            )}
+            {stepsToday === 0 && pedometerAvailable === false && (
+              <button
+                type="button"
+                onClick={requestPedometerPermission}
+                className="shrink-0 bg-emerald-500 text-white px-1.5 py-0.5 rounded-lg text-[9px] font-bold"
+              >
+                만보기 허용
+              </button>
+            )}
+          </div>
+        )}
+
+        {(gpsStatus === 'error' || gpsStatus === 'unavailable') && gpsError && (
+          <div className="bg-amber-50 text-amber-900 text-[10px] px-4 py-2 font-medium flex items-start justify-between gap-2 border-b border-amber-100">
+            <span className="leading-relaxed">{gpsError}</span>
+            <button
+              type="button"
+              onClick={requestGpsPermission}
+              className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap"
+            >
+              위치 다시 시도
+            </button>
+          </div>
+        )}
+
+        {/* 앱 타이틀 바 */}
+        <div className="flex items-center justify-between px-4 pt-2.5 pb-2">
+          <div className="flex items-center gap-2">
+            <ApmtLogo size={36} />
+            <div>
+              <h1 className="text-[15px] font-black text-gray-900 leading-tight tracking-tight">애플망고톡</h1>
+              <p className="text-[9px] text-orange-400 font-semibold">Apple Mango Talk 🍎🥭</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            {outboxCount > 0 && (
+              <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full font-semibold border border-rose-200 mr-1">
+                {outboxCount}개 대기
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleManualRefresh}
+              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition"
+              title="새로고침"
+            >
+              <RefreshCw className={`w-4 h-4 text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base"
+              title="내 프로필"
+            >
+              {(() => { const f = localStorage.getItem('aemang_fruit'); return f || activeProfile?.avatar || '👤'; })()}
+            </button>
+            {/* 방 삭제 버튼 — + 버튼 옆에 나란히 */}
+            <button
+              type="button"
+              onClick={() => { setIsRoomEditMode(!isRoomEditMode); setIsCreatingRoom(false); }}
+              style={{ backgroundColor: isRoomEditMode ? '#ef4444' : '#f3f4f6', minWidth: 32, minHeight: 32 }}
+              className="w-8 h-8 rounded-full flex items-center justify-center transition text-base border border-gray-200"
+              title="방 삭제 모드"
+            >
+              <span style={{ fontSize: 16 }}>🗑</span>
+            </button>
+            {/* 방 생성 버튼 */}
+            <button
+              type="button"
+              onClick={() => { setIsCreatingRoom(!isCreatingRoom); setIsRoomEditMode(false); }}
+              style={{ backgroundColor: isCreatingRoom ? '#374151' : '#fb923c', minWidth: 32, minHeight: 32 }}
+              className="w-8 h-8 rounded-full flex items-center justify-center transition shadow-sm"
+              title="새 그룹 만들기"
+            >
+              <span className="text-white font-bold" style={{ fontSize: 20, lineHeight: 1 }}>
+                {isCreatingRoom ? '×' : '+'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* 그룹 생성 드로어 */}
+        {isCreatingRoom && (
+          <div className="mx-4 mb-3 bg-gray-50 border border-gray-200 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-bold text-gray-700">새 모임 그룹 만들기</span>
+              <button onClick={() => setIsCreatingRoom(false)} className="text-gray-400 hover:text-gray-600 text-sm w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-200 transition">✕</button>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="그룹 이름 (예: 동창회, 부모님 안심)"
+                value={newRoomName}
+                onChange={(e) => setNewRoomName(e.target.value)}
+                className="flex-1 bg-white border border-gray-200 text-sm px-3 py-2 rounded-xl focus:outline-none focus:border-rose-400"
+              />
+              <select
+                value={newRoomEmoji}
+                onChange={(e) => setNewRoomEmoji(e.target.value)}
+                className="bg-white border border-gray-200 text-sm px-2 py-2 rounded-xl focus:outline-none"
+              >
+                <option value="🍎">🍎</option>
+                <option value="🥭">🥭</option>
+                <option value="👵">👵</option>
+                <option value="🏠">🏠</option>
+                <option value="🍻">🍻</option>
+                <option value="💼">💼</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={newRoomType}
+                onChange={(e) => setNewRoomType(e.target.value as any)}
+                className="bg-white border border-gray-200 text-xs px-3 py-2 rounded-xl focus:outline-none"
+              >
+                <option value="friends">🤝 친구 모임</option>
+                <option value="family">🏠 가족</option>
+                <option value="work">💼 직장 동료</option>
+                <option value="care">👵 부모님 안심방</option>
+              </select>
+              <select
+                value={newRoomTrackingStyle}
+                onChange={(e) => setNewRoomTrackingStyle(e.target.value as any)}
+                className="bg-white border border-gray-200 text-xs px-3 py-2 rounded-xl focus:outline-none"
+              >
+                <option value="temporary">⏰ 모임 후 자동 종료</option>
+                <option value="continuous">👵 상시 위치 공유</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleCreateRoom(newRoomName, newRoomEmoji, newRoomType, newRoomTrackingStyle)}
+              className="w-full bg-rose-500 hover:bg-rose-600 text-white font-semibold text-sm py-2.5 rounded-xl transition"
+            >
+              그룹 만들기
+            </button>
+          </div>
+        )}
+
+        {recentCreatedRoomName && (
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-[11px] text-emerald-700 font-semibold">
+            <span>✅</span>
+            <span>"{recentCreatedRoomName}" 그룹이 생성되었습니다</span>
+          </div>
+        )}
+
+        {/* 그룹 탭 */}
+        {isRoomEditMode && (
+          <div className="mx-4 mb-1 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-rose-600 font-semibold">
+            <span>🗑️</span>
+            <span>삭제할 방을 탭하세요. 우측 ✕로 종료.</span>
+            <button onClick={() => setIsRoomEditMode(false)} className="ml-auto text-rose-400 font-bold">✕</button>
+          </div>
+        )}
+        <div ref={roomNavRef} className="flex items-center gap-1.5 overflow-x-auto px-4 pb-3 scrollbar-none">
+          {rooms.map((room) => {
+            const isActive = activeRoomId === room.id;
+            const isOwner = room.ownerId === activeProfileId ||
+              ['room-friends', 'room-family', 'room-work', 'room-care'].includes(room.id);
+            return (
+              <div key={room.id} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isRoomEditMode && isOwner) {
+                      handleDeleteRoom(room.id);
+                    } else {
+                      setActiveRoomId(room.id);
+                      setSelectedFriendId(null);
+                      setSelectedPromiseId(null);
+                      setIsRoomEditMode(false);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition ${
+                    isRoomEditMode && isOwner
+                      ? 'bg-rose-100 text-rose-600 border border-rose-300 animate-pulse'
+                      : isActive
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  } ${isActive && !isRoomEditMode ? 'active-room' : ''}`}
+                >
+                  <span>{room.emoji}</span>
+                  <span>{room.name}</span>
+                  {room.isDisbanded && <span className="text-[8px] bg-red-500 text-white px-1 rounded-full">종료</span>}
+                  {isRoomEditMode && isOwner && <span className="text-[10px] ml-0.5">🗑</span>}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 개발용: 프로필 전환 (접기 가능) */}
+        {import.meta.env.DEV && friends.length > 0 && (
+          <details className="px-4 pb-2">
+            <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-gray-500 select-none list-none flex items-center gap-1">
+              <span>▸</span><span>프로필 전환 (개발용)</span>
+            </summary>
+            <div className="flex items-center gap-1 overflow-x-auto pt-1.5 pb-0.5 scrollbar-none">
+              {friends.map((friend) => (
+                <button
+                  key={friend.id}
+                  type="button"
+                  onClick={() => { setActiveProfileId(friend.id); setSelectedFriendId(friend.id); setSelectedPromiseId(null); }}
+                  className={`px-2.5 py-1 rounded-xl text-[10px] flex items-center gap-1 transition shrink-0 ${
+                    activeProfileId === friend.id
+                      ? 'bg-gray-900 text-white font-semibold'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  <span>{friend.avatar}</span>
+                  <span>{friend.name.split(' ')[0]}</span>
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+
+      {/* 2. Main Selected Dynamic Content Area */}
+      <div className="flex-1 relative overflow-hidden flex flex-col bg-amber-50/20">
+        {activeTab === 'map' && (
+          <MapComponent
+            friends={friends}
+            appointments={appointments}
+            activeProfileId={activeProfileId}
+            selectedFriendId={selectedFriendId}
+            selectedPromiseId={selectedPromiseId}
+            onMapClick={handleMapTouchClick}
+            tempPromiseCoords={tempPromiseCoords}
+            myGpsCoords={myCoords ? [myCoords.lat, myCoords.lng] : null}
+            centerOnMyGpsOnce={!hasCenteredOnGpsRef.current}
+            onMyGpsCentered={() => { hasCenteredOnGpsRef.current = true; }}
+          />
+        )}
+
+        {activeTab === 'chat' && (
+          <ChatRoom
+            messages={messages}
+            friends={friends}
+            activeProfileId={activeProfileId}
+            onSendMessage={handleSendMessage}
+            onFocusLocation={handleFocusLocation}
+            onEmergency119={handleEmergency119}
+            isCareGroup={activeRoomId === 'room-care' || activeRoomId.includes('care')}
+            isDisbanded={rooms.find(r => r.id === activeRoomId)?.isDisbanded || false}
+            trackingStyle={rooms.find(r => r.id === activeRoomId)?.trackingStyle || 'temporary'}
+            onDisbandRoom={() => handleDisbandRoom(activeRoomId)}
+            onAcceptInvite={handleAcceptInvite}
+            roomId={activeRoomId}
+          />
+        )}
+
+        {activeTab === 'appointments' && (
+          <SchedulePanel
+            appointments={appointments}
+            friends={friends}
+            activeProfileId={activeProfileId}
+            tempPromiseCoords={tempPromiseCoords}
+            onCreateAppointment={handleCreateAppointment}
+            onUpdateAppointment={handleUpdateAppointment}
+            onVote={handleVote}
+            onClearTempCoords={() => setTempPromiseCoords(null)}
+            onFocusLocation={handleFocusLocation}
+          />
+        )}
+
+        {activeTab === 'friends' && (
+          <FriendListPanel
+            friends={friends}
+            activeProfileId={activeProfileId}
+            selectedFriendId={selectedFriendId}
+            onSelectFriend={(id) => {
+              setSelectedFriendId(id);
+              if (id) setActiveTab('map');
+            }}
+            onInviteFriend={handleInviteFriend}
+            onDeleteFriend={handleDeleteFriend}
+            onManualMoveFriend={handleManualMoveFriend}
+            onUpdateStatusMsg={handleUpdateStatusMsg}
+            onEmergency119={handleEmergency119}
+            onTogglePedometer={handleTogglePedometer}
+            onToggleHeartRate={handleToggleHeartRate}
+            isCareGroup={activeRoomId === 'room-care' || activeRoomId.includes('care')}
+            onMeasureHeartRate={handleTriggerHeartRateMeasure}
+            onAcceptInvite={handleAcceptInvite}
+            isRoomOwner={rooms.find(r => r.id === activeRoomId)?.ownerId === activeProfileId || ['room-friends','room-family','room-work','room-care'].includes(activeRoomId)}
+            onLeaveRoom={handleLeaveRoom}
+            showDevControls={import.meta.env.DEV}
+          />
+        )}
+
+        {activeTab === 'notifications' && (
+          <NotificationPanel
+            notifications={notifications}
+            onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+          />
+        )}
+      </div>
+
+      {/* 119 Emergency Calling Simulation Overlay */}
+      {isDialing119 && emergencyTarget && (
+        <div className="absolute inset-0 z-50 bg-slate-950 text-white flex flex-col justify-between p-5 animate-fadeIn font-sans">
+          {/* Glowing Red Emergency Header */}
+          <div className="flex flex-col items-center gap-1.5 text-center mt-3 shrink-0">
+            <div className="flex gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
+              <span className="text-[9.5px] font-black bg-red-700 px-2 py-0.5 rounded-full uppercase tracking-wider select-none">
+                SIMULATED 119 EMERGENCY
+              </span>
+            </div>
+            <h2 className="text-sm font-black text-rose-500">🚑 119 소방재난본부 안심 연동</h2>
+            <p className="text-[10px] text-zinc-400 font-bold">
+              GPS 정밀 탐색 좌표 및 보호자 안부 긴급 데이터가 상시 119 시스템에 표출 중입니다.
+            </p>
+          </div>
+
+          {/* Core Caller Target Indicator Card */}
+          <div className="flex flex-col items-center justify-center gap-4 py-4 my-auto">
+            {/* Spinning phone circle indicator */}
+            <div className="w-20 h-20 rounded-full bg-red-900/35 border-4 border-red-500 flex items-center justify-center animate-pulse shadow-2xl">
+              <span className="text-4xl animate-bounce">🚨</span>
+            </div>
+
+            <div className="text-center space-y-1">
+              <div className="flex items-center justify-center gap-1 text-md font-black">
+                <span className="text-xl">{emergencyTarget.avatar}</span>
+                <span>{emergencyTarget.name}</span>
+              </div>
+              <p className="text-[11px] text-yellow-400 font-mono font-bold">
+                “{emergencyTarget.statusMsg || '실내 안정 상태'}”
+              </p>
+            </div>
+
+            {/* Simulated Live Connection Stats */}
+            <div className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-3 space-y-2 text-[10px] text-zinc-300 font-mono">
+              <div className="flex justify-between border-b border-zinc-800/80 pb-1.5 font-bold">
+                <span className="text-zinc-500">📞 전화통화 상태:</span>
+                <span className={`${dialingStatus === 'connected' ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`}>
+                  {dialingStatus === 'calling' ? '소방본부 연결대기 중...' : '📞 구조상황실 통화 중'}
+                </span>
+              </div>
+              <div className="flex justify-between border-b border-zinc-800/80 pb-1.5">
+                <span className="text-zinc-500">⌚ 경과 시간:</span>
+                <span className="font-extrabold text-[#FACC15]">
+                  {dialingStatus === 'connected' 
+                    ? `00:${dialingTimeCounter < 10 ? '0' + dialingTimeCounter : dialingTimeCounter}` 
+                    : '--:--'}
+                </span>
+              </div>
+              <div className="flex justify-between border-b border-zinc-800/80 pb-1.5">
+                <span className="text-zinc-500">📍 실시간 기기 GPS:</span>
+                <span>위도 {emergencyTarget.lat.toFixed(5)}, 경도 {emergencyTarget.lng.toFixed(5)}</span>
+              </div>
+              <div className="flex justify-between border-b border-zinc-800/80 pb-1.5">
+                <span className="text-zinc-500">💓 보호자 활력 징후:</span>
+                <span className="text-rose-500 font-black flex items-center gap-1 animate-pulse">
+                  Normal ({emergencyTarget.heartRate || 74} bpm)
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">🔋 고정 배터리 잔량물:</span>
+                <span>{emergencyTarget.battery}%</span>
+              </div>
+            </div>
+
+            {/* Simulating dispatcher auto-transcripts */}
+            <div className="w-full bg-red-950/20 border border-red-900/30 rounded-xl p-2.5 text-[9px] text-zinc-400 leading-normal italic text-slate-300/80">
+              {dialingStatus === 'calling' ? (
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce"></span>
+                  <span>119소방상황실 주 전산 연계 수집 확인 대기 중...</span>
+                </div>
+              ) : (
+                <span>
+                  "119 상황실 요원: '네, 119 응급상황실입니다. 대리신고인 민수 님 자택 연동으로 {emergencyTarget.name} 님의 GPS 실시간 신호가 수집 확인되었습니다. 서교동/망원동 물리관 근처 구급 구난 구조대를 비상 비접촉 발령하여 출발시켰사오니 안심하십시오.'"
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Standard Cancel Actions */}
+          <div className="grid grid-cols-2 gap-2.5 pb-4 shrink-0 font-sans">
+            <button
+              type="button"
+              onClick={() => {
+                setIsDialing119(false);
+                setEmergencyTarget(null);
+                setDialingStatus('calling');
+                setDialingTimeCounter(0);
+              }}
+              className="bg-zinc-800 hover:bg-zinc-700 text-white font-extrabold py-2.5 rounded-xl text-xs border border-zinc-650 transition cursor-pointer"
+            >
+              상황 해제 (통화 종료)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsDialing119(false);
+                setEmergencyTarget(null);
+                setDialingStatus('calling');
+                setDialingTimeCounter(0);
+                // Trigger notification of rescue successful completion
+                const notifId = `notif-rescue-${Date.now()}`;
+                setNotifications(prev => [
+                  {
+                    id: notifId,
+                    type: 'system',
+                    title: '🚨 119 구급출동 완료 통보',
+                    message: `${emergencyTarget.name} 님의 구조를 위해 상황실에서 요원을 현장 지대에 신속 조치하였습니다. 대화방에 정보가 영속 유지됩니다.`,
+                    timestamp: new Date().toISOString(),
+                    read: false
+                  },
+                  ...prev
+                ]);
+                setActiveTab('chat');
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white font-extrabold py-2.5 rounded-xl text-xs border border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition hover:shadow-none active:translate-y-0.5 cursor-pointer"
+            >
+              출동 상황 수락 등록
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. 하단 내비게이션 */}
+      <div className="bg-white border-t border-gray-100 px-1 flex justify-around items-center select-none z-40 shrink-0 pt-1.5 pb-3">
+        {([
+          { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); setSelectedPromiseId(null); } },
+          { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
+          { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
+          { id: 'friends' as const, Icon: Users, label: '친구', onClick: () => setActiveTab('friends') },
+          { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
+        ]).map(({ id, Icon, label, onClick }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={onClick}
+            className={`relative flex flex-col items-center justify-center gap-0.5 w-14 h-12 rounded-2xl transition-all ${
+              activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Icon className="w-5 h-5" />
+            <span className={`text-[10px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+            {id === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
+              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                {notifications.filter(n => !n.read).length}
+              </span>
+            )}
+            {id === 'appointments' && tempPromiseCoords && (
+              <span className="absolute top-1.5 right-2 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* A. 프로필 등록 모달 */}
+      {showProfileModal && (
+        <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
+          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl">
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
+            <h3 className="text-base font-bold text-gray-900">내 프로필 설정</h3>
+            <p className="text-sm text-gray-500">전화번호와 이름을 등록하면 그룹에 위치가 공유됩니다.</p>
+
+            <div className="space-y-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-600">휴대전화 번호</label>
+                <input
+                  type="text"
+                  placeholder="010-0000-0000"
+                  value={regPhone}
+                  onChange={(e) => setRegPhone(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 text-sm px-4 py-3 rounded-2xl focus:outline-none focus:border-rose-400 font-mono"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-600">실명</label>
+                <input
+                  type="text"
+                  placeholder="김민수"
+                  value={regRealName}
+                  onChange={(e) => setRegRealName(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 text-sm px-4 py-3 rounded-2xl focus:outline-none focus:border-rose-400"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-600">앱 내 닉네임</label>
+                <input
+                  type="text"
+                  placeholder="예: 애망민수"
+                  value={regAlias}
+                  onChange={(e) => setRegAlias(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 text-sm px-4 py-3 rounded-2xl focus:outline-none focus:border-rose-400"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(false)}
+                className="py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl text-sm font-semibold transition"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveProfile(regPhone, regRealName, regAlias)}
+                className="py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl text-sm font-semibold transition"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* C. 그룹 삭제 확인 모달 */}
+      {pendingDeleteRoomId && (
+        <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
+          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl">
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
+            <h3 className="text-base font-bold text-gray-900">그룹 삭제</h3>
+            <p className="text-sm text-gray-500 leading-relaxed">
+              이 작업은 취소할 수 없습니다. 삭제하려면 방 이름 <span className="font-semibold text-rose-600">"{rooms.find(r => r.id === pendingDeleteRoomId)?.name}"</span>을 정확히 입력하세요.
+            </p>
+            <input
+              type="text"
+              value={deleteRoomConfirmKey}
+              onChange={(e) => setDeleteRoomConfirmKey(e.target.value)}
+              placeholder="방 이름 입력..."
+              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-rose-400"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={cancelDeleteRoom}
+                className="py-3 bg-gray-100 hover:bg-gray-200 rounded-2xl text-sm font-semibold text-gray-700 transition"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteRoom}
+                disabled={deleteRoomConfirmKey !== rooms.find(r => r.id === pendingDeleteRoomId)?.name}
+                className="py-3 bg-rose-500 hover:bg-rose-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl text-sm font-semibold transition"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* B. Real-time caregiver bio heart rate ECG tracker diagnostics overlay */}
+      {isMeasuringHeartRate && measuringTarget && (
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 font-sans">
+          <div className="bg-slate-900 border-4 border-red-500 p-4 rounded-2xl w-full max-w-[290px] shadow-[4px_4px_0px_0px_rgba(239,68,68,0.4)] text-white animate-fadeIn">
+            <div className="flex justify-between items-center border-b border-zinc-800 pb-2 mb-3">
+              <h3 className="text-xs font-black text-red-500 animate-pulse flex items-center gap-1">
+                💓 원격 바이오 심박측정 진단
+              </h3>
+              <span className="text-[8px] bg-red-950 text-red-400 px-1.5 py-0.5 rounded font-black border border-red-900">
+                연결 중
+              </span>
+            </div>
+
+            <p className="text-[9.5px] text-zinc-400 font-bold mb-3">
+              - 측정 대상: <span className="text-white font-extrabold">{measuringTarget.name}</span> 님<br />
+              - 연결 경로: LTE-M 무선 원격 스마트 안심밴드 6
+            </p>
+
+            <div className="flex flex-col items-center py-4 relative">
+              {/* Spinning heart scanner circle */}
+              <div className="w-16 h-16 rounded-full bg-red-950/40 border-2 border-dashed border-red-500 flex items-center justify-center animate-spin duration-3000 my-2">
+                <span className="text-2xl select-none rotate-90 scale-90">🧬</span>
+              </div>
+              <span className="text-3xl absolute animate-bounce mt-1">❤️</span>
+
+              {/* Real-time Simulated EEG Green Graph Line */}
+              <div className="w-full h-8 bg-zinc-950 border border-zinc-800 rounded mt-3 relative overflow-hidden flex items-center justify-center">
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                  <path
+                    d={`M0,15 L20,15 L25,5 L30,25 L35,15 L50,15 L55,0 L60,30 L65,15 L100,15`}
+                    fill="none"
+                    stroke="#EF4444"
+                    strokeWidth="2"
+                    className="animate-pulse"
+                  />
+                </svg>
+                <span className="text-[7.5px] text-red-400 absolute bottom-0.5 right-1 animate-pulse font-mono font-bold">
+                  ECG LIVE SIGNAL
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 mt-2">
+              <div className="flex justify-between items-center text-[9.5px]">
+                <span className="text-zinc-500">지표 판독 주파수</span>
+                <span className="font-mono text-[#FACC15]">{measurementProgress}%</span>
+              </div>
+              <div className="w-full bg-zinc-800 h-2 border border-zinc-750 rounded-full overflow-hidden">
+                <div 
+                  className="bg-emerald-500 h-full transition-all duration-300"
+                  style={{ width: `${measurementProgress}%` }}
+                ></div>
+              </div>
+
+              {measuredBpm !== null ? (
+                <div className="p-2 bg-emerald-950/40 border border-emerald-950 rounded-lg text-center mt-3 animate-slideUp">
+                  <p className="text-[9.5px] text-emerald-400 font-bold leading-normal">
+                    ✅ 측정 진단 결과: <span className="font-black text-white">{measuredBpm} BPM</span>
+                  </p>
+                  <p className="text-[8px] text-zinc-400 font-medium leading-normal mt-0.5">
+                    동방 결절 자율 수치 안정적. 활력 지수 매우 정상입니다.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[8px] text-center text-zinc-500 italic mt-2 animate-pulse">
+                  손목 스마트센서 무선 데이터를 원격 판독 중입니다...
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              disabled={measurementProgress < 100}
+              onClick={() => {
+                setIsMeasuringHeartRate(false);
+                setMeasuringTarget(null);
+              }}
+              className={`w-full py-2 border-2 border-black rounded-xl text-xs font-black mt-4 transition cursor-pointer ${
+                measurementProgress < 100
+                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed border-zinc-700'
+                  : 'bg-red-600 border-red-500 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:shadow-none hover:translate-y-0.5'
+              }`}
+            >
+              {measurementProgress < 100 ? '측정 판독 중...' : '확인 완료'}
+            </button>
+          </div>
+        </div>
+      )}
+    </MobileFrame>
+  );
+}
