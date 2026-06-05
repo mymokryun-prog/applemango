@@ -226,17 +226,40 @@ export default function SchedulePanel({
     });
   };
 
-  // 약속 문자열에서 년, 월, 일 파싱: "2026년 6월 6일 오후 7:00"
+  // 약속 문자열에서 년, 월, 일 파싱: "2026년 6월 6일 오후 7:00" 및 ISO, 표준 포맷 대응
   const parseAppDate = (datetimeStr: string) => {
     if (!datetimeStr) return null;
-    const match = datetimeStr.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-    if (match) {
+    
+    // Korean format: "2026년 6월 6일 오후 7:00"
+    const koMatch = datetimeStr.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+    if (koMatch) {
       return {
-        year: parseInt(match[1], 10),
-        month: parseInt(match[2], 10),
-        day: parseInt(match[3], 10)
+        year: parseInt(koMatch[1], 10),
+        month: parseInt(koMatch[2], 10),
+        day: parseInt(koMatch[3], 10)
       };
     }
+
+    // ISO/Standard format: "2026-06-03 15:00" or "2026/06/03"
+    const isoMatch = datetimeStr.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (isoMatch) {
+      return {
+        year: parseInt(isoMatch[1], 10),
+        month: parseInt(isoMatch[2], 10),
+        day: parseInt(isoMatch[3], 10)
+      };
+    }
+
+    // Fallback: Date parse
+    const d = new Date(datetimeStr);
+    if (!isNaN(d.getTime())) {
+      return {
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        day: d.getDate()
+      };
+    }
+
     return null;
   };
 

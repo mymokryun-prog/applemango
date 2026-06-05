@@ -378,6 +378,41 @@ export default function App() {
     lng: 126.9242
   };
 
+  const isSyncingProfileRef = useRef(false);
+
+  const syncProfileWithServer = async () => {
+    if (isSyncingProfileRef.current) return;
+    isSyncingProfileRef.current = true;
+    const registered = localStorage.getItem('apmt_v3_registered') === 'true';
+    const phone = localStorage.getItem('aemang_phone');
+    const name = localStorage.getItem('aemang_name');
+    const nickname = localStorage.getItem('aemang_nickname');
+    const fruit = localStorage.getItem('aemang_fruit') || '🍎';
+
+    if (registered && phone && name && nickname) {
+      try {
+        const res = await fetch('/api/friends/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, realName: name, alias: nickname, avatar: fruit })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) {
+            localStorage.setItem('aemang_token', data.token);
+          }
+          await fetchAllStates(activeRoomId);
+        }
+      } catch (err) {
+        console.warn('Failed to sync profile on demand:', err);
+      } finally {
+        isSyncingProfileRef.current = false;
+      }
+    } else {
+      isSyncingProfileRef.current = false;
+    }
+  };
+
   // 1. Fetch data from Server
   const fetchAllStates = async (targetRoomId = activeRoomId) => {
     try {
@@ -396,9 +431,11 @@ export default function App() {
       if (friendsRes.ok) {
         const data = await friendsRes.json();
         setFriends(data);
-        // Realign if current profile is missing in the newly fetched list
-        if (data.length > 0 && !data.some((f: any) => f.id === activeProfileId)) {
-          setActiveProfileId(data[0].id);
+        
+        // 내 프로필이 친구 목록에 없다면 (서버 리셋 등), 백그라운드에서 동기화 진행
+        const registered = localStorage.getItem('apmt_v3_registered') === 'true';
+        if (registered && data.length > 0 && !data.some((f: any) => f.id === activeProfileId)) {
+          syncProfileWithServer();
         }
       }
       if (chatRes.ok) {
@@ -470,19 +507,24 @@ export default function App() {
     if (messages.length > prevMessagesCountRef.current) {
       const newMsg = messages[messages.length - 1];
       if (newMsg && !newMsg.isSystem && prevMessagesCountRef.current > 0) {
-        const avatar = newMsg.senderAvatar || '🍎';
-        const emojiMap: Record<string, string> = {
-          '🍎': '사과',
-          '🥭': '망고',
-          '👵': '할머니',
-          '🏠': '집',
-          '🍻': '맥주',
-          '💼': '회사',
-          '🟢': '초록',
-          '👤': '사람'
-        };
-        const nameToSpeak = emojiMap[avatar] || '애플망고';
-        speakText(`${nameToSpeak}${nameToSpeak}`);
+        // 방을 전환할 때 과거 메시지들이 스팸처럼 읽히는 것을 방지
+        const msgTime = new Date(newMsg.timestamp).getTime();
+        const isRecent = Date.now() - msgTime < 3000;
+        if (isRecent) {
+          const avatar = newMsg.senderAvatar || '🍎';
+          const emojiMap: Record<string, string> = {
+            '🍎': '사과',
+            '🥭': '망고',
+            '👵': '할머니',
+            '🏠': '집',
+            '🍻': '맥주',
+            '💼': '회사',
+            '🟢': '초록',
+            '👤': '사람'
+          };
+          const nameToSpeak = emojiMap[avatar] || '애플망고';
+          speakText(`${nameToSpeak}${nameToSpeak}`);
+        }
       }
     }
     prevMessagesCountRef.current = messages.length;
@@ -796,10 +838,11 @@ export default function App() {
 
   const handleSaveProfile = async (phone: string, realName: string, alias: string) => {
     try {
+      const avatar = localStorage.getItem('aemang_fruit') || '🍎';
       await fetch('/api/friends/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, realName, alias })
+        body: JSON.stringify({ phone, realName, alias, avatar })
       });
       localStorage.setItem('apmt_v3_registered', 'true');
       setShowOnboarding(false);

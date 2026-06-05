@@ -123,7 +123,12 @@ export default function MapComponent({
     // 경로 선
     friends.forEach(f => {
       if (!f.route || f.route.length < 2) return;
-      const poly = L.polyline(f.route as L.LatLngTuple[], {
+      const validRoute = f.route.filter(coord => 
+        coord && typeof coord[0] === 'number' && typeof coord[1] === 'number' && !isNaN(coord[0]) && !isNaN(coord[1])
+      );
+      if (validRoute.length < 2) return;
+      
+      const poly = L.polyline(validRoute as L.LatLngTuple[], {
         color: f.color,
         weight: selectedFriendId === f.id ? 4 : 2,
         opacity: selectedFriendId === f.id ? 0.85 : 0.4,
@@ -133,9 +138,13 @@ export default function MapComponent({
 
     // 약속 장소까지 실선 연결 (각 멤버의 색상 사용)
     appointments.forEach(app => {
+      if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
+      
       friends.forEach(f => {
         const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
         const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
+        
+        if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
         
         const line = L.polyline([[lat, lng], [app.lat, app.lng]] as L.LatLngTuple[], {
           color: f.color || '#3B82F6',
@@ -150,6 +159,8 @@ export default function MapComponent({
 
     // 약속 마커
     appointments.forEach(app => {
+      if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
+      
       const icon = L.divIcon({
         className: '',
         html: `<div style="display:flex;flex-direction:column;align-items:center">
@@ -165,7 +176,7 @@ export default function MapComponent({
     });
 
     // 임시 핀
-    if (tempPromiseCoords) {
+    if (tempPromiseCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
       const icon = L.divIcon({
         className: '',
         html: `<div style="display:flex;flex-direction:column;align-items:center;animation:bounce 1s infinite">
@@ -182,6 +193,7 @@ export default function MapComponent({
     friends.forEach(f => {
       // 내 실시간 GPS 마커가 지도 위에 표시되므로 중복 마커 방지를 위해 f.id === activeProfileId 이고 myGpsCoords가 있는 경우는 스킵
       if (f.id === activeProfileId && myGpsCoords) return;
+      if (typeof f.lat !== 'number' || typeof f.lng !== 'number' || isNaN(f.lat) || isNaN(f.lng)) return;
 
       const icon = L.divIcon({
         className: '',
@@ -216,7 +228,7 @@ export default function MapComponent({
   // ── 내 위치 프로필 모양 마커 업데이트 ────────────────────────────────────────
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map || !myGpsCoords) return;
+    if (!map || !myGpsCoords || typeof myGpsCoords[0] !== 'number' || typeof myGpsCoords[1] !== 'number' || isNaN(myGpsCoords[0]) || isNaN(myGpsCoords[1])) return;
 
     const myProfile = friends.find(f => f.id === activeProfileId) || {
       avatar: localStorage.getItem('aemang_fruit') || '🍎',
@@ -243,6 +255,7 @@ export default function MapComponent({
       // 기존에 circleMarker 등이 생성되어 있었다면 제거
       if (myMarkerRef.current) {
         myMarkerRef.current.remove();
+        myMarkerRef.current = null;
       }
       myMarkerRef.current = L.marker(myGpsCoords, {
         icon: L.divIcon({
