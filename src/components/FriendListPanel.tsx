@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Friend } from '../types';
-import { Search, UserPlus2, Check, UserX, Heart, Footprints, AlertTriangle, MapPin, Shield, ShieldOff } from 'lucide-react';
+import { Search, Check, UserX, Heart, Footprints, AlertTriangle, Shield, ShieldOff, UserPlus2, Phone, Loader2 } from 'lucide-react';
 
 interface FriendListPanelProps {
   friends: Friend[];
@@ -49,12 +49,13 @@ export default function FriendListPanel({
   onLeaveRoom,
   showDevControls = false,
 }: FriendListPanelProps) {
+  // 통합 검색 상태
   const [searchTerm, setSearchTerm] = useState('');
-  const [showInviteForm, setShowInviteForm] = useState(false);
-  const [inviteName, setInviteName] = useState('');
-  const [invitePhone, setInvitePhone] = useState('010-');
-  const [inviteEmoji, setInviteEmoji] = useState('👩');
-  const [inviteColor, setInviteColor] = useState('#EC4899');
+  const [searchResults, setSearchResults] = useState<Friend[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<Friend[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
   const [statusDraft, setStatusDraft] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -64,9 +65,10 @@ export default function FriendListPanel({
   const [geofenceRadiusInput, setGeofenceRadiusInput] = useState<Record<string, number>>({});
   const [savingGeofence, setSavingGeofence] = useState<string | null>(null);
 
-  const filteredFriends = friends.filter(f =>
+  const filteredFriends = showSearch ? [] : friends.filter(f =>
     f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (f.statusMsg || '').toLowerCase().includes(searchTerm.toLowerCase())
+    (f.statusMsg || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (f.phone || '').includes(searchTerm)
   );
 
   const formatPhoneInput = (value: string) => {
@@ -76,18 +78,51 @@ export default function FriendListPanel({
     return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
   };
 
-  const handleInviteSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteName.trim() || !invitePhone.trim()) return;
-    const phoneDigits = invitePhone.replace(/\D/g, '');
-    if (phoneDigits.length < 10) {
-      alert('올바른 전화번호를 입력해 주세요. (예: 010-1234-5678)');
+  // 통합 검색: 서버에서 이름/전화번호 검색
+  useEffect(() => {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    if (!showSearch || !searchTerm.trim()) {
+      setSearchResults([]);
+      setOnlineUsers([]);
       return;
     }
-    onInviteFriend(inviteName, inviteEmoji, inviteColor, invitePhone);
-    setInviteName('');
-    setInvitePhone('010-');
-    setShowInviteForm(false);
+    setIsSearching(true);
+    searchDebounce.current = setTimeout(async () => {
+      try {
+        const [userRes, onlineRes] = await Promise.all([
+          fetch(`/api/users/search?q=${encodeURIComponent(searchTerm)}`),
+          fetch('/api/users/online'),
+        ]);
+        const users = userRes.ok ? await userRes.json() : [];
+        const online = onlineRes.ok ? await onlineRes.json() : [];
+        const memberIds = new Set(friends.map(f => f.id));
+        setSearchResults(users.filter((u: any) => !memberIds.has(u.id)));
+        setOnlineUsers(online.filter((u: any) => !memberIds.has(u.id)));
+      } catch { /* 무시 */ }
+      finally { setIsSearching(false); }
+    }, 400);
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
+  }, [searchTerm, showSearch, friends]);
+
+  const handleInviteUser = (user: Friend) => {
+    const fruits = ['🍎', '🥭', '🍊', '🍋', '🍇', '🍓', '🫐', '🍑'];
+    const colors = ['#EF4444', '#F97316', '#EAB308', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899'];
+    const emoji = fruits[Math.floor(Math.random() * fruits.length)];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    onInviteFriend(user.name, emoji, color, user.phone || '');
+    setSearchTerm('');
+    setShowSearch(false);
+  };
+
+  const handleInviteByPhone = () => {
+    const phone = searchTerm.replace(/\D/g, '');
+    if (phone.length < 10) { alert('올바른 전화번호를 입력하세요 (예: 01012345678)'); return; }
+    const formatted = `${phone.slice(0,3)}-${phone.slice(3,7)}-${phone.slice(7)}`;
+    const fruits = ['🍎', '🥭', '🍊', '🍋', '🍇'];
+    const colors = ['#EF4444', '#F97316', '#EAB308', '#10B981', '#3B82F6'];
+    onInviteFriend('새 멤버', fruits[Math.floor(Math.random() * fruits.length)], colors[Math.floor(Math.random() * colors.length)], formatted);
+    setSearchTerm('');
+    setShowSearch(false);
   };
 
   const getHeartRateColor = (bpm: number) => {
@@ -130,70 +165,93 @@ export default function FriendListPanel({
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* 검색 + 초대 헤더 */}
-      <div className="px-4 pt-4 pb-3 space-y-3 border-b border-gray-100">
+      {/* 통합 검색 + 초대 헤더 */}
+      <div className="px-4 pt-4 pb-3 space-y-2 border-b border-gray-100">
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            {isSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400 animate-spin" />}
             <input
               type="text"
-              placeholder="이름 또는 상태 검색..."
+              placeholder={showSearch ? "이름 또는 전화번호로 검색..." : "멤버 이름/번호 검색..."}
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-2.5 pl-9 pr-3 text-sm focus:outline-none focus:border-rose-300 focus:bg-white transition"
+              onChange={e => setSearchTerm(e.target.value)}
+              onFocus={() => setShowSearch(true)}
+              className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-2.5 pl-9 pr-9 text-sm focus:outline-none focus:border-rose-300 focus:bg-white transition"
             />
           </div>
           <button
             type="button"
-            onClick={() => setShowInviteForm(!showInviteForm)}
-            className="flex items-center gap-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl px-4 py-2.5 text-sm font-semibold transition shadow-sm shrink-0"
+            onClick={() => { setShowSearch(!showSearch); setSearchTerm(''); }}
+            className={`flex items-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-semibold transition shadow-sm shrink-0 ${showSearch ? 'bg-gray-200 text-gray-700' : 'bg-rose-500 hover:bg-rose-600 text-white'}`}
           >
             <UserPlus2 className="w-4 h-4" />
-            <span>초대</span>
+            <span>{showSearch ? '닫기' : '초대'}</span>
           </button>
         </div>
 
-        {showInviteForm && (
-          <form onSubmit={handleInviteSubmit} className="bg-gray-50 rounded-2xl p-4 space-y-3 border border-gray-100">
-            <p className="text-xs font-bold text-gray-700">📱 전화번호로 초대</p>
-            <input
-              type="tel" required placeholder="010-1234-5678 (필수)"
-              value={invitePhone}
-              onChange={(e) => setInvitePhone(formatPhoneInput(e.target.value))}
-              className="w-full bg-white border border-gray-200 rounded-xl px-3 py-3 text-base focus:outline-none focus:border-rose-300 font-mono"
-              inputMode="numeric"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="text" required placeholder="이름 또는 닉네임"
-                value={inviteName} onChange={(e) => setInviteName(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-rose-300"
-              />
-              <select
-                value={inviteEmoji} onChange={(e) => setInviteEmoji(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none"
-              >
-                {AVATAR_OPTIONS.map(e => <option key={e} value={e}>{e}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">마커 색상 (선택)</span>
-              <div className="flex gap-1.5">
-                {COLOR_OPTIONS.map(c => (
-                  <button key={c} type="button" onClick={() => setInviteColor(c)}
-                    className={`w-5 h-5 rounded-full transition ${inviteColor === c ? 'ring-2 ring-offset-1 ring-gray-800 scale-110' : ''}`}
-                    style={{ backgroundColor: c }}
-                  />
+        {/* 통합 검색 결과 */}
+        {showSearch && (
+          <div className="space-y-1">
+            {searchTerm.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-2">
+                이름이나 전화번호를 입력해서 초대할 사람을 찾으세요
+              </p>
+            )}
+
+            {/* 검색 결과 (앱 등록 유저) */}
+            {searchResults.length > 0 && (
+              <div className="bg-blue-50 rounded-2xl p-2 space-y-1">
+                <p className="text-[10px] font-bold text-blue-500 px-2">앱 유저</p>
+                {searchResults.map(u => (
+                  <div key={u.id} className="flex items-center gap-2 bg-white rounded-xl px-3 py-2">
+                    <span className="text-xl">{u.avatar}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{u.name}</p>
+                      <p className="text-[11px] text-gray-400 font-mono">{u.phone}</p>
+                    </div>
+                    <button onClick={() => handleInviteUser(u)}
+                      className="bg-rose-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl shrink-0">
+                      초대
+                    </button>
+                  </div>
                 ))}
               </div>
-            </div>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setShowInviteForm(false)}
-                className="flex-1 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-600 font-medium">취소</button>
-              <button type="submit"
-                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-sm font-semibold transition">초대하기</button>
-            </div>
-          </form>
+            )}
+
+            {/* 현재 온라인 유저 */}
+            {onlineUsers.length > 0 && (
+              <div className="bg-emerald-50 rounded-2xl p-2 space-y-1">
+                <p className="text-[10px] font-bold text-emerald-600 px-2">🟢 지금 접속 중</p>
+                {onlineUsers.map(u => (
+                  <div key={u.id} className="flex items-center gap-2 bg-white rounded-xl px-3 py-2">
+                    <span className="text-xl">{u.avatar}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{u.name}</p>
+                      {u.phone && <p className="text-[11px] text-gray-400 font-mono">{u.phone}</p>}
+                    </div>
+                    <button onClick={() => handleInviteUser(u)}
+                      className="bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl shrink-0">
+                      초대
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 전화번호로 직접 초대 */}
+            {searchTerm.replace(/\D/g, '').length >= 7 && (
+              <button onClick={handleInviteByPhone}
+                className="w-full flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-2xl px-4 py-3 text-sm text-rose-700 font-semibold hover:bg-rose-100 transition">
+                <Phone className="w-4 h-4 shrink-0" />
+                <span>{searchTerm} 번호로 초대하기</span>
+              </button>
+            )}
+
+            {searchTerm.length > 1 && searchResults.length === 0 && onlineUsers.length === 0 && searchTerm.replace(/\D/g, '').length < 7 && (
+              <p className="text-center text-xs text-gray-400 py-2">검색 결과가 없습니다</p>
+            )}
+          </div>
         )}
       </div>
 

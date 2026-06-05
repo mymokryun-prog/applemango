@@ -803,6 +803,45 @@ async function startServer() {
     });
   }));
 
+  // 현재 온라인 유저 목록
+  app.get('/api/users/online', (req, res) => {
+    const onlineIds = new Set(Object.values(socketUsers).map(u => u.userId));
+    const profiles: any[] = [];
+    const seen = new Set<string>();
+    for (const uid of onlineIds) {
+      if (seen.has(uid)) continue;
+      seen.add(uid);
+      for (const room of Object.values(dbRooms)) {
+        if (room.friends[uid]) {
+          profiles.push({ ...room.friends[uid], isOnline: true });
+          break;
+        }
+      }
+    }
+    res.json(profiles);
+  });
+
+  // 전화번호/이름으로 사용자 검색
+  app.get('/api/users/search', (req, res) => {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    if (!q) return res.json([]);
+    const results: any[] = [];
+    const seen = new Set<string>();
+    for (const room of Object.values(dbRooms)) {
+      for (const user of Object.values(room.friends) as any[]) {
+        if (seen.has(user.id)) continue;
+        const nameMatch = (user.name || '').toLowerCase().includes(q);
+        const phoneMatch = (user.phone || '').replace(/-/g, '').includes(q.replace(/-/g, ''));
+        const aliasMatch = (user.alias || '').toLowerCase().includes(q);
+        if (nameMatch || phoneMatch || aliasMatch) {
+          seen.add(user.id);
+          results.push(user);
+        }
+      }
+    }
+    res.json(results.slice(0, 10));
+  });
+
   // 장소 검색 — OpenStreetMap Nominatim (API 키 불필요)
   app.get('/api/places/search', async (req, res) => {
     const q = String(req.query.q || '').trim();

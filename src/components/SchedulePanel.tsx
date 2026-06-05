@@ -43,11 +43,13 @@ export default function SchedulePanel({
 }: SchedulePanelProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<PlaceResult[]>(LOCAL_PLACES);
+  const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [confirmedPlace, setConfirmedPlace] = useState<PlaceResult | null>(null);
   const [title, setTitle] = useState('');
-  const [datetime, setDatetime] = useState('');
+  // 날짜/시간 picker 상태
+  const [dateValue, setDateValue] = useState(() => new Date().toISOString().slice(0, 10));
+  const [timeValue, setTimeValue] = useState('19:00');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -55,12 +57,27 @@ export default function SchedulePanel({
   const [editingAppId, setEditingAppId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editPlaceName, setEditPlaceName] = useState('');
-  const [editDatetime, setEditDatetime] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
   const [editLat, setEditLat] = useState(37.5568);
   const [editLng, setEditLng] = useState(126.9238);
   const [editSearchQuery, setEditSearchQuery] = useState('');
   const [editResults, setEditResults] = useState<PlaceResult[]>([]);
   const [isEditSearching, setIsEditSearching] = useState(false);
+
+  // 날짜+시간 → 한국어 포맷 변환
+  const formatKoreanDatetime = (date: string, time: string) => {
+    if (!date) return '시간 조율 중';
+    const d = new Date(`${date}T${time || '00:00'}`);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hour = d.getHours();
+    const min = d.getMinutes();
+    const ampm = hour < 12 ? '오전' : '오후';
+    const h = hour % 12 || 12;
+    return `${year}년 ${month}월 ${day}일 ${ampm} ${h}:${String(min).padStart(2, '0')}`;
+  };
 
   // 실시간 장소 검색 (디바운스 600ms)
   useEffect(() => {
@@ -154,9 +171,11 @@ export default function SchedulePanel({
     e.preventDefault();
     if (!title.trim() || !coordsReady) return;
     setIsSubmitting(true);
-    onCreateAppointment(title, finalPlaceName!, datetime || '시간 조율 중', finalLat, finalLng);
+    const formattedDatetime = formatKoreanDatetime(dateValue, timeValue);
+    onCreateAppointment(title, finalPlaceName!, formattedDatetime, finalLat, finalLng);
     setTitle('');
-    setDatetime('');
+    setDateValue(new Date().toISOString().slice(0, 10));
+    setTimeValue('19:00');
     setSearchQuery('');
     setConfirmedPlace(null);
     setStep(1);
@@ -164,21 +183,22 @@ export default function SchedulePanel({
     setIsSubmitting(false);
   };
 
-  const handleSaveEdit = (id: string) => {
-    if (onUpdateAppointment) {
-      onUpdateAppointment(id, editTitle, editPlaceName, editLat, editLng, editDatetime);
-    }
-    setEditingAppId(null);
-  };
-
   const resetForm = () => {
     setStep(1);
     setSearchQuery('');
     setConfirmedPlace(null);
     setTitle('');
-    setDatetime('');
     onClearTempCoords();
   };
+
+  const handleSaveEdit = (id: string) => {
+    if (onUpdateAppointment) {
+      const dt = editDate ? formatKoreanDatetime(editDate, editTime) : '시간 조율 중';
+      onUpdateAppointment(id, editTitle, editPlaceName, editLat, editLng, dt);
+    }
+    setEditingAppId(null);
+  };
+
 
   return (
     <div className="flex flex-col h-full bg-white overflow-y-auto">
@@ -243,6 +263,9 @@ export default function SchedulePanel({
 
                 {/* 검색 결과 */}
                 <div className="mt-2 space-y-1 max-h-56 overflow-y-auto">
+                  {!searchQuery && (
+                    <p className="text-center text-xs text-gray-400 py-6">🔍 장소명이나 주소를 입력하세요<br/><span className="opacity-60">예: 강남역, 홍대 카페, 스타벅스</span></p>
+                  )}
                   {searchResults.length === 0 && !isSearching && searchQuery && (
                     <p className="text-center text-xs text-gray-400 py-4">검색 결과가 없습니다</p>
                   )}
@@ -294,13 +317,27 @@ export default function SchedulePanel({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-600">날짜 및 시간</label>
-                <input
-                  type="text" value={datetime}
-                  onChange={(e) => setDatetime(e.target.value)}
-                  placeholder="예) 오늘 저녁 7:30, 이번 주 토요일 2시"
-                  className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400"
-                />
+                <label className="text-xs font-semibold text-gray-600">📅 날짜 및 시간</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={dateValue}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setDateValue(e.target.value)}
+                    className="bg-white border border-gray-200 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-400"
+                  />
+                  <input
+                    type="time"
+                    value={timeValue}
+                    onChange={e => setTimeValue(e.target.value)}
+                    className="bg-white border border-gray-200 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                {dateValue && (
+                  <p className="text-[11px] text-amber-600 font-semibold px-1">
+                    {formatKoreanDatetime(dateValue, timeValue)}
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-2 pt-1">
@@ -417,7 +454,8 @@ export default function SchedulePanel({
                       setEditingAppId(app.id);
                       setEditTitle(app.title);
                       setEditPlaceName(app.placeName);
-                      setEditDatetime(app.datetime);
+                      setEditDate(new Date().toISOString().slice(0, 10));
+                      setEditTime('19:00');
                       setEditLat(app.lat);
                       setEditLng(app.lng);
                       setEditSearchQuery('');
@@ -461,8 +499,12 @@ export default function SchedulePanel({
 
                     <input type="text" value={editPlaceName} onChange={e => setEditPlaceName(e.target.value)}
                       placeholder="장소 주소" className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
-                    <input type="text" value={editDatetime} onChange={e => setEditDatetime(e.target.value)}
-                      placeholder="날짜 및 시간" className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
+                        className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                      <input type="time" value={editTime} onChange={e => setEditTime(e.target.value)}
+                        className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                    </div>
 
                     <div className="flex gap-2 pt-1">
                       <button type="button" onClick={() => setEditingAppId(null)}

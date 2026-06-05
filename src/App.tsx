@@ -10,9 +10,10 @@ import ChatRoom from './components/ChatRoom';
 import SchedulePanel from './components/SchedulePanel';
 import FriendListPanel from './components/FriendListPanel';
 import NotificationPanel from './components/NotificationPanel';
+import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Users, Bell, RefreshCw } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList } from 'lucide-react';
 import {
   queueOfflineAction,
   getOutboxCount,
@@ -39,7 +40,7 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'map' | 'chat' | 'appointments' | 'friends' | 'notifications'>('map');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications'>('rooms');
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -59,11 +60,11 @@ export default function App() {
   const [newRoomType, setNewRoomType] = useState<'friends' | 'family' | 'work' | 'care' | 'custom'>('friends');
   const [newRoomTrackingStyle, setNewRoomTrackingStyle] = useState<'continuous' | 'temporary'>('temporary');
 
-  // Interactive user registration states ("핸펀번호, 이름, 가명")
+  // Interactive user registration states — localStorage에서 기존 정보 불러오기
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [regPhone, setRegPhone] = useState('010-1234-5678');
-  const [regRealName, setRegRealName] = useState('김민수');
-  const [regAlias, setRegAlias] = useState('애플망고');
+  const [regPhone, setRegPhone] = useState(() => localStorage.getItem('aemang_phone') || '');
+  const [regRealName, setRegRealName] = useState(() => localStorage.getItem('aemang_name') || '');
+  const [regAlias, setRegAlias] = useState(() => localStorage.getItem('aemang_nickname') || '');
 
   const [recentCreatedRoomName, setRecentCreatedRoomName] = useState<string | null>(null);
   const [pendingDeleteRoomId, setPendingDeleteRoomId] = useState<string | null>(null);
@@ -1042,16 +1043,16 @@ export default function App() {
             >
               <span style={{ fontSize: 16 }}>🗑</span>
             </button>
-            {/* 방 생성 버튼 */}
+            {/* 방 생성 버튼 → 그룹방 탭으로 이동 */}
             <button
               type="button"
-              onClick={() => { setIsCreatingRoom(!isCreatingRoom); setIsRoomEditMode(false); }}
-              style={{ backgroundColor: isCreatingRoom ? '#374151' : '#fb923c', minWidth: 32, minHeight: 32 }}
+              onClick={() => { setActiveTab('rooms'); setIsCreatingRoom(false); setIsRoomEditMode(false); }}
+              style={{ backgroundColor: '#fb923c', minWidth: 32, minHeight: 32 }}
               className="w-8 h-8 rounded-full flex items-center justify-center transition shadow-sm"
-              title="새 그룹 만들기"
+              title="그룹방 목록"
             >
               <span className="text-white font-bold" style={{ fontSize: 20, lineHeight: 1 }}>
-                {isCreatingRoom ? '×' : '+'}
+                +
               </span>
             </button>
           </div>
@@ -1196,6 +1197,26 @@ export default function App() {
 
       {/* 2. Main Selected Dynamic Content Area */}
       <div className="flex-1 relative overflow-hidden flex flex-col bg-amber-50/20">
+        {activeTab === 'rooms' && (
+          <GroupRoomsPanel
+            rooms={rooms}
+            activeRoomId={activeRoomId}
+            activeProfileId={activeProfileId}
+            messages={messages.map(m => ({ roomId: activeRoomId, text: m.text, timestamp: m.timestamp }))}
+            onSelectRoom={(roomId) => {
+              setActiveRoomId(roomId);
+              setSelectedFriendId(null);
+              setSelectedPromiseId(null);
+              setActiveTab('chat');
+            }}
+            onCreateRoom={handleCreateRoom}
+            onDeleteRoom={(roomId) => {
+              setPendingDeleteRoomId(roomId);
+              setDeleteRoomConfirmKey('');
+            }}
+          />
+        )}
+
         {activeTab === 'map' && (
           <MapComponent
             friends={friends}
@@ -1242,15 +1263,13 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'friends' && (
+        {/* 채팅방 내 멤버 관리: 채팅 탭 하단 버튼으로 접근 가능 */}
+        {activeTab === 'chat' && false && (
           <FriendListPanel
             friends={friends}
             activeProfileId={activeProfileId}
             selectedFriendId={selectedFriendId}
-            onSelectFriend={(id) => {
-              setSelectedFriendId(id);
-              if (id) setActiveTab('map');
-            }}
+            onSelectFriend={(id) => { setSelectedFriendId(id); if (id) setActiveTab('map'); }}
             onInviteFriend={handleInviteFriend}
             onDeleteFriend={handleDeleteFriend}
             onManualMoveFriend={handleManualMoveFriend}
@@ -1401,12 +1420,12 @@ export default function App() {
       )}
 
       {/* 3. 하단 내비게이션 */}
-      <div className="bg-white border-t border-gray-100 px-1 flex justify-around items-center select-none z-40 shrink-0 pt-1.5 pb-3">
+      <div className="bg-white border-t border-gray-100 px-1 flex justify-around items-center select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
         {([
+          { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
           { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); setSelectedPromiseId(null); } },
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
-          { id: 'friends' as const, Icon: Users, label: '친구', onClick: () => setActiveTab('friends') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
         ]).map(({ id, Icon, label, onClick }) => (
           <button

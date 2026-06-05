@@ -25,7 +25,8 @@
       "Bash(git commit -m '빌드 도구를 dependencies로 이동 \\(Render 배포 수정\\) *)",
       "Bash(git commit -m '데모 데이터 전체 제거 + 실제 유저 ID 시스템 *)",
       "Bash(git commit -m '서비스워커 캐시 v3으로 강제 갱신 + 네트워크 우선 전략 *)",
-      "Bash(git commit -m '카카오맵 → Leaflet+VWorld/CartoDB 전환 \\(API 키 불필요\\) *)"
+      "Bash(git commit -m '카카오맵 → Leaflet+VWorld/CartoDB 전환 \\(API 키 불필요\\) *)",
+      "Bash(git commit -m 'leaflet 패키지 dependencies 추가 \\(빌드 오류 수정\\) *)"
     ]
   }
 }

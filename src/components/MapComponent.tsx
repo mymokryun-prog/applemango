@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import { Friend, Appointment } from '../types';
-import { Search, Loader2, X, MapPin } from 'lucide-react';
+import { Search, Loader2, X, MapPin, Crosshair } from 'lucide-react';
 
 interface MapComponentProps {
   friends: Friend[];
@@ -55,6 +55,7 @@ export default function MapComponent({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerGroupRef = useRef<L.LayerGroup | null>(null);
   const polyGroupRef = useRef<L.LayerGroup | null>(null);
+  const myMarkerRef = useRef<L.CircleMarker | null>(null);
 
   const [mapSearch, setMapSearch] = useState('');
   const [mapResults, setMapResults] = useState<PlaceResult[]>([]);
@@ -192,6 +193,26 @@ export default function MapComponent({
     }
   }, [selectedFriendId, selectedPromiseId, tempPromiseCoords]);
 
+  // ── 내 위치 파란 점 마커 업데이트 ────────────────────────────────────────
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !myGpsCoords) return;
+
+    if (myMarkerRef.current) {
+      myMarkerRef.current.setLatLng(myGpsCoords);
+    } else {
+      myMarkerRef.current = L.circleMarker(myGpsCoords, {
+        radius: 9,
+        fillColor: '#3B82F6',
+        color: '#fff',
+        weight: 3,
+        fillOpacity: 1,
+        pane: 'markerPane',
+      }).addTo(map);
+      myMarkerRef.current.bindTooltip('내 위치', { direction: 'top', permanent: false });
+    }
+  }, [myGpsCoords]);
+
   // ── 최초 GPS 이동 ────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -200,6 +221,13 @@ export default function MapComponent({
     map.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
     onMyGpsCentered?.();
   }, [myGpsCoords, centerOnMyGpsOnce]);
+
+  // ── 내 위치로 이동 버튼 핸들러 ───────────────────────────────────────────
+  const handleGoToMyLocation = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !myGpsCoords) return;
+    map.flyTo(myGpsCoords, 17, { animate: true, duration: 0.8 });
+  }, [myGpsCoords]);
 
   // ── 장소 검색 (Nominatim) ────────────────────────────────────────────────
   useEffect(() => {
@@ -273,6 +301,18 @@ export default function MapComponent({
           </div>
         )}
       </div>
+
+      {/* 내 위치 버튼 */}
+      {myGpsCoords && (
+        <button
+          type="button"
+          onClick={handleGoToMyLocation}
+          className="absolute bottom-14 right-3 z-30 w-10 h-10 bg-white border-2 border-gray-200 rounded-full shadow-md flex items-center justify-center hover:bg-blue-50 hover:border-blue-300 transition"
+          title="내 위치로 이동"
+        >
+          <Crosshair className="w-5 h-5 text-blue-500" />
+        </button>
+      )}
 
       {/* 안내 뱃지 */}
       <div className="absolute bottom-4 left-4 bg-yellow-400 text-slate-950 font-black border-2 border-black text-[9.5px] px-3 py-2 rounded-xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] z-20 pointer-events-none flex items-center gap-1.5">
