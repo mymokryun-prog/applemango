@@ -55,7 +55,7 @@ export default function MapComponent({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerGroupRef = useRef<L.LayerGroup | null>(null);
   const polyGroupRef = useRef<L.LayerGroup | null>(null);
-  const myMarkerRef = useRef<L.CircleMarker | null>(null);
+  const myMarkerRef = useRef<L.Marker | L.CircleMarker | null>(null);
 
   const [mapSearch, setMapSearch] = useState('');
   const [mapResults, setMapResults] = useState<PlaceResult[]>([]);
@@ -131,6 +131,23 @@ export default function MapComponent({
       pg.addLayer(poly);
     });
 
+    // 약속 장소까지 실선 연결 (각 멤버의 색상 사용)
+    appointments.forEach(app => {
+      friends.forEach(f => {
+        const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
+        const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
+        
+        const line = L.polyline([[lat, lng], [app.lat, app.lng]] as L.LatLngTuple[], {
+          color: f.color || '#3B82F6',
+          weight: selectedFriendId === f.id ? 4 : 2.5,
+          opacity: selectedFriendId === f.id ? 0.9 : 0.6,
+          dashArray: 'none', // 실선
+        });
+        line.bindTooltip(`${f.name} → 약속 장소`, { direction: 'top', sticky: true });
+        pg.addLayer(line);
+      });
+    });
+
     // 약속 마커
     appointments.forEach(app => {
       const icon = L.divIcon({
@@ -163,6 +180,9 @@ export default function MapComponent({
 
     // 친구 마커
     friends.forEach(f => {
+      // 내 실시간 GPS 마커가 지도 위에 표시되므로 중복 마커 방지를 위해 f.id === activeProfileId 이고 myGpsCoords가 있는 경우는 스킵
+      if (f.id === activeProfileId && myGpsCoords) return;
+
       const icon = L.divIcon({
         className: '',
         html: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
@@ -193,25 +213,49 @@ export default function MapComponent({
     }
   }, [selectedFriendId, selectedPromiseId, tempPromiseCoords]);
 
-  // ── 내 위치 파란 점 마커 업데이트 ────────────────────────────────────────
+  // ── 내 위치 프로필 모양 마커 업데이트 ────────────────────────────────────────
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !myGpsCoords) return;
 
-    if (myMarkerRef.current) {
-      myMarkerRef.current.setLatLng(myGpsCoords);
+    const myProfile = friends.find(f => f.id === activeProfileId) || {
+      avatar: localStorage.getItem('aemang_fruit') || '🍎',
+      color: '#EF4444',
+      name: '나'
+    };
+
+    const myHtml = `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+      <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1)">
+        ${myProfile.avatar}
+        <div style="position:absolute;bottom:-4px;right:-7px;background:#3B82F6;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;border:1px solid #111">내 위치</div>
+      </div>
+    </div>`;
+
+    if (myMarkerRef.current && 'setIcon' in myMarkerRef.current) {
+      (myMarkerRef.current as L.Marker).setLatLng(myGpsCoords);
+      (myMarkerRef.current as L.Marker).setIcon(L.divIcon({
+        className: '',
+        html: myHtml,
+        iconSize: [36, 42],
+        iconAnchor: [18, 36],
+      }));
     } else {
-      myMarkerRef.current = L.circleMarker(myGpsCoords, {
-        radius: 9,
-        fillColor: '#3B82F6',
-        color: '#fff',
-        weight: 3,
-        fillOpacity: 1,
+      // 기존에 circleMarker 등이 생성되어 있었다면 제거
+      if (myMarkerRef.current) {
+        myMarkerRef.current.remove();
+      }
+      myMarkerRef.current = L.marker(myGpsCoords, {
+        icon: L.divIcon({
+          className: '',
+          html: myHtml,
+          iconSize: [36, 42],
+          iconAnchor: [18, 36],
+        }),
         pane: 'markerPane',
-      }).addTo(map);
+      }).addTo(map) as any;
       myMarkerRef.current.bindTooltip('내 위치', { direction: 'top', permanent: false });
     }
-  }, [myGpsCoords]);
+  }, [myGpsCoords, friends, activeProfileId]);
 
   // ── 최초 GPS 이동 ────────────────────────────────────────────────────────
   useEffect(() => {

@@ -13,7 +13,7 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings } from 'lucide-react';
 import {
   queueOfflineAction,
   getOutboxCount,
@@ -65,6 +65,11 @@ export default function App() {
   const [regPhone, setRegPhone] = useState(() => localStorage.getItem('aemang_phone') || '');
   const [regRealName, setRegRealName] = useState(() => localStorage.getItem('aemang_name') || '');
   const [regAlias, setRegAlias] = useState(() => localStorage.getItem('aemang_nickname') || '');
+
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isSoundEnabled, setIsSoundEnabled] = useState(() => {
+    return localStorage.getItem('aemang_sound_enabled') !== 'false';
+  });
 
   const [recentCreatedRoomName, setRecentCreatedRoomName] = useState<string | null>(null);
   const [pendingDeleteRoomId, setPendingDeleteRoomId] = useState<string | null>(null);
@@ -440,6 +445,60 @@ export default function App() {
   useEffect(() => {
     hasCenteredOnGpsRef.current = false;
   }, [activeRoomId]);
+
+  // SpeechSynthesis 아기목소리 헬퍼 함수
+  const speakText = useCallback((text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis || !isSoundEnabled) return;
+    
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ko-KR';
+    utterance.pitch = 1.8; // 높은 톤 (아기 목소리)
+    utterance.rate = 1.4;  // 빠르게 말함
+
+    const voices = window.speechSynthesis.getVoices();
+    const koVoice = voices.find(v => v.lang.includes('KO') || v.lang.includes('ko'));
+    if (koVoice) {
+      utterance.voice = koVoice;
+    }
+    window.speechSynthesis.speak(utterance);
+  }, [isSoundEnabled]);
+
+  // 새 채팅 메시지 감지 시 TTS 말하기
+  const prevMessagesCountRef = useRef(0);
+  useEffect(() => {
+    if (messages.length > prevMessagesCountRef.current) {
+      const newMsg = messages[messages.length - 1];
+      if (newMsg && !newMsg.isSystem && prevMessagesCountRef.current > 0) {
+        const avatar = newMsg.senderAvatar || '🍎';
+        const emojiMap: Record<string, string> = {
+          '🍎': '사과',
+          '🥭': '망고',
+          '👵': '할머니',
+          '🏠': '집',
+          '🍻': '맥주',
+          '💼': '회사',
+          '🟢': '초록',
+          '👤': '사람'
+        };
+        const nameToSpeak = emojiMap[avatar] || '애플망고';
+        speakText(`${nameToSpeak}${nameToSpeak}`);
+      }
+    }
+    prevMessagesCountRef.current = messages.length;
+  }, [messages, speakText]);
+
+  // 새 알림 감지 시 TTS "알림" 말하기
+  const prevNotificationsCountRef = useRef(0);
+  useEffect(() => {
+    if (notifications.length > prevNotificationsCountRef.current) {
+      const latestNotif = notifications[0];
+      if (latestNotif && !latestNotif.read && prevNotificationsCountRef.current > 0) {
+        speakText('알림');
+      }
+    }
+    prevNotificationsCountRef.current = notifications.length;
+  }, [notifications, speakText]);
 
   // Handle dial timing simulation
   useEffect(() => {
@@ -1033,6 +1092,15 @@ export default function App() {
             >
               {(() => { const f = localStorage.getItem('aemang_fruit'); return f || activeProfile?.avatar || '👤'; })()}
             </button>
+            {/* 설정 버튼 */}
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base border border-gray-200"
+              title="설정"
+            >
+              <Settings className="w-4 h-4 text-gray-500" />
+            </button>
             {/* 방 삭제 버튼 — + 버튼 옆에 나란히 */}
             <button
               type="button"
@@ -1245,6 +1313,7 @@ export default function App() {
             trackingStyle={rooms.find(r => r.id === activeRoomId)?.trackingStyle || 'temporary'}
             onDisbandRoom={() => handleDisbandRoom(activeRoomId)}
             onAcceptInvite={handleAcceptInvite}
+            onInviteFriend={handleInviteFriend}
             roomId={activeRoomId}
           />
         )}
@@ -1449,6 +1518,71 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {/* B. 설정 모달 */}
+      {showSettingsModal && (
+        <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
+          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl">
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
+            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-rose-500 animate-spin-slow" />
+              <span>설정</span>
+            </h3>
+            <p className="text-xs text-gray-500">앱 알림 소리 켜기/끄기 및 방 탈퇴 등 환경설정입니다.</p>
+
+            <div className="space-y-4 py-2 border-t border-b border-gray-100">
+              <div className="flex items-center justify-between pb-1">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">소리 알림</p>
+                  <p className="text-[11px] text-gray-400">채팅 및 알림 시 아기 목소리로 읽어줍니다</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = !isSoundEnabled;
+                    setIsSoundEnabled(nextVal);
+                    localStorage.setItem('aemang_sound_enabled', String(nextVal));
+                  }}
+                  className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-200 ${
+                    isSoundEnabled ? 'bg-rose-500' : 'bg-gray-200'
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${
+                      isSoundEnabled ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">현재 그룹방 나가기</p>
+                  <p className="text-[11px] text-gray-400">이 안심 모임그룹방에서 즉시 탈퇴합니다</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsModal(false);
+                    handleLeaveRoom();
+                  }}
+                  className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                >
+                  탈퇴하기
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(false)}
+              className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl text-sm font-semibold transition"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* A. 프로필 등록 모달 */}
       {showProfileModal && (

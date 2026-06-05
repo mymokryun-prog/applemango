@@ -199,6 +199,62 @@ export default function SchedulePanel({
     setEditingAppId(null);
   };
 
+  // --- 달력 및 약속 파싱 상태 ---
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth() + 1); // 1-12
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<number | null>(null);
+
+  const handlePrevMonth = () => {
+    setSelectedCalendarDay(null);
+    setCurrentMonth(prev => {
+      if (prev === 1) {
+        setCurrentYear(y => y - 1);
+        return 12;
+      }
+      return prev - 1;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setSelectedCalendarDay(null);
+    setCurrentMonth(prev => {
+      if (prev === 12) {
+        setCurrentYear(y => y + 1);
+        return 1;
+      }
+      return prev + 1;
+    });
+  };
+
+  // 약속 문자열에서 년, 월, 일 파싱: "2026년 6월 6일 오후 7:00"
+  const parseAppDate = (datetimeStr: string) => {
+    if (!datetimeStr) return null;
+    const match = datetimeStr.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+    if (match) {
+      return {
+        year: parseInt(match[1], 10),
+        month: parseInt(match[2], 10),
+        day: parseInt(match[3], 10)
+      };
+    }
+    return null;
+  };
+
+  const getDaysInMonth = (year: number, month: number) => {
+    return new Date(year, month, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (year: number, month: number) => {
+    return new Date(year, month - 1, 1).getDay();
+  };
+
+  const getAppsForDay = (day: number) => {
+    return appointments.filter(app => {
+      const parsed = parseAppDate(app.datetime);
+      return parsed && parsed.year === currentYear && parsed.month === currentMonth && parsed.day === day;
+    });
+  };
+
 
   return (
     <div className="flex flex-col h-full bg-white overflow-y-auto">
@@ -357,6 +413,129 @@ export default function SchedulePanel({
             </form>
           )}
         </div>
+      </div>
+
+      {/* 월별 약속 달력 */}
+      <div className="mx-4 my-2 bg-slate-50 border-2 border-black rounded-3xl p-4 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] select-none font-sans">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-black text-gray-900 flex items-center gap-1.5">
+            <span className="text-sm">📅</span>
+            <span>약속 달력</span>
+          </h3>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              className="w-6 h-6 border-2 border-black rounded-lg bg-white flex items-center justify-center font-bold text-xs hover:bg-gray-100 active:translate-y-0.5 transition shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
+            >
+              &lt;
+            </button>
+            <span className="text-[11px] font-black text-slate-800">
+              {currentYear}년 {currentMonth}월
+            </span>
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              className="w-6 h-6 border-2 border-black rounded-lg bg-white flex items-center justify-center font-bold text-xs hover:bg-gray-100 active:translate-y-0.5 transition shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
+            >
+              &gt;
+            </button>
+          </div>
+        </div>
+
+        {/* 요일 헤더 */}
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-gray-500 border-b border-gray-250 pb-1.5 mb-1.5">
+          <span className="text-red-500">일</span>
+          <span>월</span>
+          <span>화</span>
+          <span>수</span>
+          <span>목</span>
+          <span>금</span>
+          <span className="text-blue-500">토</span>
+        </div>
+
+        {/* 일자 그리드 */}
+        <div className="grid grid-cols-7 gap-1.5">
+          {Array.from({ length: getFirstDayOfMonth(currentYear, currentMonth) }).map((_, i) => (
+            <div key={`empty-${i}`} />
+          ))}
+          {Array.from({ length: getDaysInMonth(currentYear, currentMonth) }).map((_, i) => {
+            const day = i + 1;
+            const dayApps = getAppsForDay(day);
+            const hasApp = dayApps.length > 0;
+            const isToday = new Date().getFullYear() === currentYear &&
+                            new Date().getMonth() + 1 === currentMonth &&
+                            new Date().getDate() === day;
+            
+            const isSelected = selectedCalendarDay === day;
+
+            return (
+              <button
+                key={`day-${day}`}
+                type="button"
+                onClick={() => {
+                  if (hasApp) {
+                    setSelectedCalendarDay(isSelected ? null : day);
+                  }
+                }}
+                className={`relative h-8 w-full rounded-xl flex flex-col items-center justify-center text-[11px] font-bold border transition ${
+                  hasApp
+                    ? isSelected
+                      ? 'bg-rose-500 text-white border-2 border-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] font-black scale-110'
+                      : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-black cursor-pointer'
+                    : isToday
+                      ? 'bg-blue-50 text-blue-600 border-blue-200'
+                      : 'bg-white border-gray-100 hover:bg-gray-50'
+                }`}
+              >
+                <span>{day}</span>
+                {hasApp && !isSelected && (
+                  <span className="absolute bottom-0.5 w-1 h-1 bg-rose-500 rounded-full" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 선택한 날짜의 약속 상세 */}
+        {selectedCalendarDay !== null && (
+          <div className="mt-3.5 p-3 bg-amber-50 border-2 border-black rounded-2xl space-y-2">
+            <div className="flex items-center justify-between border-b border-amber-200 pb-1.5">
+              <span className="text-[10px] font-black text-amber-900">
+                📌 {currentMonth}월 {selectedCalendarDay}일 약속 ({getAppsForDay(selectedCalendarDay).length}개)
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedCalendarDay(null)}
+                className="text-[10px] text-amber-500 hover:text-amber-700 font-bold cursor-pointer"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-32 overflow-y-auto">
+              {getAppsForDay(selectedCalendarDay).map(app => (
+                <div key={app.id} className="text-[10px] text-gray-800 flex items-start gap-1">
+                  <span className="text-amber-500 shrink-0">🚩</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-extrabold text-slate-900 truncate">{app.title}</p>
+                    <p className="text-[9px] text-gray-500 leading-tight truncate">
+                      📍 {app.placeName} · 🕒 {app.datetime.split('오')[1] ? '오' + app.datetime.split('오')[1] : app.datetime}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onFocusLocation(app.lat, app.lng);
+                    }}
+                    className="text-[9px] bg-white border border-gray-300 px-1.5 py-0.5 rounded font-semibold text-gray-500 shrink-0 hover:border-black hover:text-black transition cursor-pointer"
+                  >
+                    이동
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 약속 목록 */}

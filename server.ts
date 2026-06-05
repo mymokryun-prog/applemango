@@ -395,6 +395,17 @@ function syncUserAllRooms(userId: string, lat: number, lng: number, statusMsg?: 
   });
 }
 
+// 사용자 프로필 찾기 헬퍼
+function findUserProfile(userId: string): any {
+  for (const roomId of Object.keys(dbRooms)) {
+    const room = dbRooms[roomId];
+    if (room.friends[userId]) {
+      return room.friends[userId];
+    }
+  }
+  return null;
+}
+
 /** Last GPS sample per room+friend — used for speed/heading */
 const lastGpsPosition: Record<string, { lat: number; lng: number; time: number }> = {};
 
@@ -714,8 +725,37 @@ async function startServer() {
     const roomType = type || 'custom';
     const roomTrackingStyle = trackingStyle || (type === 'care' || type === 'family' ? 'continuous' : 'temporary');
 
+    const ownerId = req.user?.userId || 'user-minsu';
+
     // 새 그룹은 빈 상태로 시작 (생성자가 가입 후 추가됨)
     const customFriends: Record<string, any> = {};
+    const creatorProfile = findUserProfile(ownerId);
+    if (creatorProfile) {
+      customFriends[ownerId] = {
+        ...creatorProfile,
+        route: [],
+        routeIndex: 0,
+        updatedAt: new Date().toISOString()
+      };
+    } else {
+      customFriends[ownerId] = {
+        id: ownerId,
+        name: '나 (민수)',
+        avatar: '🍎',
+        color: '#EF4444',
+        lat: HONGDAE_LAT,
+        lng: HONGDAE_LNG,
+        statusMsg: '애플망고톡 시작! 🍎🥭',
+        isOnline: true,
+        battery: 100,
+        speed: 0,
+        heading: '정지',
+        route: [],
+        routeIndex: 0,
+        updatedAt: new Date().toISOString()
+      };
+    }
+
     const count = 0; // 데모 유저 미생성
     for (let i = 0; i < count; i++) {
       const idx = Math.floor(Math.random() * nameOptions.length);
@@ -790,7 +830,6 @@ async function startServer() {
       ]
     };
 
-    const ownerId = req.user?.userId || 'user-minsu';
     res.json({
       id: newRoomId,
       name,
