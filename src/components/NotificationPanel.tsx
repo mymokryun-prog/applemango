@@ -12,6 +12,7 @@ interface NotificationPanelProps {
   onMarkAllAsRead: () => void;
   onAcceptRoomInvite: (id: string, roomId: string) => void;
   onAcceptGameInvite: (inviteId: string) => void;
+  activeProfileId: string;
 }
 
 const TYPE_META: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
@@ -26,9 +27,25 @@ export default function NotificationPanel({
   notifications, 
   onMarkAllAsRead,
   onAcceptRoomInvite,
-  onAcceptGameInvite
+  onAcceptGameInvite,
+  activeProfileId
 }: NotificationPanelProps) {
-  const unread = notifications.filter(n => !n.read).length;
+  // Client-side safety filtering for invitations
+  const filteredNotifs = notifications.filter(notif => {
+    const nAny = notif as any;
+    if (notif.type === 'invite') {
+      if (nAny.game) {
+        // Game invite: only show if I am the recipient
+        return nAny.to === activeProfileId;
+      } else {
+        // Room invite: only show if I am the invitee
+        return nAny.inviteId === activeProfileId;
+      }
+    }
+    return true;
+  });
+
+  const unread = filteredNotifs.filter(n => !n.read).length;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -43,7 +60,7 @@ export default function NotificationPanel({
           </h2>
           <p className="text-[11px] text-gray-400 mt-0.5">친구 위치 · 약속 · 초대 알림</p>
         </div>
-        {notifications.length > 0 && (
+        {filteredNotifs.length > 0 && (
           <button
             type="button"
             onClick={onMarkAllAsRead}
@@ -57,7 +74,7 @@ export default function NotificationPanel({
 
       {/* 알림 목록 */}
       <div className="flex-1 overflow-y-auto">
-        {notifications.length === 0 ? (
+        {filteredNotifs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full pb-16 text-gray-400">
             <BellOff className="w-12 h-12 mb-3 opacity-20" />
             <p className="text-sm font-medium">새 알림이 없습니다</p>
@@ -65,7 +82,7 @@ export default function NotificationPanel({
           </div>
         ) : (
           <div className="divide-y divide-gray-50 font-sans">
-            {notifications.map((notif) => {
+            {filteredNotifs.map((notif) => {
               const meta = TYPE_META[notif.type] || TYPE_META.system;
               const nAny = notif as any;
               const isRoomInvite = notif.type === 'invite' && nAny.roomId && nAny.inviteId && !nAny.game;

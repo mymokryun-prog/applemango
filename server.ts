@@ -747,41 +747,58 @@ async function startServer() {
         return f.isPendingInvite && f.phone && f.phone.trim().replace(/\D/g, '') === targetPhone;
       });
 
-      if (pendingKey && pendingKey !== userId) {
-        const pendingFriend = r.friends[pendingKey];
-        // Convert/rename the key to the real userId
-        delete r.friends[pendingKey];
-        
-        r.friends[userId] = {
-          ...pendingFriend,
-          id: userId,
-          name: alias || realName || pendingFriend.name.replace(' (대기)', ''),
-          realName: realName || pendingFriend.realName,
-          alias: alias || pendingFriend.alias,
-          avatar: avatar || pendingFriend.avatar,
-          color: color || pendingFriend.color,
-          isOnline: true,
-          updatedAt: new Date().toISOString()
-        };
+      if (pendingKey) {
+        if (pendingKey !== userId) {
+          const pendingFriend = r.friends[pendingKey];
+          // Convert/rename the key to the real userId
+          delete r.friends[pendingKey];
+          
+          r.friends[userId] = {
+            ...pendingFriend,
+            id: userId,
+            name: alias || realName || pendingFriend.name.replace(' (대기)', ''),
+            realName: realName || pendingFriend.realName,
+            alias: alias || pendingFriend.alias,
+            avatar: avatar || pendingFriend.avatar,
+            color: color || pendingFriend.color,
+            isOnline: true,
+            updatedAt: new Date().toISOString()
+          };
 
-        // Also ensure any interactive system messages point to the new userId
-        r.messages.forEach(m => {
-          if (m.isInviteCard && m.inviteId === pendingKey) {
-            m.inviteId = userId;
+          // Also ensure any interactive system messages point to the new userId
+          r.messages.forEach(m => {
+            if (m.isInviteCard && m.inviteId === pendingKey) {
+              m.inviteId = userId;
+            }
+          });
+        }
+
+        // Update inviteId in all notifications from pendingKey to userId across all rooms
+        Object.keys(dbRooms).forEach(rid => {
+          const roomObj = dbRooms[rid];
+          if (roomObj.notifications) {
+            roomObj.notifications.forEach((n: any) => {
+              if (n.type === 'invite' && n.inviteId === pendingKey) {
+                n.inviteId = userId;
+              }
+            });
           }
         });
 
         // Add a notification directly to the room's notifications list
-        r.notifications.unshift({
-          id: `notif-invite-direct-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-          type: 'invite',
-          title: '✉️ 그룹 초대장이 도착했습니다!',
-          message: `[${r.name}] 그룹방에 초대되었습니다. 수락하여 참여해 보세요.`,
-          timestamp: new Date().toISOString(),
-          read: false,
-          roomId: r.id, // For routing / accepting
-          inviteId: userId // The pending user ID to accept
-        });
+        const alreadyExistsInRoom = r.notifications.some((n: any) => n.roomId === r.id && n.inviteId === userId);
+        if (!alreadyExistsInRoom) {
+          r.notifications.unshift({
+            id: `notif-invite-direct-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+            type: 'invite',
+            title: '✉️ 그룹 초대장이 도착했습니다!',
+            message: `[${r.name}] 그룹방에 초대되었습니다. 수락하여 참여해 보세요.`,
+            timestamp: new Date().toISOString(),
+            read: false,
+            roomId: r.id, // For routing / accepting
+            inviteId: userId // The pending user ID to accept
+          });
+        }
         
         // Also sync copy to room-friends so they see it
         const defaultRoom = dbRooms['room-friends'];
@@ -827,7 +844,7 @@ async function startServer() {
 
     const filteredRooms = Object.values(dbRooms).filter(r => {
       const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(r.id);
-      const isMember = r.friends && r.friends[userId];
+      const isMember = r.friends && r.friends[userId] && !r.friends[userId].isPendingInvite;
       const isOwner = r.ownerId === userId;
       return isSystemRoom || isMember || isOwner;
     });
@@ -1297,24 +1314,38 @@ async function startServer() {
       dbUserProfiles[userId].updatedAt = new Date().toISOString();
     }
 
-    // 모든 기존 룸에 사용자 추가/업데이트
+    // 모든 기존 룸에 사용자 추가/업데이트 (시스템 방은 자동 가입, 커스텀 방은 이미 존재하는 경우만 프로필 동기화)
     Object.keys(dbRooms).forEach(roomId => {
       const r = dbRooms[roomId];
-      if (!r.friends[userId]) {
-        r.friends[userId] = {
-          ...dbUserProfiles[userId],
-          route: [],
-          routeIndex: 0
-        };
-      } else {
-        r.friends[userId].name = displayName;
-        if (avatar) {
-          r.friends[userId].avatar = avatar;
+      const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
+      if (isSystemRoom) {
+        if (!r.friends[userId]) {
+          r.friends[userId] = {
+            ...dbUserProfiles[userId],
+            route: [],
+            routeIndex: 0
+          };
+        } else {
+          r.friends[userId].name = displayName;
+          if (avatar) {
+            r.friends[userId].avatar = avatar;
+          }
+          r.friends[userId].phone = phone;
+          r.friends[userId].realName = realName;
+          r.friends[userId].alias = alias;
+          r.friends[userId].updatedAt = new Date().toISOString();
         }
-        r.friends[userId].phone = phone;
-        r.friends[userId].realName = realName;
-        r.friends[userId].alias = alias;
-        r.friends[userId].updatedAt = new Date().toISOString();
+      } else {
+        if (r.friends[userId]) {
+          r.friends[userId].name = displayName;
+          if (avatar) {
+            r.friends[userId].avatar = avatar;
+          }
+          r.friends[userId].phone = phone;
+          r.friends[userId].realName = realName;
+          r.friends[userId].alias = alias;
+          r.friends[userId].updatedAt = new Date().toISOString();
+        }
       }
     });
 
@@ -1740,7 +1771,20 @@ async function startServer() {
   app.get('/api/notifications', (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId] || dbRooms['room-friends'];
-    res.json(room.notifications);
+    const userId = (req.headers['x-user-id'] as string) || 'user-minsu';
+
+    const filtered = room.notifications.filter(n => {
+      // 1. If it's a room invite: only return if inviteId matches requesting userId
+      if (n.type === 'invite' && n.inviteId && !n.game) {
+        return n.inviteId === userId;
+      }
+      // 2. If it's a game invite: only return if recipient 'to' matches requesting userId
+      if (n.type === 'invite' && n.game) {
+        return n.to === userId;
+      }
+      return true;
+    });
+    res.json(filtered);
   });
 
   app.post('/api/notifications/read', (req, res) => {

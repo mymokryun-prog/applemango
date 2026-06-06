@@ -945,6 +945,9 @@ export default function App() {
       });
       if (response.ok) {
         setActiveRoomId(roomId);
+        setActiveTab('chat');
+        // Refresh room list and states
+        authFetch('/api/rooms').then(r => r.json()).then(data => setRooms(data)).catch(() => {});
         fetchAllStates(roomId);
       }
     } catch (err) {
@@ -1662,6 +1665,7 @@ export default function App() {
             onMarkAllAsRead={handleMarkAllNotificationsAsRead}
             onAcceptRoomInvite={handleAcceptRoomInvite}
             onAcceptGameInvite={handleAcceptGameInvite}
+            activeProfileId={activeProfileId}
           />
         )}
 

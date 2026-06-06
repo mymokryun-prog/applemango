@@ -221,7 +221,7 @@ class TetrisAudioSynth {
   isPlaying: boolean = false;
   noteIndex: number = 0;
   timerId: any = null;
-  isMuted: boolean = true;
+  isMuted: boolean = false;
 
   init() {
     if (!this.ctx) {
@@ -1443,7 +1443,7 @@ function TetrisGame({ onBack }: TetrisGameProps) {
   const [lines, setLines] = useState(0);
   const [level, setLevel] = useState(1);
   const [isGameOver, setIsGameOver] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
 
   const gridRef = useRef<(string | null)[][]>(
     Array(20).fill(null).map(() => Array(10).fill(null))
@@ -2082,6 +2082,55 @@ function YutNoriGame({
     };
   }, [multiplayerConfig, yutTurn, canThrow, mals, sticks, isThrowingAnimation, thrownSteps]);
 
+  const getStationCenter = (st: { x: number; y: number }) => {
+    const ox = st.x + 10;
+    const oy = st.y + 10;
+    const cx = 250 + (ox - 145) * 1.2;
+    const cy = 190 + (oy - 145) * 1.2;
+    return { x: cx, y: cy };
+  };
+
+  const drawMalCircle = (ctx: CanvasRenderingContext2D, cx: number, cy: number, mal: Mal, idx: number, isSelected: boolean) => {
+    if (isSelected) {
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = '#eab308';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    ctx.fillStyle = mal.player === 1 ? '#3b82f6' : '#ef4444';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const carryCount = mal.groupWith.length;
+    ctx.fillText(carryCount > 0 ? `${mal.id % 4 + 1}(+${carryCount})` : `${mal.id % 4 + 1}`, cx, cy);
+  };
+
+  const drawFinishedMal = (ctx: CanvasRenderingContext2D, cx: number, cy: number, mal: Mal) => {
+    ctx.fillStyle = '#1e293b';
+    ctx.strokeStyle = mal.player === 1 ? '#3b82f6' : '#ef4444';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`🏁${mal.id % 4 + 1}`, cx, cy);
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -2090,70 +2139,148 @@ function YutNoriGame({
 
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const tl = getStationCenter({ x: 10, y: 10 });
+    const tr = getStationCenter({ x: 260, y: 10 });
+    const bl = getStationCenter({ x: 10, y: 260 });
+    const br = getStationCenter({ x: 260, y: 260 });
+
     ctx.shadowBlur = 10;
     ctx.shadowColor = '#818cf8';
     ctx.strokeStyle = '#312e81';
     ctx.lineWidth = 4;
-    ctx.strokeRect(20, 20, 260, 260);
+    ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+
     ctx.beginPath();
-    ctx.moveTo(20, 20);
-    ctx.lineTo(280, 280);
-    ctx.moveTo(280, 20);
-    ctx.lineTo(20, 280);
+    ctx.moveTo(tl.x, tl.y);
+    ctx.lineTo(br.x, br.y);
+    ctx.moveTo(tr.x, tr.y);
+    ctx.lineTo(bl.x, bl.y);
     ctx.stroke();
     ctx.shadowBlur = 0;
 
     YUT_STATIONS.forEach(st => {
-      const scaleX = st.x + 10; 
-      const scaleY = st.y + 10; 
+      const coords = getStationCenter(st);
       ctx.fillStyle = st.corner ? '#ec4899' : '#1e1b4b';
       ctx.strokeStyle = st.corner ? '#f472b6' : '#6366f1';
       ctx.lineWidth = st.corner ? 3.5 : 2;
       ctx.shadowColor = st.corner ? '#ec4899' : '#6366f1';
       ctx.shadowBlur = st.corner ? 8 : 4;
       ctx.beginPath();
-      ctx.arc(scaleX, scaleY, st.corner ? 12 : 9, 0, Math.PI * 2);
+      ctx.arc(coords.x, coords.y, st.corner ? 12 : 9, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.shadowBlur = 0;
+
+      // 출발지 텍스트 표시
+      if (st.id === 0) {
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('출발', coords.x, coords.y + 18);
+      }
+    });
+
+    // Resolve Player Names
+    const p1Profile = isMultiplayer
+      ? (multiplayerConfig.role === 'p1' ? friends.find(f => f.id === activeProfileId) : friends.find(f => f.id === multiplayerConfig.opponentId))
+      : friends.find(f => f.id === activeProfileId);
+    const p2Profile = isMultiplayer
+      ? (multiplayerConfig.role === 'p2' ? friends.find(f => f.id === activeProfileId) : friends.find(f => f.id === multiplayerConfig.opponentId))
+      : friends.find(f => f.id !== activeProfileId);
+
+    const p1Name = p1Profile ? (p1Profile.alias || p1Profile.realName || p1Profile.name).split(' ')[0] : 'Player 1';
+    const p2Name = p2Profile ? (p2Profile.alias || p2Profile.realName || p2Profile.name).split(' ')[0] : 'Player 2';
+
+    // Player 1 (Left Side, X: 50)
+    ctx.fillStyle = yutTurn === 1 ? '#3b82f6' : '#64748b';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p1Name, 50, 35);
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('플레이어 1', 50, 50);
+
+    if (yutTurn === 1 && !yutWinner) {
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(50, 42, 35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Player 2 (Right Side, X: 450)
+    ctx.fillStyle = yutTurn === 2 ? '#ef4444' : '#64748b';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText(p2Name, 450, 35);
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('플레이어 2', 450, 50);
+
+    if (yutTurn === 2 && !yutWinner) {
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(450, 42, 35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Headers
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('대기', 50, 80);
+    ctx.fillText('완료', 50, 220);
+    ctx.fillText('대기', 450, 80);
+    ctx.fillText('완료', 450, 220);
+
+    let p1WaitCount = 0;
+    let p1DoneCount = 0;
+    let p2WaitCount = 0;
+    let p2DoneCount = 0;
+
+    mals.forEach((mal, idx) => {
+      const isSelected = selectedMalIdx === idx;
+      if (mal.player === 1) {
+        if (mal.stationId === null && !mal.isFinished) {
+          const cx = 50;
+          const cy = 100 + p1WaitCount * 26;
+          drawMalCircle(ctx, cx, cy, mal, idx, isSelected);
+          p1WaitCount++;
+        } else if (mal.isFinished) {
+          const cx = 50;
+          const cy = 240 + p1DoneCount * 26;
+          drawFinishedMal(ctx, cx, cy, mal);
+          p1DoneCount++;
+        }
+      } else {
+        if (mal.stationId === null && !mal.isFinished) {
+          const cx = 450;
+          const cy = 100 + p2WaitCount * 26;
+          drawMalCircle(ctx, cx, cy, mal, idx, isSelected);
+          p2WaitCount++;
+        } else if (mal.isFinished) {
+          const cx = 450;
+          const cy = 240 + p2DoneCount * 26;
+          drawFinishedMal(ctx, cx, cy, mal);
+          p2DoneCount++;
+        }
+      }
     });
 
     mals.forEach((mal, idx) => {
-      if (mal.isFinished) return;
-      let cx = 0;
-      let cy = 0;
-      if (mal.stationId === null) {
-        const offset = (idx % 4) * 18;
-        if (mal.player === 1) { cx = 310 + offset; cy = 155; } else { cx = 310 + offset; cy = 55; }
-      } else {
-        const st = YUT_STATIONS.find(s => s.id === mal.stationId);
-        if (st) { cx = st.x + 10; cy = st.y + 10; }
+      if (mal.isFinished || mal.stationId === null) return;
+      const st = YUT_STATIONS.find(s => s.id === mal.stationId);
+      if (st) {
+        const coords = getStationCenter(st);
+        const isSelected = selectedMalIdx === idx;
+        drawMalCircle(ctx, coords.x, coords.y, mal, idx, isSelected);
       }
-      if (selectedMalIdx === idx) {
-        ctx.strokeStyle = '#facc15';
-        ctx.lineWidth = 3;
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = '#eab308';
-        ctx.beginPath();
-        ctx.arc(cx, cy, 14, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
-      ctx.fillStyle = mal.player === 1 ? '#3b82f6' : '#ef4444';
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const carryCount = mal.groupWith.length;
-      ctx.fillText(carryCount > 0 ? `${mal.id + 1}(+${carryCount})` : `${mal.id + 1}`, cx, cy);
     });
-  }, [mals, selectedMalIdx]);
+  }, [mals, selectedMalIdx, friends, yutTurn, yutWinner]);
 
   const throwYut = () => {
     if (!isMyTurn || !canThrow) return;
@@ -2207,9 +2334,30 @@ function YutNoriGame({
       if (frame >= 30) {
         clearInterval(interval);
         setIsThrowingAnimation(false);
-        const flatCount = yuts.reduce((acc, curr) => acc + curr, 0);
-        let label = flatCount === 1 ? (yuts[0] === 1 ? '빽도' : '도') : flatCount === 2 ? '개' : flatCount === 3 ? '걸' : flatCount === 4 ? '윷' : '모';
-        let steps = flatCount === 1 ? (yuts[0] === 1 ? -1 : 1) : flatCount === 2 ? 2 : flatCount === 3 ? 3 : flatCount === 4 ? 4 : 5;
+        const roundCount = yuts.filter(v => v === 0).length;
+        let label = '돼지';
+        let steps = 1;
+        if (roundCount === 1) {
+          if (yuts[0] === 0) {
+            label = '빽도';
+            steps = -1;
+          } else {
+            label = '돼지 (도)';
+            steps = 1;
+          }
+        } else if (roundCount === 2) {
+          label = '개 (개)';
+          steps = 2;
+        } else if (roundCount === 3) {
+          label = '양 (걸)';
+          steps = 3;
+        } else if (roundCount === 4) {
+          label = '소 (윷)';
+          steps = 4;
+        } else if (roundCount === 0) {
+          label = '말 (모)';
+          steps = 5;
+        }
         setThrownResult(label);
         setThrownSteps(steps);
       }
@@ -2311,8 +2459,8 @@ function YutNoriGame({
           </div>
         )}
         <div className="flex flex-col md:flex-row gap-2.5 items-center justify-center w-full max-w-[850px] shrink-0">
-          <div className="relative border-4 border-slate-800 bg-slate-900 rounded-2xl overflow-hidden shadow-2xl w-[290px] h-[290px] md:w-[360px] md:h-[360px] shrink-0">
-            <canvas ref={canvasRef} width={400} height={400} className="w-full h-full block" />
+          <div className="relative border-4 border-slate-800 bg-slate-900 rounded-2xl overflow-hidden shadow-2xl w-[320px] h-[245px] sm:w-[400px] sm:h-[300px] md:w-[500px] md:h-[380px] shrink-0">
+            <canvas ref={canvasRef} width={500} height={380} className="w-full h-full block" />
           </div>
           <div className="flex flex-col items-center bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 w-full max-w-[190px] shrink-0 gap-2">
             <p className="text-[9px] font-bold text-slate-400">윷가락 던지기 상태</p>
@@ -2324,9 +2472,21 @@ function YutNoriGame({
                   className="w-4 h-16 bg-amber-100 rounded-md border border-amber-900 relative shadow-md flex items-center justify-center overflow-hidden"
                 >
                   {stick.val === 1 ? (
-                    <div className="absolute inset-0 bg-white flex flex-col justify-around py-1.5"><span className="text-[7px] text-red-500 font-extrabold leading-none">✕</span><span className="text-[7px] text-red-500 font-extrabold leading-none">✕</span></div>
+                    <div className="absolute inset-0 bg-white flex flex-col justify-around py-1.5">
+                      {idx === 0 && <span className="absolute top-0.5 left-0.5 w-1 h-1 rounded-full bg-red-600"></span>}
+                      <span className="text-[7px] text-red-500 font-extrabold leading-none">✕</span>
+                      <span className="text-[7px] text-red-500 font-extrabold leading-none">✕</span>
+                    </div>
                   ) : (
-                    <div className="absolute inset-0 bg-gradient-to-r from-amber-800 to-amber-950"><div className="w-0.5 h-full bg-amber-900 mx-auto" /></div>
+                    <div className="absolute inset-0 bg-gradient-to-r from-amber-800 to-amber-950">
+                      {idx === 0 ? (
+                        <div className="absolute inset-0 flex items-center justify-center bg-red-950/20">
+                          <span className="text-[8px] text-red-400 font-black">뒤</span>
+                        </div>
+                      ) : (
+                        <div className="w-0.5 h-full bg-amber-900 mx-auto" />
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
