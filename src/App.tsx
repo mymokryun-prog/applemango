@@ -22,7 +22,9 @@ import {
   registerBackgroundSync,
   requestNotificationPermission,
   showLocalNotification,
-  syncOutbox
+  syncOutbox,
+  getAllOutboxEntries,
+  deleteOutboxEntry
 } from './offlineSync';
 import {
   getPushSubscription,
@@ -114,6 +116,23 @@ export default function App() {
   
   // Leaflet map selected coordinate for potential appointment creation
   const [tempPromiseCoords, setTempPromiseCoords] = useState<[number, number] | null>(null);
+  
+  // Promise (Appointment) Form Creation States
+  const [promiseTitle, setPromiseTitle] = useState('');
+  const [promiseSearchQuery, setPromiseSearchQuery] = useState('');
+  const [promiseConfirmedPlace, setPromiseConfirmedPlace] = useState<any | null>(null);
+  const [promiseDateValue, setPromiseDateValue] = useState(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
+  const [promiseTimeValue, setPromiseTimeValue] = useState('19:00');
+
+  // Outbox modal states
+  const [showOutboxModal, setShowOutboxModal] = useState(false);
+  const [outboxEntries, setOutboxEntries] = useState<any[]>([]);
   
   // Manual refreshing spin indicators
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -1208,7 +1227,8 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({ roomId: pendingDeleteRoomId })
       });
-      if (response.ok) {
+      if (response.ok || response.status === 404) {
+        // 만약 서버에서 404(방 없음)가 반환되더라도 이미 삭제된 것이므로 로컬 UI에서 제거
         const remain = rooms.filter(r => r.id !== pendingDeleteRoomId);
         const nextRoomId = remain.length > 0 ? remain[0].id : 'room-friends';
         setActiveRoomId(nextRoomId);
@@ -1248,6 +1268,66 @@ export default function App() {
       fetchAllStates(nextRoomId);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Outbox (Offline Queue) Management Helpers
+  const handleOpenOutboxModal = async () => {
+    try {
+      const entries = await getAllOutboxEntries();
+      setOutboxEntries(entries);
+      setShowOutboxModal(true);
+    } catch (err) {
+      console.error('Failed to get outbox entries:', err);
+    }
+  };
+
+  const handleClearOutbox = async () => {
+    if (!window.confirm('오프라인 대기열을 모두 비우시겠습니까? 전송되지 않은 메시지와 약속이 영구히 삭제됩니다.')) return;
+    try {
+      for (const entry of outboxEntries) {
+        await deleteOutboxEntry(entry.id);
+      }
+      setOutboxEntries([]);
+      setOutboxCount(0);
+      setShowOutboxModal(false);
+      alert('대기열이 비워졌습니다.');
+    } catch (err) {
+      console.error('Failed to clear outbox:', err);
+    }
+  };
+
+  const handleRemoveOutboxEntry = async (id: string) => {
+    try {
+      await deleteOutboxEntry(id);
+      const remain = outboxEntries.filter(e => e.id !== id);
+      setOutboxEntries(remain);
+      setOutboxCount(remain.length);
+      if (remain.length === 0) {
+        setShowOutboxModal(false);
+      }
+    } catch (err) {
+      console.error('Failed to delete outbox entry:', err);
+    }
+  };
+
+  const handleForceSyncOutbox = async () => {
+    try {
+      await syncOutbox();
+      const count = await getOutboxCount();
+      setOutboxCount(count);
+      const entries = await getAllOutboxEntries();
+      setOutboxEntries(entries);
+      if (count === 0) {
+        setShowOutboxModal(false);
+        alert('모든 대기 작업이 성공적으로 전송되었습니다! 🎉');
+      } else {
+        alert(`일부 작업 전송 실패. 여전히 ${count}개의 작업이 대기 중입니다.`);
+      }
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error('Failed to sync outbox:', err);
+      alert('전송 중 오류가 발생했습니다. 네트워크 상태를 확인하세요.');
     }
   };
 
@@ -1414,9 +1494,15 @@ export default function App() {
           </div>
           <div className="flex items-center gap-1">
             {outboxCount > 0 && (
-              <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full font-semibold border border-rose-200 mr-1">
-                {outboxCount}개 대기
-              </span>
+              <button
+                type="button"
+                onClick={handleOpenOutboxModal}
+                className="text-[10px] bg-rose-100 hover:bg-rose-200 text-rose-600 px-2.5 py-1 rounded-full font-black border border-rose-300 mr-1 cursor-pointer animate-pulse transition flex items-center gap-1 shadow-sm"
+                title="대기 중인 오프라인 작업 보기"
+              >
+                <span>📥</span>
+                <span>{outboxCount}개 대기</span>
+              </button>
             )}
             <button
               type="button"
@@ -1653,6 +1739,16 @@ export default function App() {
             onVote={handleVote}
             onClearTempCoords={() => setTempPromiseCoords(null)}
             onFocusLocation={handleFocusLocation}
+            title={promiseTitle}
+            setTitle={setPromiseTitle}
+            searchQuery={promiseSearchQuery}
+            setSearchQuery={setPromiseSearchQuery}
+            confirmedPlace={promiseConfirmedPlace}
+            setConfirmedPlace={setPromiseConfirmedPlace}
+            dateValue={promiseDateValue}
+            setDateValue={setPromiseDateValue}
+            timeValue={promiseTimeValue}
+            setTimeValue={setPromiseTimeValue}
           />
         )}
 
@@ -1856,6 +1952,84 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {/* C. 오프라인 대기열 모달 */}
+      {showOutboxModal && (
+        <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
+          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl max-h-[80vh] flex flex-col">
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto shrink-0" />
+            <div className="flex items-center justify-between shrink-0">
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <span>📥</span>
+                <span>오프라인 대기열 ({outboxEntries.length}개)</span>
+              </h3>
+              <button 
+                onClick={() => setShowOutboxModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 shrink-0 leading-relaxed">
+              네트워크가 불안정할 때 전송되지 못하고 브라우저에 임시 보관된 요청입니다. 
+              인터넷이 연결되면 백그라운드에서 자동으로 전송을 시도합니다.
+            </p>
+
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-2 py-2 border-t border-b border-gray-100">
+              {outboxEntries.map((entry) => {
+                let description = '대기 중인 요청';
+                if (entry.endpoint === '/api/chat') {
+                  description = `💬 채팅 메시지: "${entry.payload?.text || ''}"`;
+                } else if (entry.endpoint === '/api/appointments') {
+                  description = `📅 약속 생성: "${entry.payload?.title || ''}" (${entry.payload?.placeName || ''})`;
+                } else if (entry.endpoint === '/api/appointments/update') {
+                  description = `🔄 약속 수정: "${entry.payload?.title || ''}"`;
+                } else if (entry.endpoint === '/api/friends/move') {
+                  description = `📍 내 위치 업데이트 전송`;
+                } else if (entry.endpoint === '/api/friends/profile') {
+                  description = `👤 프로필 수정: "${entry.payload?.alias || entry.payload?.realName || ''}"`;
+                } else {
+                  description = `${entry.endpoint} (${JSON.stringify(entry.payload || {})})`;
+                }
+
+                return (
+                  <div key={entry.id} className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-700">
+                    <div className="flex-1 truncate mr-2">
+                      <p className="truncate text-gray-800">{description}</p>
+                      <p className="text-[9px] text-gray-450 font-normal mt-0.5">
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => handleRemoveOutboxEntry(entry.id)}
+                      className="text-rose-500 hover:text-rose-700 px-2 py-1 hover:bg-rose-50 rounded-lg text-[10px] shrink-0"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2 pt-2 shrink-0">
+              <button 
+                type="button" 
+                onClick={handleClearOutbox}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs transition border border-gray-300"
+              >
+                🗑️ 대기열 비우기
+              </button>
+              <button 
+                type="button" 
+                onClick={handleForceSyncOutbox}
+                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl text-xs transition border border-rose-600 shadow-sm"
+              >
+                ⚡ 즉시 전송 시도
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* B. 설정 모달 */}
       {showSettingsModal && (

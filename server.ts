@@ -5,6 +5,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { createServer as createHttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -410,6 +411,50 @@ const dbRooms: Record<string, any> = {
   }
 };
 
+const DB_FILE = path.join(process.cwd(), 'aemang_db.json');
+
+function saveDatabase() {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify({
+      dbRooms,
+      dbUserProfiles
+    }, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save database:', err);
+  }
+}
+
+let saveTimeout: NodeJS.Timeout | null = null;
+function saveDatabaseDebounced() {
+  if (saveTimeout) return;
+  saveTimeout = setTimeout(() => {
+    saveTimeout = null;
+    saveDatabase();
+  }, 2000);
+}
+
+function loadDatabase() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (data.dbRooms) {
+        Object.keys(dbRooms).forEach(key => delete dbRooms[key]);
+        Object.assign(dbRooms, data.dbRooms);
+      }
+      if (data.dbUserProfiles) {
+        Object.keys(dbUserProfiles).forEach(key => delete dbUserProfiles[key]);
+        Object.assign(dbUserProfiles, data.dbUserProfiles);
+      }
+      console.log('Database loaded successfully from file.');
+    }
+  } catch (err) {
+    console.error('Failed to load database:', err);
+  }
+}
+
+loadDatabase();
+
 const nameOptions = ['애플짱 🍎', '메론이 🍈', '오렌지 🍊', '망고킹 🥭', '피치피치 🍑', '그레이프 🍇'];
 const avatarOptions = ['🍎', '🍈', '🍊', '🥭', '🍑', '🍇'];
 const colorOptions = ['#EF4444', '#10B981', '#F97316', '#FACC15', '#EC4899', '#8B5CF6'];
@@ -568,6 +613,7 @@ function applyFriendLocationUpdate(
     broadcastLocationToRoom(roomId, payload);
   }
 
+  saveDatabaseDebounced();
   return payload;
 }
 
@@ -693,6 +739,18 @@ setInterval(simulateMovement, 6000);
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
+
+  // Auto-save database on any state-changing request
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') {
+      res.on('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          saveDatabaseDebounced();
+        }
+      });
+    }
+    next();
+  });
 
   // ======= SECURITY MIDDLEWARE =======
   app.use((req: AuthRequest, res: Response, next: NextFunction) => {
@@ -1316,6 +1374,35 @@ async function startServer() {
       dbUserProfiles[userId].realName = realName;
       dbUserProfiles[userId].alias = alias;
       dbUserProfiles[userId].updatedAt = new Date().toISOString();
+    }
+
+    // Transfer guest/old user ID records to the new user ID
+    const oldUserId = req.user?.userId;
+    if (oldUserId && oldUserId !== userId) {
+      Object.keys(dbRooms).forEach(roomId => {
+        const r = dbRooms[roomId];
+        if (r.ownerId === oldUserId) {
+          r.ownerId = userId;
+        }
+        if (r.friends[oldUserId]) {
+          r.friends[userId] = {
+            ...r.friends[oldUserId],
+            id: userId,
+            name: displayName,
+            avatar: userAvatar,
+            phone,
+            realName,
+            alias,
+            isOnline: true,
+            updatedAt: new Date().toISOString()
+          };
+          delete r.friends[oldUserId];
+        }
+      });
+      // Also delete old profile from global storage if it was a temporary guest profile
+      if (oldUserId.startsWith('guest-') && dbUserProfiles[oldUserId]) {
+        delete dbUserProfiles[oldUserId];
+      }
     }
 
     // 모든 기존 룸에 사용자 추가/업데이트 (시스템 방은 자동 가입, 커스텀 방은 이미 존재하는 경우만 프로필 동기화)
@@ -2078,6 +2165,7 @@ async function startServer() {
 
         // Broadcast to all in room
         broadcastToRoom(roomId, 'new-message', newMsg);
+        saveDatabaseDebounced();
         callback({ success: true, message: newMsg });
       } catch (error) {
         callback({ error: 'Message send failed' });
@@ -2156,6 +2244,7 @@ async function startServer() {
             eta: emergencyResult.eta,
             message: emergencyMsg
           });
+          saveDatabaseDebounced();
 
           await broadcastPushNotification(
             '🚨 긴급 출동 요청',

@@ -34,18 +34,30 @@ interface SchedulePanelProps {
   onVote: (id: string, vote: 'yes' | 'no' | 'maybe') => void;
   onClearTempCoords: () => void;
   onFocusLocation: (lat: number, lng: number) => void;
+  
+  // Shared Form States
+  title: string;
+  setTitle: (val: string) => void;
+  searchQuery: string;
+  setSearchQuery: (val: string) => void;
+  confirmedPlace: PlaceResult | null;
+  setConfirmedPlace: (val: PlaceResult | null) => void;
+  dateValue: string;
+  setDateValue: (val: string) => void;
+  timeValue: string;
+  setTimeValue: (val: string) => void;
 }
 
 export default function SchedulePanel({
   appointments, friends, activeProfileId,
   tempPromiseCoords, onCreateAppointment,
-  onUpdateAppointment, onVote, onClearTempCoords, onFocusLocation
+  onUpdateAppointment, onVote, onClearTempCoords, onFocusLocation,
+  title, setTitle, searchQuery, setSearchQuery,
+  confirmedPlace, setConfirmedPlace, dateValue, setDateValue,
+  timeValue, setTimeValue
 }: SchedulePanelProps) {
-  const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [confirmedPlace, setConfirmedPlace] = useState<PlaceResult | null>(null);
-  const [title, setTitle] = useState('');
 
   // 로컬 시간대 기준 YYYY-MM-DD 날짜 구하기 헬퍼
   const getLocalDateString = (d = new Date()) => {
@@ -55,9 +67,6 @@ export default function SchedulePanel({
     return `${year}-${month}-${day}`;
   };
 
-  // 날짜/시간 picker 상태
-  const [dateValue, setDateValue] = useState(() => getLocalDateString());
-  const [timeValue, setTimeValue] = useState('19:00');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -163,7 +172,6 @@ export default function SchedulePanel({
   const handleSelectPlace = (place: PlaceResult) => {
     setConfirmedPlace(place);
     setSearchQuery(place.name);
-    onFocusLocation(place.lat, place.lng);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -190,6 +198,8 @@ export default function SchedulePanel({
     setSearchQuery('');
     setConfirmedPlace(null);
     setTitle('');
+    setDateValue(getLocalDateString());
+    setTimeValue('19:00');
     onClearTempCoords();
   };
 
@@ -294,7 +304,7 @@ export default function SchedulePanel({
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-4 font-sans">
+        <form onSubmit={handleSubmit} className="p-4 space-y-3 font-sans pb-5">
           {/* 약속 이름 */}
           <div className="space-y-1">
             <label className="text-xs font-bold text-gray-700">약속 이름 *</label>
@@ -323,7 +333,7 @@ export default function SchedulePanel({
 
             {/* 확정된 검색 장소가 있을 때 표시 */}
             {confirmedPlace ? (
-              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-250 rounded-xl px-3 py-2 mb-2">
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 mb-2 shadow-sm">
                 <div className="flex items-center gap-2 min-w-0">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                   <div className="truncate">
@@ -331,7 +341,11 @@ export default function SchedulePanel({
                     <p className="text-[10px] text-gray-400 truncate">{confirmedPlace.address}</p>
                   </div>
                 </div>
-                <button type="button" onClick={() => setConfirmedPlace(null)} className="text-[10px] text-emerald-600 font-bold hover:underline shrink-0 ml-2">변경</button>
+                <div className="flex items-center gap-2 shrink-0 ml-2 font-sans text-[10px]">
+                  <button type="button" onClick={() => onFocusLocation(confirmedPlace.lat, confirmedPlace.lng)} className="text-blue-500 font-bold hover:underline cursor-pointer">지도 보기</button>
+                  <span className="text-gray-300">|</span>
+                  <button type="button" onClick={() => setConfirmedPlace(null)} className="text-rose-500 font-bold hover:underline cursor-pointer">변경</button>
+                </div>
               </div>
             ) : (
               <div className="relative">
