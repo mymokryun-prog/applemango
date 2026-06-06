@@ -2174,15 +2174,37 @@ function YutNoriGame({
       frame++;
       setSticks(prev => prev.map((s, idx) => {
         const sway = idx % 2 === 0 ? 1 : -1;
-        const xOffset = Math.sin(frame * 0.4 + idx) * 35 * sway;
-        if (frame < 12) return { x: xOffset, y: 150 - frame * 9, rot: s.rot + 0.65, scale: 1 + frame * 0.05, val: 0 };
-        else if (frame < 22) return { x: xOffset, y: 42 + (frame - 12) * 12, rot: s.rot + 0.45, scale: 1.6 - (frame - 12) * 0.06, val: 0 };
-        else {
-          if (frame === 22) synthRef.current?.playYutWoodSound();
-          return { x: Math.sin(idx * 1.5) * 8, y: 160 + (frame % 2 === 0 ? 3 : -3), rot: Math.round(s.rot / Math.PI) * Math.PI, scale: 1.0, val: yuts[idx] as (0 | 1) };
+        let xOffset = 0;
+        let yOffset = 160;
+        let rotVal = s.rot + 0.85;
+        let scaleVal = 1.0;
+        
+        if (frame < 15) {
+          xOffset = Math.sin(frame * 0.5 + idx * 1.2) * 60 * sway;
+          yOffset = 160 - frame * 18;
+          scaleVal = 1.0 + frame * 0.08;
+        } else if (frame < 26) {
+          xOffset = Math.sin(frame * 0.5 + idx * 1.2) * 60 * sway;
+          yOffset = -110 + (frame - 15) * 25;
+          scaleVal = 2.2 - (frame - 15) * 0.11;
+        } else {
+          if (frame === 26) synthRef.current?.playYutWoodSound();
+          xOffset = Math.sin(idx * 1.5) * 8;
+          yOffset = 165 + (frame % 2 === 0 ? 3 : -3);
+          rotVal = Math.round(s.rot / Math.PI) * Math.PI;
+          scaleVal = 1.0;
         }
+        
+        return {
+          x: xOffset,
+          y: yOffset,
+          rot: rotVal,
+          scale: scaleVal,
+          val: frame >= 26 ? (yuts[idx] as (0 | 1)) : 0
+        };
       }));
-      if (frame >= 25) {
+      
+      if (frame >= 30) {
         clearInterval(interval);
         setIsThrowingAnimation(false);
         const flatCount = yuts.reduce((acc, curr) => acc + curr, 0);
@@ -2191,7 +2213,7 @@ function YutNoriGame({
         setThrownResult(label);
         setThrownSteps(steps);
       }
-    }, 45);
+    }, 40);
   };
 
   const getNextStation = (curr: number | null, steps: number) => {
@@ -2289,7 +2311,7 @@ function YutNoriGame({
           </div>
         )}
         <div className="flex flex-col md:flex-row gap-2.5 items-center justify-center w-full max-w-[850px] shrink-0">
-          <div className="relative border-4 border-slate-800 bg-slate-900 rounded-2xl overflow-hidden shadow-2xl w-[230px] h-[230px] md:w-[270px] md:h-[270px] shrink-0">
+          <div className="relative border-4 border-slate-800 bg-slate-900 rounded-2xl overflow-hidden shadow-2xl w-[290px] h-[290px] md:w-[360px] md:h-[360px] shrink-0">
             <canvas ref={canvasRef} width={400} height={400} className="w-full h-full block" />
           </div>
           <div className="flex flex-col items-center bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 w-full max-w-[190px] shrink-0 gap-2">
@@ -2317,10 +2339,46 @@ function YutNoriGame({
               {isThrowingAnimation ? '흔드는 중...' : '윷 던지기!'}
             </button>
 
+            {/* 말 간편 선택 버튼 그룹 */}
+            {!yutWinner && thrownSteps !== 0 && isMyTurn && (
+              <div className="w-full flex flex-col gap-1.5 mt-2 bg-slate-950/40 p-2 rounded-xl border border-slate-800">
+                <p className="text-[9px] font-black text-slate-400 text-center">움직일 말 선택 ({yutTurn === 1 ? 'P1' : 'P2'})</p>
+                <div className="grid grid-cols-4 gap-1">
+                  {mals
+                    .filter(m => m.player === yutTurn)
+                    .map(m => {
+                      const label = m.isFinished 
+                        ? '🏁' 
+                        : m.stationId === null 
+                          ? '대기' 
+                          : `${m.stationId}번`;
+                      const isSelected = selectedMalIdx === m.id;
+                      
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setSelectedMalIdx(m.id)}
+                          disabled={m.isFinished}
+                          className={`text-[9.5px] font-black py-1.5 px-0.5 rounded border transition flex flex-col items-center gap-0.5 cursor-pointer ${
+                            isSelected
+                              ? 'bg-sky-500 text-white border-sky-400'
+                              : 'bg-slate-800 text-slate-350 border-slate-700 hover:bg-slate-700'
+                          } disabled:opacity-40 disabled:cursor-not-allowed`}
+                        >
+                          <span className="text-[8px] font-bold opacity-60">말 {m.id % 4 + 1}</span>
+                          <span className="truncate max-w-full font-sans">{label}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
             {!yutWinner && thrownSteps !== 0 && isMyTurn && selectedMalIdx !== null && (
               <button
                 onClick={() => moveMal(selectedMalIdx)}
-                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-2 rounded-xl text-xs transition mt-3 cursor-pointer animate-pulse"
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer animate-pulse border border-black"
               >
                 선택한 말 이동하기 ({thrownSteps > 0 ? `+${thrownSteps}` : `${thrownSteps}`})
               </button>
@@ -2408,7 +2466,7 @@ export default function GamePanel({
     }
   }, [multiplayerConfig]);
 
-  const sendGameInvite = (friendId: string, gameType: 'drone_battle' | 'yut_nori') => {
+  const sendGameInvite = async (friendId: string, gameType: 'drone_battle' | 'yut_nori') => {
     const socket = getLocationSocket();
     socket.emit('game-relay', {
       roomId: activeRoomId,
@@ -2419,7 +2477,27 @@ export default function GamePanel({
         game: gameType
       }
     });
-    alert('게임 초대를 발송했습니다. 상대방이 수락할 때까지 대기해 주세요.');
+    
+    // REST API call to persist the invitation and alert in notifications
+    try {
+      await fetch('/api/games/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('aemang_token') || ''}`
+        },
+        body: JSON.stringify({
+          from: activeProfileId,
+          to: friendId,
+          game: gameType,
+          roomId: activeRoomId
+        })
+      });
+    } catch (err) {
+      console.warn('Game invite REST error (falling back to socket-only):', err);
+    }
+    
+    alert('게임 대결 신청이 발송되었습니다. 상대방이 알림창이나 팝업에서 수락하면 바로 대국이 연동됩니다! 🎮');
   };
 
   if (activeGame === null) {

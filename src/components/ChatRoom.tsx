@@ -342,22 +342,19 @@ export default function ChatRoom({
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {/* 친구가 나 혼자일 때의 일러스트 및 초대 카드 빈 상태 */}
         {friends.length <= 1 && (
-          <div className="flex flex-col items-center justify-center p-6 bg-white border-2 border-black rounded-3xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-center my-4 mx-2">
-            <img src="/invite_friend.png" alt="Invite Friends" className="w-full h-32 object-contain mb-4 rounded-xl" />
-            <h4 className="text-sm font-black text-gray-900 mb-1">아직 대화방에 멤버가 없습니다</h4>
-            <p className="text-[10px] text-gray-500 leading-relaxed mb-4">
-              위치 정보를 실시간으로 공유하고 대화하려면,<br/>
-              우측 상단의 초대 단추를 누르거나 아래 버튼으로 친구를 초대하세요!
+          <div className="flex flex-col items-center justify-center p-4 bg-white border-2 border-black rounded-2xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] text-center my-2 mx-1 select-none">
+            <h4 className="text-xs font-black text-gray-900 mb-1">아직 대화방에 멤버가 없습니다</h4>
+            <p className="text-[9px] text-gray-500 leading-relaxed mb-3">
+              우측 상단의 [초대] 단추를 눌러 첫 친구를 초대해 보세요!
             </p>
             <button
               type="button"
               onClick={() => setShowInviteModal(true)}
-              className="flex items-center gap-1.5 bg-rose-500 hover:bg-rose-600 text-white border-2 border-black font-black text-xs px-5 py-2.5 rounded-2xl shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
+              className="flex items-center gap-1 bg-[#10B981] hover:bg-[#059669] text-white border border-black font-black text-[10px] px-3.5 py-1.5 rounded-xl shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
             >
-              <UserPlus className="w-4 h-4" />
-              <span>+ 친구 초대하기</span>
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>친구 초대하기</span>
             </button>
           </div>
         )}

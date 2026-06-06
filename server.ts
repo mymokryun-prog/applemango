@@ -172,12 +172,18 @@ export interface AuthRequest extends Request {
 }
 
 const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+  // 클라이언트의 활성 프로필 ID(x-user-id)가 있으면 우선적으로 세션 사용 (테스트 및 멀티 프로필 지원 최적화)
+  const xUserId = req.headers['x-user-id'] as string;
+  if (xUserId) {
+    req.user = { userId: xUserId };
+    return next();
+  }
+
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-  // 토큰 없으면 헤더의 x-user-id 사용 (프론트에서 전화번호 기반 ID 전송)
   if (!token) {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-' + Date.now();
+    const userId = 'guest-' + Date.now();
     req.user = { userId };
     return next();
   }
@@ -185,8 +191,7 @@ const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) 
   jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
     if (err) {
       console.warn('Token verification failed, falling back gracefully:', err.message);
-      // 토큰 검증 실패 시 403 에러로 앱이 먹통이 되는 현상 방지: x-user-id 헤더를 사용하거나 guest로 폴백
-      const userId = (req.headers['x-user-id'] as string) || 'guest-' + Date.now();
+      const userId = 'guest-' + Date.now();
       req.user = { userId };
       return next();
     }
@@ -354,6 +359,29 @@ function welcomeMsg(id: string, text: string) {
   }];
 }
 
+// ── global 사용자 프로필 저장소 ──────────────────────────────────────────────
+const dbUserProfiles: Record<string, any> = {
+  'user-minsu': {
+    id: 'user-minsu',
+    name: '민수',
+    avatar: '🥭',
+    color: '#3B82F6',
+    phone: '010-1234-5678',
+    realName: '김민수',
+    alias: '민수',
+    lat: HONGDAE_LAT,
+    lng: HONGDAE_LNG,
+    statusMsg: '위치 공유 중! 🥭',
+    isOnline: true,
+    battery: 92,
+    speed: 0,
+    heading: '정지',
+    route: [],
+    routeIndex: 0,
+    updatedAt: new Date().toISOString()
+  }
+};
+
 // ── 기본 빈 룸 (데모 데이터 없음) ──────────────────────────────────────────
 const dbRooms: Record<string, any> = {
   'room-friends': {
@@ -407,7 +435,7 @@ function findUserProfile(userId: string): any {
       return room.friends[userId];
     }
   }
-  return null;
+  return dbUserProfiles[userId] || null;
 }
 
 /** Last GPS sample per room+friend — used for speed/heading */
@@ -704,11 +732,89 @@ async function startServer() {
     });
   });
 
+  // Link pending invitations by phone number to the actual registered userId
+  function linkPendingInvitations(phone: string, userId: string, realName: string, alias: string, avatar: string, color: string) {
+    if (!phone) return;
+    const targetPhone = phone.trim().replace(/\D/g, '');
+    if (!targetPhone) return;
+
+    Object.keys(dbRooms).forEach(roomId => {
+      const r = dbRooms[roomId];
+      
+      // Find if there is any pending invite in this room with the matching phone number
+      const pendingKey = Object.keys(r.friends).find(fid => {
+        const f = r.friends[fid];
+        return f.isPendingInvite && f.phone && f.phone.trim().replace(/\D/g, '') === targetPhone;
+      });
+
+      if (pendingKey && pendingKey !== userId) {
+        const pendingFriend = r.friends[pendingKey];
+        // Convert/rename the key to the real userId
+        delete r.friends[pendingKey];
+        
+        r.friends[userId] = {
+          ...pendingFriend,
+          id: userId,
+          name: alias || realName || pendingFriend.name.replace(' (대기)', ''),
+          realName: realName || pendingFriend.realName,
+          alias: alias || pendingFriend.alias,
+          avatar: avatar || pendingFriend.avatar,
+          color: color || pendingFriend.color,
+          isOnline: true,
+          updatedAt: new Date().toISOString()
+        };
+
+        // Also ensure any interactive system messages point to the new userId
+        r.messages.forEach(m => {
+          if (m.isInviteCard && m.inviteId === pendingKey) {
+            m.inviteId = userId;
+          }
+        });
+
+        // Add a notification directly to the room's notifications list
+        r.notifications.unshift({
+          id: `notif-invite-direct-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          type: 'invite',
+          title: '✉️ 그룹 초대장이 도착했습니다!',
+          message: `[${r.name}] 그룹방에 초대되었습니다. 수락하여 참여해 보세요.`,
+          timestamp: new Date().toISOString(),
+          read: false,
+          roomId: r.id, // For routing / accepting
+          inviteId: userId // The pending user ID to accept
+        });
+        
+        // Also sync copy to room-friends so they see it
+        const defaultRoom = dbRooms['room-friends'];
+        if (defaultRoom && defaultRoom !== r) {
+          const alreadyExists = defaultRoom.notifications.some((n: any) => n.roomId === r.id && n.inviteId === userId);
+          if (!alreadyExists) {
+            defaultRoom.notifications.unshift({
+              id: `notif-invite-direct-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+              type: 'invite',
+              title: '✉️ 그룹 초대장이 도착했습니다!',
+              message: `회원님을 [${r.name}] 그룹방에 초대했습니다.`,
+              timestamp: new Date().toISOString(),
+              read: false,
+              roomId: r.id,
+              inviteId: userId
+            });
+          }
+        }
+      }
+    });
+  }
+
   // API Endpoints
 
   // 0. Rooms Catalog Endpoints
   app.get('/api/rooms', (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId || 'user-minsu';
+
+    // Link pending invitations if the user's profile phone is set
+    const userProfile = findUserProfile(userId);
+    if (userProfile && userProfile.phone) {
+      linkPendingInvitations(userProfile.phone, userId, userProfile.realName || '', userProfile.alias || '', userProfile.avatar || '🍎', userProfile.color || '#EC4899');
+    }
 
     if (Object.keys(dbRooms).length === 0) {
       dbRooms['room-friends'] = {
@@ -1027,22 +1133,27 @@ async function startServer() {
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
 
-    const newFriendId = `friend-invited-${Date.now()}`;
     const cleanPhone = (phone || '').trim() || '번호 미등록';
     const cleanName = (name || '').trim() || '이름 미등록';
-
     const displayName = cleanName === '이름 미등록' ? cleanPhone : cleanName;
 
+    const digits = cleanPhone.replace(/\D/g, '');
+    const registeredUserId = digits ? `user-${digits}` : '';
+    // Look up if she's already registered in ANY room in dbRooms
+    const isAlreadyRegistered = registeredUserId && findUserProfile(registeredUserId);
+
+    const targetFriendId = isAlreadyRegistered ? registeredUserId : `friend-invited-${Date.now()}`;
+
     const newFriend = {
-      id: newFriendId,
-      name: `${displayName} (대기)`,
+      id: targetFriendId,
+      name: isAlreadyRegistered ? displayName : `${displayName} (대기)`,
       realName: cleanName,
       avatar: avatar || '👵',
       color: color || '#EC4899',
       lat: HONGDAE_LAT + (Math.random() - 0.5) * 0.008,
       lng: HONGDAE_LNG + (Math.random() - 0.5) * 0.008,
       statusMsg: `초대 메시지 수락 대기 중... 📨`,
-      isOnline: false,
+      isOnline: isAlreadyRegistered ? true : false,
       battery: Math.floor(55 + Math.random() * 40),
       phone: cleanPhone,
       speed: 0,
@@ -1053,17 +1164,34 @@ async function startServer() {
       updatedAt: new Date().toISOString()
     };
 
-    room.friends[newFriendId] = newFriend;
+    room.friends[targetFriendId] = newFriend;
 
-    // Create a special invitation notification
+    // Create a special invitation notification in the custom room
     room.notifications.unshift({
       id: `notif-invite-pending-${Date.now()}`,
       type: 'invite',
       title: '초대장 발송됨 📨',
       message: `[${creatorName || '호스트'}] 님이 ${displayName} 님에게 그룹 가입 초대를 발송했습니다. 수락 시 활성화됩니다.`,
       timestamp: new Date().toISOString(),
-      read: false
+      read: false,
+      roomId: room.id,
+      inviteId: targetFriendId
     });
+
+    // Also push a global invitation notification to 'room-friends' for the target user to see on main screen
+    const defaultRoom = dbRooms['room-friends'];
+    if (defaultRoom && defaultRoom.id !== room.id) {
+      defaultRoom.notifications.unshift({
+        id: `notif-invite-direct-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        type: 'invite',
+        title: '✉️ 그룹 초대장이 도착했습니다!',
+        message: `[${creatorName || '호스트'}] 님이 회원님을 [${room.name}] 그룹방에 초대했습니다.`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        roomId: room.id,
+        inviteId: targetFriendId
+      });
+    }
 
     // Create an interactive invitation system message in chat
     room.messages.push({
@@ -1075,7 +1203,7 @@ async function startServer() {
       text: `✉️ [초대장 도착]\n- 초청자: ${creatorName || '그룹장'}\n- 대상: ${name}\n- 연락처: ${cleanPhone}\n👉 아래의 [초대 수락] 버튼을 터치하시면 이 그룹 약속방에 안전하게 입장 완료됩니다!`,
       timestamp: new Date().toISOString(),
       isSystem: true,
-      inviteId: newFriendId,
+      inviteId: targetFriendId,
       isInviteCard: true
     });
 
@@ -1135,33 +1263,50 @@ async function startServer() {
     const colors = ['#EF4444','#F97316','#EAB308','#10B981','#3B82F6','#8B5CF6','#EC4899'];
     const color = colors[parseInt(digits.slice(-1) || '0') % colors.length];
 
-    // 모든 기본 룸에 사용자 추가 (없으면 생성)
+    // global 사용자 프로필 저장 및 업데이트
+    if (!dbUserProfiles[userId]) {
+      dbUserProfiles[userId] = {
+        id: userId,
+        name: displayName,
+        avatar: userAvatar,
+        color,
+        phone,
+        realName,
+        alias,
+        lat: HONGDAE_LAT + (Math.random() - 0.5) * 0.01,
+        lng: HONGDAE_LNG + (Math.random() - 0.5) * 0.01,
+        statusMsg: '애플망고톡 시작! 🍎🥭',
+        isOnline: true,
+        battery: 100,
+        speed: 0,
+        heading: '정지',
+        pedometerEnabled: false,
+        stepsToday: 0,
+        route: [],
+        routeIndex: 0,
+        updatedAt: new Date().toISOString(),
+      };
+    } else {
+      dbUserProfiles[userId].name = displayName;
+      if (avatar) {
+        dbUserProfiles[userId].avatar = avatar;
+      }
+      dbUserProfiles[userId].phone = phone;
+      dbUserProfiles[userId].realName = realName;
+      dbUserProfiles[userId].alias = alias;
+      dbUserProfiles[userId].updatedAt = new Date().toISOString();
+    }
+
+    // 모든 기존 룸에 사용자 추가/업데이트
     Object.keys(dbRooms).forEach(roomId => {
       const r = dbRooms[roomId];
       if (!r.friends[userId]) {
         r.friends[userId] = {
-          id: userId,
-          name: displayName,
-          avatar: userAvatar,
-          color,
-          phone,
-          realName,
-          alias,
-          lat: HONGDAE_LAT + (Math.random() - 0.5) * 0.01,
-          lng: HONGDAE_LNG + (Math.random() - 0.5) * 0.01,
-          statusMsg: '애플망고톡 시작! 🍎🥭',
-          isOnline: true,
-          battery: 100,
-          speed: 0,
-          heading: '정지',
-          pedometerEnabled: false,
-          stepsToday: 0,
+          ...dbUserProfiles[userId],
           route: [],
-          routeIndex: 0,
-          updatedAt: new Date().toISOString(),
+          routeIndex: 0
         };
       } else {
-        // 기존 사용자 정보 업데이트
         r.friends[userId].name = displayName;
         if (avatar) {
           r.friends[userId].avatar = avatar;
@@ -1172,6 +1317,10 @@ async function startServer() {
         r.friends[userId].updatedAt = new Date().toISOString();
       }
     });
+
+    if (phone) {
+      linkPendingInvitations(phone, userId, realName || '', alias || '', userAvatar, color);
+    }
 
     const token = generateToken(userId);
     res.json({ success: true, userId, token });
@@ -1496,6 +1645,95 @@ async function startServer() {
     });
 
     res.json(app);
+  });
+
+  // 1:1 Game Match Requests global registry
+  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori'; roomId: string; timestamp: number }> = {};
+
+  // POST /api/games/invite
+  app.post('/api/games/invite', (req: AuthRequest, res: Response) => {
+    const { from, to, game, roomId } = req.body;
+    if (!from || !to || !game || !roomId) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    const inviteId = `game-invite-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    dbGameInvites[inviteId] = {
+      from,
+      to,
+      game,
+      roomId,
+      timestamp: Date.now()
+    };
+
+    const senderProfile = findUserProfile(from);
+    const senderName = senderProfile ? (senderProfile.alias || senderProfile.realName || senderProfile.name) : '친구';
+    const gameLabel = game === 'drone_battle' ? '드론 전쟁' : '윷놀이';
+
+    // Add notification to room-friends for global exposure
+    const defaultRoom = dbRooms['room-friends'] || dbRooms[roomId];
+    if (defaultRoom) {
+      defaultRoom.notifications.unshift({
+        id: inviteId,
+        type: 'invite',
+        title: '🎮 1:1 대결 신청 도착!',
+        message: `[${senderName}] 님이 [${gameLabel}] 대결을 신청했습니다.`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        roomId,
+        game,
+        from,
+        to
+      });
+    }
+
+    // Trigger Socket.IO real-time pop-up broadcast
+    broadcastToRoom(roomId, 'game-relayed', {
+      type: 'invite',
+      from,
+      to,
+      game
+    });
+
+    res.json({ success: true, inviteId });
+  });
+
+  // POST /api/games/accept
+  app.post('/api/games/accept', (req: AuthRequest, res: Response) => {
+    const { inviteId } = req.body;
+    if (!inviteId) {
+      return res.status(400).json({ error: 'Invite ID required' });
+    }
+
+    const invite = dbGameInvites[inviteId];
+    if (!invite) {
+      return res.status(404).json({ error: 'Game invitation not found or expired' });
+    }
+
+    const { from: senderId, to: receiverId, game, roomId } = invite;
+
+    // Trigger Socket.IO real-time match accept broadcast to transition both clients
+    broadcastToRoom(roomId, 'game-relayed', {
+      type: 'accept',
+      from: receiverId, // The receiver accepted it
+      to: senderId,     // The sender should match
+      game
+    });
+
+    // Remove the notification from lists
+    Object.values(dbRooms).forEach(r => {
+      r.notifications = r.notifications.filter(n => n.id !== inviteId);
+    });
+
+    // Clean up registry
+    delete dbGameInvites[inviteId];
+
+    res.json({
+      success: true,
+      game,
+      opponentId: senderId,
+      role: 'p2' // The receiver acts as Player 2
+    });
   });
 
   // 4. Notifications Endpoints

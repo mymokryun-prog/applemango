@@ -85,6 +85,10 @@ export default function App() {
   const [isSoundEnabled, setIsSoundEnabled] = useState(() => {
     return localStorage.getItem('aemang_sound_enabled') !== 'false';
   });
+  const [selectedSoundIdx, setSelectedSoundIdx] = useState<number>(() => {
+    const saved = localStorage.getItem('aemang_sound_idx');
+    return saved ? parseInt(saved, 10) : 0;
+  });
 
   const [recentCreatedRoomName, setRecentCreatedRoomName] = useState<string | null>(null);
   const [pendingDeleteRoomId, setPendingDeleteRoomId] = useState<string | null>(null);
@@ -525,8 +529,8 @@ export default function App() {
     hasCenteredOnGpsRef.current = false;
   }, [activeRoomId]);
 
-  // Web Audio API 기반 "애플" 비프음 재생
-  const speakText = useCallback((text: string, force = false) => {
+  // Web Audio API 기반 다양한 알림 사운드 합성기
+  const playBipSound = useCallback((soundIdx: number, force = false) => {
     if (!isSoundEnabled && !force) return;
     if (typeof window === 'undefined') return;
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -534,37 +538,138 @@ export default function App() {
     
     try {
       const ctx = new AudioContextClass();
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      const gain2 = ctx.createGain();
       
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(880, ctx.currentTime); // '애' (A5)
-      gain1.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-      
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(659, ctx.currentTime + 0.07); // '플' (E5)
-      gain2.gain.setValueAtTime(0, ctx.currentTime);
-      gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.07);
-      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      
-      osc1.start(ctx.currentTime);
-      osc1.stop(ctx.currentTime + 0.16);
-      
-      osc2.start(ctx.currentTime + 0.07);
-      osc2.stop(ctx.currentTime + 0.25);
+      if (soundIdx === 0) {
+        // 1. 애플: A5 (880Hz) -> E5 (659Hz) sine beep.
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        const gain2 = ctx.createGain();
+        
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(880, ctx.currentTime);
+        gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(659, ctx.currentTime + 0.07);
+        gain2.gain.setValueAtTime(0, ctx.currentTime);
+        gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.07);
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        
+        osc1.start(ctx.currentTime);
+        osc1.stop(ctx.currentTime + 0.16);
+        osc2.start(ctx.currentTime + 0.07);
+        osc2.stop(ctx.currentTime + 0.25);
+      } else if (soundIdx === 1) {
+        // 2. 실로폰: C6 (1047Hz) -> G5 (784Hz) -> E5 (659Hz) triangle chime.
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const osc3 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        const gain2 = ctx.createGain();
+        const gain3 = ctx.createGain();
+
+        osc1.type = 'triangle';
+        osc1.frequency.setValueAtTime(1047, ctx.currentTime);
+        gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(784, ctx.currentTime + 0.1);
+        gain2.gain.setValueAtTime(0, ctx.currentTime);
+        gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.1);
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+        osc3.type = 'triangle';
+        osc3.frequency.setValueAtTime(659, ctx.currentTime + 0.2);
+        gain3.gain.setValueAtTime(0, ctx.currentTime);
+        gain3.gain.setValueAtTime(0.15, ctx.currentTime + 0.2);
+        gain3.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+
+        osc1.connect(gain1); gain1.connect(ctx.destination);
+        osc2.connect(gain2); gain2.connect(ctx.destination);
+        osc3.connect(gain3); gain3.connect(ctx.destination);
+
+        osc1.start(ctx.currentTime); osc1.stop(ctx.currentTime + 0.21);
+        osc2.start(ctx.currentTime + 0.1); osc2.stop(ctx.currentTime + 0.31);
+        osc3.start(ctx.currentTime + 0.2); osc3.stop(ctx.currentTime + 0.41);
+      } else if (soundIdx === 2) {
+        // 3. 경쾌한 핑: 1200Hz -> 800Hz sine frequency sweep (0.1s).
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.1);
+        
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.11);
+      } else if (soundIdx === 3) {
+        // 4. 레이저: 800Hz -> 200Hz sawtooth sweep (0.25s).
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(200, ctx.currentTime + 0.25);
+        
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.26);
+      } else if (soundIdx === 4) {
+        // 5. 전통 장구: Triangle drum thud (150Hz -> 50Hz) + wood clack (800Hz).
+        const oscDrum = ctx.createOscillator();
+        const gainDrum = ctx.createGain();
+        oscDrum.type = 'triangle';
+        oscDrum.frequency.setValueAtTime(150, ctx.currentTime);
+        oscDrum.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.15);
+        gainDrum.gain.setValueAtTime(0.25, ctx.currentTime);
+        gainDrum.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        
+        oscDrum.connect(gainDrum);
+        gainDrum.connect(ctx.destination);
+        oscDrum.start(ctx.currentTime);
+        oscDrum.stop(ctx.currentTime + 0.16);
+        
+        const oscClack = ctx.createOscillator();
+        const gainClack = ctx.createGain();
+        oscClack.type = 'triangle';
+        oscClack.frequency.setValueAtTime(800, ctx.currentTime + 0.08);
+        gainClack.gain.setValueAtTime(0, ctx.currentTime);
+        gainClack.gain.setValueAtTime(0.2, ctx.currentTime + 0.08);
+        gainClack.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.13);
+        
+        oscClack.connect(gainClack);
+        gainClack.connect(ctx.destination);
+        oscClack.start(ctx.currentTime + 0.08);
+        oscClack.stop(ctx.currentTime + 0.14);
+      }
     } catch (e) {
       console.error('AudioContext error:', e);
     }
   }, [isSoundEnabled]);
+
+  // 기존 컴포넌트와의 호환성을 위한 speakText 맵핑 함수
+  const speakText = useCallback((text: string, force = false) => {
+    playBipSound(selectedSoundIdx, force);
+  }, [playBipSound, selectedSoundIdx]);
 
   // 새 채팅 메시지 감지 시 TTS 말하기
   const prevMessagesCountRef = useRef(0);
@@ -829,6 +934,46 @@ export default function App() {
     }
   };
 
+  const handleAcceptRoomInvite = async (id: string, roomId: string) => {
+    try {
+      const response = await authFetch('/api/friends/accept', {
+        method: 'POST',
+        body: JSON.stringify({
+          id,
+          roomId
+        })
+      });
+      if (response.ok) {
+        setActiveRoomId(roomId);
+        fetchAllStates(roomId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAcceptGameInvite = async (inviteId: string) => {
+    try {
+      const response = await authFetch('/api/games/accept', {
+        method: 'POST',
+        body: JSON.stringify({ inviteId })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setMultiplayerGameConfig({
+            game: data.game,
+            opponentId: data.opponentId,
+            role: 'p2'
+          });
+          setActiveTab('game');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleManualMoveFriend = async (id: string, latOffset: number, lngOffset: number) => {
     const friend = friends.find(f => f.id === id);
     if (!friend) return;
@@ -931,6 +1076,7 @@ export default function App() {
         // 즉시 탭에 추가
         setRooms(prev => [...prev.filter(r => r.id !== newRoom.id), newRoom]);
         setActiveRoomId(newRoom.id);
+        setActiveTab('chat');
         setIsCreatingRoom(false);
         setNewRoomName('');
         setNewRoomEmoji('🍎');
@@ -1514,6 +1660,8 @@ export default function App() {
           <NotificationPanel
             notifications={notifications}
             onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+            onAcceptRoomInvite={handleAcceptRoomInvite}
+            onAcceptGameInvite={handleAcceptGameInvite}
           />
         )}
 
@@ -1697,36 +1845,72 @@ export default function App() {
             <p className="text-xs text-gray-500">앱 알림 소리 켜기/끄기 및 방 탈퇴 등 환경설정입니다.</p>
 
             <div className="space-y-4 py-2 border-t border-b border-gray-100">
-              <div className="flex items-center justify-between pb-1">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">소리 알림</p>
-                  <p className="text-[11px] text-gray-400">채팅 및 알림 시 경쾌한 비프음이 울립니다</p>
-                </div>
-                <div className="flex items-center gap-2 font-sans">
-                  <button
-                    type="button"
-                    onClick={() => speakText('애망! 애망!', true)}
-                    className="bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] whitespace-nowrap font-bold px-2 py-1 rounded-xl transition border border-rose-200"
-                  >
-                    🔊 소리 테스트
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextVal = !isSoundEnabled;
-                      setIsSoundEnabled(nextVal);
-                      localStorage.setItem('aemang_sound_enabled', String(nextVal));
-                    }}
-                    className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-200 ${
-                      isSoundEnabled ? 'bg-rose-500' : 'bg-gray-200'
-                    }`}
-                  >
-                    <div
-                      className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${
-                        isSoundEnabled ? 'translate-x-6' : 'translate-x-0'
+              <div className="flex flex-col pb-1 gap-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">소리 알림</p>
+                    <p className="text-[11px] text-gray-400">채팅 및 알림 시 경쾌한 비프음이 울립니다</p>
+                  </div>
+                  <div className="flex items-center gap-2 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => speakText('애망! 애망!', true)}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] whitespace-nowrap font-bold px-2 py-1 rounded-xl transition border border-rose-200"
+                    >
+                      🔊 소리 테스트
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = !isSoundEnabled;
+                        setIsSoundEnabled(nextVal);
+                        localStorage.setItem('aemang_sound_enabled', String(nextVal));
+                      }}
+                      className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-200 ${
+                        isSoundEnabled ? 'bg-rose-500' : 'bg-gray-200'
                       }`}
-                    />
-                  </button>
+                    >
+                      <div
+                        className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${
+                          isSoundEnabled ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 알림 소리 종류 선택 그리드 */}
+                <div className="space-y-1.5 mt-1">
+                  <p className="text-[10px] font-bold text-gray-400">알림 소리 종류 선택</p>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[
+                      { label: '애플 🍎', value: 0 },
+                      { label: '실로폰 🎵', value: 1 },
+                      { label: '핑 🔔', value: 2 },
+                      { label: '레이저 ⚡', value: 3 },
+                      { label: '장구 🥁', value: 4 },
+                    ].map((theme) => {
+                      const isSelected = selectedSoundIdx === theme.value;
+                      return (
+                        <button
+                          key={theme.value}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSoundIdx(theme.value);
+                            localStorage.setItem('aemang_sound_idx', String(theme.value));
+                            playBipSound(theme.value, true);
+                          }}
+                          className={`py-2 px-1 text-[10px] font-bold rounded-xl border text-center transition ${
+                            isSelected
+                              ? 'bg-rose-500 text-white border-rose-500 shadow-sm'
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-rose-50 hover:text-rose-600'
+                          }`}
+                        >
+                          {theme.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 

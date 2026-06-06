@@ -10,6 +10,8 @@ import { Bell, BellOff, MessageSquare, MapPin, Calendar, Sparkles, CheckCheck } 
 interface NotificationPanelProps {
   notifications: NotificationAlert[];
   onMarkAllAsRead: () => void;
+  onAcceptRoomInvite: (id: string, roomId: string) => void;
+  onAcceptGameInvite: (inviteId: string) => void;
 }
 
 const TYPE_META: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
@@ -20,7 +22,12 @@ const TYPE_META: Record<string, { icon: React.ReactNode; color: string; bg: stri
   system: { icon: <Bell className="w-4 h-4" />, color: 'text-rose-600', bg: 'bg-rose-100' },
 };
 
-export default function NotificationPanel({ notifications, onMarkAllAsRead }: NotificationPanelProps) {
+export default function NotificationPanel({ 
+  notifications, 
+  onMarkAllAsRead,
+  onAcceptRoomInvite,
+  onAcceptGameInvite
+}: NotificationPanelProps) {
   const unread = notifications.filter(n => !n.read).length;
 
   return (
@@ -57,18 +64,22 @@ export default function NotificationPanel({ notifications, onMarkAllAsRead }: No
             <p className="text-xs mt-1 opacity-70">친구가 도착하거나 새 약속이 생기면 알려드려요</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y divide-gray-50 font-sans">
             {notifications.map((notif) => {
               const meta = TYPE_META[notif.type] || TYPE_META.system;
+              const nAny = notif as any;
+              const isRoomInvite = notif.type === 'invite' && nAny.roomId && nAny.inviteId && !nAny.game;
+              const isGameInvite = notif.type === 'invite' && nAny.roomId && nAny.game && nAny.from;
+
               return (
                 <div
                   key={notif.id}
-                  className={`flex items-start gap-3 px-4 py-3.5 transition-colors ${notif.read ? 'opacity-50' : 'hover:bg-gray-50'}`}
+                  className={`flex items-start gap-3 px-4 py-3.5 transition-colors ${notif.read ? 'opacity-65' : 'hover:bg-gray-50'}`}
                 >
                   <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
                     {meta.icon}
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 text-left">
                     <div className="flex items-baseline justify-between gap-2">
                       <p className="text-[13px] font-semibold text-gray-900 truncate">{notif.title}</p>
                       <span className="text-[10px] text-gray-400 shrink-0 font-mono">
@@ -76,6 +87,32 @@ export default function NotificationPanel({ notifications, onMarkAllAsRead }: No
                       </span>
                     </div>
                     <p className="text-[12px] text-gray-500 mt-0.5 leading-relaxed break-words">{notif.message}</p>
+                    
+                    {/* 초대 수락 버튼 */}
+                    {isRoomInvite && (
+                      <div className="mt-2 flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onAcceptRoomInvite(nAny.inviteId, nAny.roomId)}
+                          className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-[9.5px] px-3 py-1.5 rounded-lg border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
+                        >
+                          초대 수락 👍
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 대결 수락 버튼 */}
+                    {isGameInvite && (
+                      <div className="mt-2 flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onAcceptGameInvite(notif.id)}
+                          className="bg-indigo-650 hover:bg-indigo-700 text-white font-extrabold text-[9.5px] px-3 py-1.5 rounded-lg border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
+                        >
+                          대결 수락 ⚔️
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {!notif.read && (
                     <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0 mt-2" />
