@@ -1155,30 +1155,10 @@ async function startServer() {
     res.status(404).json({ error: 'Room not found' });
   });
 
-  // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능 (시스템 방은 초기화 처리하여 보호)
+  // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능 (시스템 방 포함)
   app.post('/api/rooms/delete', (req, res) => {
     const { roomId } = req.body;
     if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
-    
-    const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
-    if (isSystemRoom) {
-      const room = dbRooms[roomId];
-      if (room) {
-        let welcomeText = '';
-        if (roomId === 'room-friends') welcomeText = '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @망고봇 을 부르면 모임 장소도 추천해 드려요!';
-        else if (roomId === 'room-family') welcomeText = '🏠 가족 안심방이 활성화되었습니다. 가족을 초대하여 상시 위치 공유를 시작하세요!';
-        else if (roomId === 'room-work') welcomeText = '👔 직장 동료 방이 활성화되었습니다. 외근·미팅 위치를 공유해 보세요!';
-        else if (roomId === 'room-care') welcomeText = '👵 부모님 안심 효도방이 활성화되었습니다. 부모님을 초대하여 실시간 위치와 건강 정보를 확인하세요!';
-        else welcomeText = '방이 초기화되었습니다.';
-
-        room.messages = welcomeMsg(room.type || 'system', welcomeText);
-        room.friends = {};
-        room.appointments = [];
-        room.notifications = [];
-        saveDatabaseDebounced();
-        return res.json({ success: true, resetRoomId: roomId });
-      }
-    }
 
     if (dbRooms[roomId]) {
       delete dbRooms[roomId];

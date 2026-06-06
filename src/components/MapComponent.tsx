@@ -297,14 +297,14 @@ export default function MapComponent({
             strokeWeight: selectedFriendId === f.id ? 4.5 : 2.5,
             strokeColor: fruitColor,
             strokeOpacity: selectedFriendId === f.id ? 0.95 : 0.65,
-            strokeStyle: isMe ? 'dashed' : 'solid',
+            strokeStyle: 'solid',
           });
           polyline.setMap(map);
           kakaoPolylinesRef.current.push(polyline);
         });
       });
 
-      // 3-2.5. 임시 핀 연결선 그리기 (내 위치에서 임시 핀까지 과일색 점선)
+      // 3-2.5. 임시 핀 연결선 그리기 (내 위치에서 임시 핀까지 과일색 실선)
       if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
         const me = friends.find(f => f.id === activeProfileId);
         if (me) {
@@ -314,7 +314,7 @@ export default function MapComponent({
             strokeWeight: 4.5,
             strokeColor: fruitColor,
             strokeOpacity: 0.95,
-            strokeStyle: 'dashed',
+            strokeStyle: 'solid',
           });
           tempPolyline.setMap(map);
           kakaoPolylinesRef.current.push(tempPolyline);
@@ -403,13 +403,12 @@ export default function MapComponent({
             color: fruitColor,
             weight: selectedFriendId === f.id ? 4 : 2.5,
             opacity: selectedFriendId === f.id ? 0.9 : 0.6,
-            dashArray: isMe ? '5, 5' : undefined,
           });
           pg.addLayer(line);
         });
       });
 
-      // 임시 핀 연결선 (내 위치에서 임시 핀까지 과일색 점선)
+      // 임시 핀 연결선 (내 위치에서 임시 핀까지 과일색 실선)
       if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
         const me = friends.find(f => f.id === activeProfileId);
         if (me) {
@@ -418,7 +417,6 @@ export default function MapComponent({
             color: fruitColor,
             weight: 4,
             opacity: 0.9,
-            dashArray: '5, 5',
           });
           pg.addLayer(tempLine);
         }

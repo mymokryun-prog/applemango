@@ -51,13 +51,18 @@ export default function GroupRoomsPanel({
   const handleCreate = async () => {
     if (!newName.trim()) return;
     setIsCreating(true);
-    const typeOption = ROOM_TYPE_OPTIONS.find(t => t.value === newType);
-    await onCreateRoom(newName.trim(), newEmoji, newType, typeOption?.trackingStyle || 'temporary');
-    setNewName('');
-    setNewEmoji('🍎');
-    setNewType('friends');
-    setShowCreate(false);
-    setIsCreating(false);
+    try {
+      const typeOption = ROOM_TYPE_OPTIONS.find(t => t.value === newType);
+      await onCreateRoom(newName.trim(), newEmoji, newType, typeOption?.trackingStyle || 'temporary');
+      setNewName('');
+      setNewEmoji('🍎');
+      setNewType('friends');
+      setShowCreate(false);
+    } catch (error) {
+      console.error('Failed to create group room:', error);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   // 방별 마지막 메시지 가져오기
