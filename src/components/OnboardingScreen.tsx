@@ -96,7 +96,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
 
   const handleComplete = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !nickname.trim()) return;
+    if (!name.trim()) return;
     onComplete(phone, name.trim(), nickname.trim(), selectedFruit);
   };
 
@@ -215,7 +215,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
                 {selectedFruit}
               </div>
               <div>
-                <p className="text-sm font-bold text-gray-800">{nickname || '닉네임'}</p>
+                <p className="text-sm font-bold text-gray-800">{nickname || name || '이름'}</p>
                 <p className="text-xs text-gray-400">{name || '이름'} · {phone}</p>
               </div>
             </div>
@@ -230,7 +230,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
               </button>
               <button
                 type="submit"
-                disabled={!name.trim() || !nickname.trim()}
+                disabled={!name.trim()}
                 className="flex-1 py-3.5 bg-orange-400 hover:bg-orange-500 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold text-sm rounded-2xl transition shadow-sm"
               >
                 애플망고톡 시작하기 🍎🥭

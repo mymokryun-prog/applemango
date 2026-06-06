@@ -84,9 +84,19 @@ export const syncOutbox = async (): Promise<void> => {
   const entries = await getAllOutboxEntries();
   for (const entry of entries) {
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('aemang_token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const activePhone = localStorage.getItem('aemang_phone');
+      if (activePhone) {
+        headers['x-user-id'] = 'user-' + activePhone.replace(/\D/g, '');
+      }
+
       const response = await fetch(entry.endpoint, {
         method: entry.method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(entry.payload),
       });
       if (response.ok) {

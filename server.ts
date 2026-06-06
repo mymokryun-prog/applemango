@@ -112,10 +112,10 @@ const MessageSchema = z.object({
 });
 
 const FriendInviteSchema = z.object({
-  name: z.string().min(1).max(50),
-  avatar: z.string().max(10),
-  color: z.string().regex(/^#[0-9A-F]{6}$/i),
-  phone: z.string().regex(/^0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4}$/, 'Invalid phone format'),
+  name: z.string().max(50).optional().nullable(),
+  avatar: z.string().max(10).optional(),
+  color: z.string().regex(/^#[0-9A-F]{6}$/i).optional(),
+  phone: z.string().max(50).optional().nullable(),
   roomId: z.string().optional(),
   creatorName: z.string().optional()
 });
@@ -707,8 +707,26 @@ async function startServer() {
   // API Endpoints
 
   // 0. Rooms Catalog Endpoints
-  app.get('/api/rooms', (req, res) => {
-    const summary = Object.values(dbRooms).map(r => ({
+  app.get('/api/rooms', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId || 'user-minsu';
+
+    if (Object.keys(dbRooms).length === 0) {
+      dbRooms['room-friends'] = {
+        id: 'room-friends', name: '애플망고 단짝방', emoji: '🥭',
+        type: 'friends', trackingStyle: 'temporary', isDisbanded: false,
+        messages: welcomeMsg('friends', '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @애망봇 을 부르면 모임 장소도 추천해 드려요!'),
+        friends: {}, appointments: [], notifications: []
+      };
+    }
+
+    const filteredRooms = Object.values(dbRooms).filter(r => {
+      const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(r.id);
+      const isMember = r.friends && r.friends[userId];
+      const isOwner = r.ownerId === userId;
+      return isSystemRoom || isMember || isOwner;
+    });
+
+    const summary = filteredRooms.map(r => ({
       id: r.id,
       name: r.name,
       emoji: r.emoji,
@@ -944,35 +962,61 @@ async function startServer() {
   app.post('/api/rooms/disband', (req, res) => {
     const { roomId } = req.body;
     if (dbRooms[roomId]) {
-      const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
-      if (!isSystemRoom) {
-        delete dbRooms[roomId];
-        return res.json({ success: true, isDisbanded: true, deleted: true });
-      } else {
-        dbRooms[roomId].isDisbanded = true;
-        dbRooms[roomId].messages.push({
-          id: `msg-disband-sys-${Date.now()}`,
-          senderId: 'system',
-          senderName: '시스템',
-          senderAvatar: '🔒',
-          senderColor: '#EF4444',
-          text: '🔒 모임 약속 완료 및 귀가 감지가 완료되어 실시간 위치 동기화 수집이 긴급 해제되었습니다. 프라이버시 보호 상태가 유지됩니다.',
-          timestamp: new Date().toISOString(),
-          isSystem: true
-        });
-        return res.json({ success: true, isDisbanded: true, deleted: false });
-      }
+      delete dbRooms[roomId];
+      return res.json({ success: true, isDisbanded: true, deleted: true });
     }
     res.status(404).json({ error: 'Room not found' });
   });
 
-  // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능
+  // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능 (시스템 방은 초기화 처리하여 보호)
   app.post('/api/rooms/delete', (req, res) => {
     const { roomId } = req.body;
     if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
+    
+    const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
+    if (isSystemRoom) {
+      const room = dbRooms[roomId];
+      if (room) {
+        let welcomeText = '';
+        if (roomId === 'room-friends') welcomeText = '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @망고봇 을 부르면 모임 장소도 추천해 드려요!';
+        else if (roomId === 'room-family') welcomeText = '🏠 가족 안심방이 활성화되었습니다. 가족을 초대하여 상시 위치 공유를 시작하세요!';
+        else if (roomId === 'room-work') welcomeText = '👔 직장 동료 방이 활성화되었습니다. 외근·미팅 위치를 공유해 보세요!';
+        else if (roomId === 'room-care') welcomeText = '👵 부모님 안심 효도방이 활성화되었습니다. 부모님을 초대하여 실시간 위치와 건강 정보를 확인하세요!';
+        else welcomeText = '방이 초기화되었습니다.';
+
+        room.messages = welcomeMsg(room.type || 'system', welcomeText);
+        room.friends = {};
+        room.appointments = [];
+        room.notifications = [];
+        return res.json({ success: true, resetRoomId: roomId });
+      }
+    }
+
     if (dbRooms[roomId]) {
       delete dbRooms[roomId];
       return res.json({ success: true, deletedRoomId: roomId });
+    }
+    res.status(404).json({ error: 'Room not found' });
+  });
+
+  // 대화방 기록 초기화 (안심방 초기화)
+  app.post('/api/rooms/reset', (req, res) => {
+    const { roomId } = req.body;
+    if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
+    const room = dbRooms[roomId];
+    if (room) {
+      let welcomeText = '';
+      if (roomId === 'room-friends') welcomeText = '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @망고봇 을 부르면 모임 장소도 추천해 드려요!';
+      else if (roomId === 'room-family') welcomeText = '🏠 가족 안심방이 활성화되었습니다. 가족을 초대하여 상시 위치 공유를 시작하세요!';
+      else if (roomId === 'room-work') welcomeText = '👔 직장 동료 방이 활성화되었습니다. 외근·미팅 위치를 공유해 보세요!';
+      else if (roomId === 'room-care') welcomeText = '👵 부모님 안심 효도방이 활성화되었습니다. 부모님을 초대하여 실시간 위치와 건강 정보를 확인하세요!';
+      else welcomeText = '방이 초기화되었습니다.';
+
+      room.messages = welcomeMsg(room.type || 'system', welcomeText);
+      room.friends = {};
+      room.appointments = [];
+      room.notifications = [];
+      return res.json({ success: true, resetRoomId: roomId });
     }
     res.status(404).json({ error: 'Room not found' });
   });
@@ -984,12 +1028,15 @@ async function startServer() {
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
 
     const newFriendId = `friend-invited-${Date.now()}`;
-    const cleanPhone = phone.trim();
+    const cleanPhone = (phone || '').trim() || '번호 미등록';
+    const cleanName = (name || '').trim() || '이름 미등록';
+
+    const displayName = cleanName === '이름 미등록' ? cleanPhone : cleanName;
 
     const newFriend = {
       id: newFriendId,
-      name: `${name} (대기)`,
-      realName: name,
+      name: `${displayName} (대기)`,
+      realName: cleanName,
       avatar: avatar || '👵',
       color: color || '#EC4899',
       lat: HONGDAE_LAT + (Math.random() - 0.5) * 0.008,
@@ -1013,7 +1060,7 @@ async function startServer() {
       id: `notif-invite-pending-${Date.now()}`,
       type: 'invite',
       title: '초대장 발송됨 📨',
-      message: `[${creatorName || '호스트'}] 님이 ${name} (${cleanPhone}) 님에게 그룹 가입 초대를 발송했습니다. 수락 시 활성화됩니다.`,
+      message: `[${creatorName || '호스트'}] 님이 ${displayName} 님에게 그룹 가입 초대를 발송했습니다. 수락 시 활성화됩니다.`,
       timestamp: new Date().toISOString(),
       read: false
     });
@@ -1155,12 +1202,12 @@ async function startServer() {
 
     room.messages.push(newMsg);
 
-    // AI Mentions Handler (@망고봇)
-    if (text && (text.includes('@망고봇') || text.includes('@ai') || text.includes('@애망bot'))) {
+    // AI Mentions Handler (@애망봇 / @망고봇)
+    if (text && (text.includes('@애망봇') || text.includes('@망고봇') || text.includes('@ai') || text.includes('@애망bot'))) {
       const prompt = `사용자가 실시간 친구 모임 및 안심 가로등 앱 '애플망고톡' 내에서 다음과 같은 메시지를 보냈습니다: "${text}".
       이전 대화 목록: ${JSON.stringify(room.messages.slice(-5))}
       참여 친구들의 현재 위치: ${JSON.stringify(Object.values(room.friends).map((f: any) => ({ name: f.name, lat: f.lat, lng: f.lng, status: f.statusMsg })))}
-      질문에 맞게 친절하고 위트 있는 @망고봇 캐릭터(말투에 '🍎' 이나 '🥭' 를 섞어서 친근한 한국어로 작성)로 다음 질문에 매장 추천, 안심 조율 팁, 또는 피드백을 제공해 주세요. 3문장 이내로 컴팩트하고 유익하게 조언해주세요.`;
+      질문에 맞게 친절하고 위트 있는 @애망봇 캐릭터(말투에 '🍎' 이나 '🥭' 를 섞어서 친근한 한국어로 작성)로 다음 질문에 매장 추천, 안심 조율 팁, 또는 피드백을 제공해 주세요. 3문장 이내로 컴팩트하고 유익하게 조언해주세요.`;
 
       let aiText = '';
       if (ai) {
@@ -1169,7 +1216,7 @@ async function startServer() {
             model: 'gemini-3.5-flash',
             contents: prompt,
             config: {
-              systemInstruction: 'You are the playful and smart assistant chatbot of "Amang Signal" (AppleMango Signal) named @망고봇. You suggest meeting spots, coordinate plans, check elder companion safety, and speak in a sweet fruits loving tone in Korean!',
+              systemInstruction: 'You are the playful and smart assistant chatbot of "Amang Signal" (AppleMango Signal) named @애망봇. You suggest meeting spots, coordinate plans, check elder companion safety, and speak in a sweet fruits loving tone in Korean!',
             }
           });
           aiText = aiResponse.text || '애망! 🍎🥭 머리가 살짝 혼란스럽네요! 근처 상쾌한 "애플망고 피크닉 쉼터"나 디저트 카페에서 소통해볼까요?';
@@ -1189,7 +1236,7 @@ async function startServer() {
       const botMsg = {
         id: `msg-bot-${Date.now()}`,
         senderId: 'bot-ai',
-        senderName: '망고봇 🥭',
+        senderName: '애망봇 🤖',
         senderAvatar: '🤖',
         senderColor: '#EF4444',
         text: aiText,
@@ -1201,16 +1248,16 @@ async function startServer() {
         room.notifications.unshift({
           id: `notif-${Date.now()}`,
           type: 'chat',
-          title: '@망고봇 멘션 답변',
-          message: '@망고봇이 채팅방에 기발한 귀가/모임 조율 조언을 남겼습니다! 🍎',
+          title: '@애망봇 멘션 답변',
+          message: '@애망봇이 채팅방에 기발한 귀가/모임 조율 조언을 남겼습니다! 🍎',
           timestamp: new Date().toISOString(),
           read: false,
-        });
-      }, 1000);
-    }
+          });
+        }, 1000);
+      }
 
-    res.json(newMsg);
-  }));
+      res.json(newMsg);
+    }));
 
   // 2. Friends/Locations Endpoints
   app.get('/api/friends', (req, res) => {
@@ -1410,6 +1457,9 @@ async function startServer() {
     const { id, friendId, vote, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
     const app = room.appointments.find(a => a.id === id);
     if (!app) {
       return res.status(404).json({ error: 'Appointment not found' });
@@ -1745,6 +1795,16 @@ async function startServer() {
         callback({ success: true, message: newMsg });
       } catch (error) {
         callback({ error: 'Message send failed' });
+      }
+    });
+
+    // Real-time multiplayer game event relay
+    socket.on('game-relay', ({ roomId, payload }, callback) => {
+      try {
+        broadcastToRoom(roomId, 'game-relayed', payload);
+        if (callback) callback({ success: true });
+      } catch (error) {
+        if (callback) callback({ error: 'Game relay failed' });
       }
     });
 

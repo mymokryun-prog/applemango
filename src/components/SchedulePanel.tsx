@@ -41,14 +41,22 @@ export default function SchedulePanel({
   tempPromiseCoords, onCreateAppointment,
   onUpdateAppointment, onVote, onClearTempCoords, onFocusLocation
 }: SchedulePanelProps) {
-  const [step, setStep] = useState<1 | 2>(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [confirmedPlace, setConfirmedPlace] = useState<PlaceResult | null>(null);
   const [title, setTitle] = useState('');
+
+  // 로컬 시간대 기준 YYYY-MM-DD 날짜 구하기 헬퍼
+  const getLocalDateString = (d = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   // 날짜/시간 picker 상태
-  const [dateValue, setDateValue] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateValue, setDateValue] = useState(() => getLocalDateString());
   const [timeValue, setTimeValue] = useState('19:00');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,8 +91,8 @@ export default function SchedulePanel({
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    if (!searchQuery.trim()) {
-      setSearchResults(LOCAL_PLACES);
+    if (!searchQuery.trim() || confirmedPlace) {
+      setSearchResults(confirmedPlace ? [] : LOCAL_PLACES);
       setIsSearching(false);
       return;
     }
@@ -92,7 +100,6 @@ export default function SchedulePanel({
     setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        // 카카오 Places SDK 우선 사용, 없으면 서버 Nominatim
         if ((window as any).kakao?.maps?.services) {
           const ps = new (window as any).kakao.maps.services.Places();
           ps.keywordSearch(
@@ -133,7 +140,7 @@ export default function SchedulePanel({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [searchQuery]);
+  }, [searchQuery, confirmedPlace]);
 
   // 편집 모드 장소 검색
   useEffect(() => {
@@ -157,34 +164,29 @@ export default function SchedulePanel({
     setConfirmedPlace(place);
     setSearchQuery(place.name);
     onFocusLocation(place.lat, place.lng);
-    setStep(2);
   };
-
-  const coordsReady = !!confirmedPlace || !!tempPromiseCoords;
-  const finalLat = confirmedPlace?.lat ?? tempPromiseCoords?.[0];
-  const finalLng = confirmedPlace?.lng ?? tempPromiseCoords?.[1];
-  const finalPlaceName = confirmedPlace
-    ? `${confirmedPlace.name}`
-    : `지도 선택 (${tempPromiseCoords?.[0].toFixed(4)}, ${tempPromiseCoords?.[1].toFixed(4)})`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !coordsReady) return;
+    if (!title.trim()) return;
     setIsSubmitting(true);
+
+    const finalPlace = confirmedPlace?.name || searchQuery.trim() || (tempPromiseCoords ? `지도 선택 위치` : '장소 미지정');
+    const finalLatVal = confirmedPlace?.lat ?? tempPromiseCoords?.[0] ?? 37.5568;
+    const finalLngVal = confirmedPlace?.lng ?? tempPromiseCoords?.[1] ?? 126.9238;
+
     const formattedDatetime = formatKoreanDatetime(dateValue, timeValue);
-    onCreateAppointment(title, finalPlaceName!, formattedDatetime, finalLat, finalLng);
+    onCreateAppointment(title, finalPlace, formattedDatetime, finalLatVal, finalLngVal);
     setTitle('');
-    setDateValue(new Date().toISOString().slice(0, 10));
+    setDateValue(getLocalDateString());
     setTimeValue('19:00');
     setSearchQuery('');
     setConfirmedPlace(null);
-    setStep(1);
     onClearTempCoords();
     setIsSubmitting(false);
   };
 
   const resetForm = () => {
-    setStep(1);
     setSearchQuery('');
     setConfirmedPlace(null);
     setTitle('');
@@ -283,159 +285,136 @@ export default function SchedulePanel({
     <div className="flex flex-col h-full bg-white overflow-y-auto">
 
       {/* 약속 만들기 카드 */}
-      <div className="mx-4 mt-4 mb-2 bg-amber-50 border border-amber-100 rounded-3xl overflow-hidden">
+      <div className="mx-4 mt-4 mb-2 bg-amber-50 border-2 border-black rounded-3xl overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
         {/* 헤더 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-amber-100">
+        <div className="flex items-center justify-between px-4 py-3.5 border-b-2 border-black bg-amber-100">
           <div className="flex items-center gap-2">
-            <Flag className="w-4 h-4 text-amber-500" />
-            <span className="text-[13px] font-bold text-gray-800">새 약속 만들기</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {([1, 2] as const).map(s => (
-              <div key={s} className="flex items-center gap-1">
-                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-colors ${
-                  step > s ? 'bg-emerald-500 text-white' : step === s ? 'bg-amber-400 text-gray-900' : 'bg-gray-200 text-gray-400'
-                }`}>
-                  {step > s ? '✓' : s}
-                </div>
-                {s < 2 && <div className={`w-4 h-0.5 ${step > s ? 'bg-emerald-400' : 'bg-gray-200'}`} />}
-              </div>
-            ))}
+            <Flag className="w-4 h-4 text-amber-600" />
+            <span className="text-sm font-black text-gray-800">새 약속 만들기</span>
           </div>
         </div>
 
-        <div className="p-4 space-y-3">
-          {/* 1단계: 장소 검색 */}
-          {step === 1 && (
-            <>
-              <p className="text-xs text-gray-500">식당명, 장소명, 주소를 검색하세요 (실시간 검색)</p>
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 font-sans">
+          {/* 약속 이름 */}
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-gray-700">약속 이름 *</label>
+            <input
+              type="text" required value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="예) 민수 생일 파티, 금요 번개"
+              className="w-full bg-white border-2 border-black rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-rose-400 font-bold"
+            />
+          </div>
 
-              {/* 지도 클릭 좌표 사용 */}
-              {tempPromiseCoords && (
-                <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-2xl px-3 py-2.5">
-                  <MapPin className="w-4 h-4 text-rose-500 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-xs font-semibold text-rose-700">지도에서 위치를 선택했습니다</p>
-                    <p className="text-[11px] text-rose-400 font-mono">{tempPromiseCoords[0].toFixed(5)}, {tempPromiseCoords[1].toFixed(5)}</p>
-                  </div>
-                  <button onClick={() => setStep(2)}
-                    className="text-xs bg-rose-500 text-white px-3 py-1.5 rounded-xl font-semibold shrink-0">
-                    이 위치로 →
-                  </button>
+          {/* 모임 장소 */}
+          <div className="space-y-1 relative">
+            <label className="text-xs font-bold text-gray-700">모임 장소 (검색 또는 직접 입력) *</label>
+            
+            {/* 지도 클릭 좌표 사용 중일 때 안내 */}
+            {tempPromiseCoords && !confirmedPlace && (
+              <div className="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <p className="text-[11px] font-semibold text-rose-700">지도 선택 좌표 연동됨 ({tempPromiseCoords[0].toFixed(4)}, {tempPromiseCoords[1].toFixed(4)})</p>
                 </div>
-              )}
+                <button type="button" onClick={onClearTempCoords} className="text-[10px] text-rose-500 font-bold hover:underline">취소</button>
+              </div>
+            )}
 
+            {/* 확정된 검색 장소가 있을 때 표시 */}
+            {confirmedPlace ? (
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-250 rounded-xl px-3 py-2 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <div className="truncate">
+                    <p className="text-xs font-bold text-emerald-800 truncate">{confirmedPlace.name}</p>
+                    <p className="text-[10px] text-gray-400 truncate">{confirmedPlace.address}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setConfirmedPlace(null)} className="text-[10px] text-emerald-600 font-bold hover:underline shrink-0 ml-2">변경</button>
+              </div>
+            ) : (
               <div className="relative">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  {isSearching ? (
+                  {isSearching && (
                     <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 animate-spin" />
-                  ) : null}
+                  )}
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="예: 강남역, 홍대 라멘, 카페 베이커리"
-                    className="w-full bg-white border border-gray-200 rounded-2xl py-3 pl-9 pr-9 text-sm focus:outline-none focus:border-amber-400"
+                    placeholder="예: 강남역, 홍대 카페, 스타벅스 또는 직접 입력"
+                    className="w-full bg-white border-2 border-black rounded-2xl py-2.5 pl-9 pr-9 text-sm focus:outline-none focus:border-amber-400 font-bold"
                   />
                 </div>
 
-                {/* 검색 결과 */}
-                <div className="mt-2 space-y-1 max-h-56 overflow-y-auto">
-                  {!searchQuery && (
-                    <p className="text-center text-xs text-gray-400 py-6">🔍 장소명이나 주소를 입력하세요<br/><span className="opacity-60">예: 강남역, 홍대 카페, 스타벅스</span></p>
-                  )}
-                  {searchResults.length === 0 && !isSearching && searchQuery && (
-                    <p className="text-center text-xs text-gray-400 py-4">검색 결과가 없습니다</p>
-                  )}
-                  {searchResults.map((place, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleSelectPlace(place)}
-                      className="w-full text-left bg-white hover:bg-amber-50 border border-gray-100 hover:border-amber-200 rounded-2xl px-4 py-2.5 transition flex items-start gap-3"
-                    >
-                      <MapPin className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-semibold text-gray-800 truncate">{place.name}</p>
-                        <p className="text-[11px] text-gray-400 truncate">{place.address}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* 2단계: 약속 정보 입력 */}
-          {step === 2 && (
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] text-emerald-600 font-semibold">장소 확정</p>
-                  <p className="text-sm font-bold text-gray-800 truncate">
-                    {confirmedPlace?.name || `지도 선택 (${tempPromiseCoords?.[0].toFixed(4)})`}
-                  </p>
-                  {confirmedPlace && (
-                    <p className="text-[11px] text-gray-400 truncate">{confirmedPlace.address}</p>
-                  )}
-                </div>
-                <button type="button" onClick={() => { setStep(1); setConfirmedPlace(null); }}
-                  className="text-[11px] text-gray-400 hover:text-gray-600 shrink-0">변경</button>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-600">약속 이름 *</label>
-                <input
-                  type="text" required value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="예) 민수 생일 파티, 금요 번개"
-                  className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-600">📅 날짜 및 시간</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="date"
-                    value={dateValue}
-                    min={new Date().toISOString().slice(0, 10)}
-                    onChange={e => setDateValue(e.target.value)}
-                    className="bg-white border border-gray-200 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-400"
-                  />
-                  <input
-                    type="time"
-                    value={timeValue}
-                    onChange={e => setTimeValue(e.target.value)}
-                    className="bg-white border border-gray-200 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-                {dateValue && (
-                  <p className="text-[11px] text-amber-600 font-semibold px-1">
-                    {formatKoreanDatetime(dateValue, timeValue)}
-                  </p>
+                {/* 검색 결과 드롭다운 */}
+                {searchQuery.trim() && searchResults.length > 0 && (
+                  <div className="absolute left-0 right-0 mt-1 bg-white border-2 border-black rounded-2xl shadow-lg z-10 max-h-48 overflow-y-auto divide-y divide-gray-100">
+                    {searchResults.map((place, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectPlace(place)}
+                        className="w-full text-left hover:bg-amber-50 px-3 py-2 transition flex items-start gap-2 text-xs"
+                      >
+                        <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-800 truncate">{place.name}</p>
+                          <p className="text-[10px] text-gray-400 truncate">{place.address}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
+            )}
+          </div>
 
-              <div className="flex gap-2 pt-1">
-                <button type="button" onClick={resetForm}
-                  className="px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-2xl text-sm font-semibold text-gray-600 transition">
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  disabled={!title.trim() || isSubmitting}
-                  className="flex-1 bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 text-gray-900 font-bold py-3 rounded-2xl text-sm transition flex items-center justify-center gap-2"
-                >
-                  <Flag className="w-4 h-4" />
-                  약속 깃발 꽂기
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
+          {/* 날짜 및 시간 */}
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-gray-700">📅 날짜 및 시간 *</label>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={dateValue}
+                min={getLocalDateString()}
+                onChange={e => setDateValue(e.target.value)}
+                onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
+                className="bg-white border-2 border-black rounded-2xl px-3 py-2 text-sm focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+              />
+              <input
+                type="time"
+                value={timeValue}
+                onChange={e => setTimeValue(e.target.value)}
+                onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
+                className="bg-white border-2 border-black rounded-2xl px-3 py-2 text-sm focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+              />
+            </div>
+            {dateValue && (
+              <p className="text-[11px] text-amber-600 font-bold px-1">
+                {formatKoreanDatetime(dateValue, timeValue)}
+              </p>
+            )}
+          </div>
+
+          {/* 등록 버튼 */}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={resetForm}
+              className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 border-2 border-black rounded-2xl text-xs font-bold text-gray-600 transition shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none">
+              초기화
+            </button>
+            <button
+              type="submit"
+              disabled={!title.trim() || isSubmitting}
+              className="flex-1 bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 text-gray-900 font-black py-2.5 rounded-2xl text-xs border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition flex items-center justify-center gap-1.5"
+            >
+              <Flag className="w-3.5 h-3.5" />
+              <span>약속 깃발 꽂기</span>
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* 월별 약속 달력 */}
@@ -497,18 +476,19 @@ export default function SchedulePanel({
                 key={`day-${day}`}
                 type="button"
                 onClick={() => {
-                  if (hasApp) {
-                    setSelectedCalendarDay(isSelected ? null : day);
-                  }
+                  setSelectedCalendarDay(isSelected ? null : day);
+                  const formattedMonth = String(currentMonth).padStart(2, '0');
+                  const formattedDay = String(day).padStart(2, '0');
+                  setDateValue(`${currentYear}-${formattedMonth}-${formattedDay}`);
                 }}
                 className={`relative h-8 w-full rounded-xl flex flex-col items-center justify-center text-[11px] font-bold border transition ${
-                  hasApp
-                    ? isSelected
-                      ? 'bg-rose-500 text-white border-2 border-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] font-black scale-110'
-                      : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-black cursor-pointer'
-                    : isToday
-                      ? 'bg-blue-50 text-blue-600 border-blue-200'
-                      : 'bg-white border-gray-100 hover:bg-gray-50'
+                  isSelected
+                    ? 'bg-rose-500 text-white border-2 border-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] font-black scale-110'
+                    : hasApp
+                      ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-black cursor-pointer'
+                      : isToday
+                        ? 'bg-blue-50 text-blue-600 border-blue-200'
+                        : 'bg-white border-gray-100 hover:bg-gray-50 cursor-pointer'
                 }`}
               >
                 <span>{day}</span>
@@ -536,26 +516,30 @@ export default function SchedulePanel({
               </button>
             </div>
             <div className="space-y-1.5 max-h-32 overflow-y-auto">
-              {getAppsForDay(selectedCalendarDay).map(app => (
-                <div key={app.id} className="text-[10px] text-gray-800 flex items-start gap-1">
-                  <span className="text-amber-500 shrink-0">🚩</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-extrabold text-slate-900 truncate">{app.title}</p>
-                    <p className="text-[9px] text-gray-500 leading-tight truncate">
-                      📍 {app.placeName} · 🕒 {app.datetime.split('오')[1] ? '오' + app.datetime.split('오')[1] : app.datetime}
-                    </p>
+              {getAppsForDay(selectedCalendarDay).length === 0 ? (
+                <p className="text-[10px] text-gray-400 italic py-1 text-center">이 날짜에는 등록된 약속이 없습니다.</p>
+              ) : (
+                getAppsForDay(selectedCalendarDay).map(app => (
+                  <div key={app.id} className="text-[10px] text-gray-800 flex items-start gap-1">
+                    <span className="text-amber-500 shrink-0">🚩</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-extrabold text-slate-900 truncate">{app.title}</p>
+                      <p className="text-[9px] text-gray-500 leading-tight truncate">
+                        📍 {app.placeName} · 🕒 {app.datetime.split('오')[1] ? '오' + app.datetime.split('오')[1] : app.datetime}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onFocusLocation(app.lat, app.lng);
+                      }}
+                      className="text-[9px] bg-white border border-gray-300 px-1.5 py-0.5 rounded font-semibold text-gray-500 shrink-0 hover:border-black hover:text-black transition cursor-pointer"
+                    >
+                      이동
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onFocusLocation(app.lat, app.lng);
-                    }}
-                    className="text-[9px] bg-white border border-gray-300 px-1.5 py-0.5 rounded font-semibold text-gray-500 shrink-0 hover:border-black hover:text-black transition cursor-pointer"
-                  >
-                    이동
-                  </button>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         )}
@@ -656,7 +640,7 @@ export default function SchedulePanel({
                       setEditingAppId(app.id);
                       setEditTitle(app.title);
                       setEditPlaceName(app.placeName);
-                      setEditDate(new Date().toISOString().slice(0, 10));
+                      setEditDate(getLocalDateString());
                       setEditTime('19:00');
                       setEditLat(app.lat);
                       setEditLng(app.lng);
@@ -702,10 +686,12 @@ export default function SchedulePanel({
                     <input type="text" value={editPlaceName} onChange={e => setEditPlaceName(e.target.value)}
                       placeholder="장소 주소" className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
                     <div className="grid grid-cols-2 gap-2">
-                      <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
-                        className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                      <input type="date" value={editDate} min={getLocalDateString()} onChange={e => setEditDate(e.target.value)}
+                        onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
+                        className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400 cursor-pointer w-full" />
                       <input type="time" value={editTime} onChange={e => setEditTime(e.target.value)}
-                        className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                        onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
+                        className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400 cursor-pointer w-full" />
                     </div>
 
                     <div className="flex gap-2 pt-1">

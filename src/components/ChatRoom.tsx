@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Message, Friend } from '../types';
-import { Send, MapPin, Smile, MessageSquareShare, UserPlus } from 'lucide-react';
+import { Send, MapPin, Smile, MessageSquareShare, UserPlus, Calendar, Users, Search, Loader2, CheckCircle2, X } from 'lucide-react';
 
 interface ChatRoomProps {
   messages: Message[];
@@ -21,6 +21,8 @@ interface ChatRoomProps {
   onAcceptInvite?: (id: string) => void;
   onInviteFriend?: (name: string, emoji: string, color: string, phone: string) => void;
   roomId?: string;
+  ownerId?: string;
+  onCreateAppointment?: (title: string, placeName: string, datetime: string, lat: number, lng: number) => void;
 }
 
 export default function ChatRoom({
@@ -36,7 +38,9 @@ export default function ChatRoom({
   onDisbandRoom,
   onAcceptInvite,
   onInviteFriend,
-  roomId = ''
+  roomId = '',
+  ownerId = '',
+  onCreateAppointment
 }: ChatRoomProps) {
   const [inputText, setInputText] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -48,14 +52,42 @@ export default function ChatRoom({
   const [inviteEmoji, setInviteEmoji] = useState('👵');
   const [inviteColor, setInviteColor] = useState('#EC4899');
 
+  // 멤버 목록 모달 상태
+  const [showMembersModal, setShowMembersModal] = useState(false);
+
+  // 약속 만들기 모달 상태
+  const [showAppModal, setShowAppModal] = useState(false);
+  const [appPlaceQuery, setAppPlaceQuery] = useState('');
+  const [appPlaceResults, setAppPlaceResults] = useState<any[]>([]);
+  const [isAppSearching, setIsAppSearching] = useState(false);
+  const [confirmedAppPlace, setConfirmedAppPlace] = useState<any | null>(null);
+  const [appTitle, setAppTitle] = useState('');
+
+  // 로컬 시간대 기준 YYYY-MM-DD 날짜 구하기 헬퍼
+  const getLocalDateString = (d = new Date()) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [appDate, setAppDate] = useState(() => getLocalDateString());
+  const [appTime, setAppTime] = useState('19:00');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const INVITE_EMOJIS = ['👵', '🍎', '🥭', '🏠', '🍻', '💼', '🍈', '🍊', '🍑', '🍇'];
   const INVITE_COLORS = ['#EF4444', '#10B981', '#F97316', '#FACC15', '#EC4899', '#8B5CF6', '#3B82F6'];
 
   const handleInviteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteName.trim() || !invitePhone.trim()) return;
+    const cleanName = inviteName.trim();
+    const cleanPhone = invitePhone.trim();
+    if (!cleanName && !cleanPhone) {
+      alert('초대할 친구 이름 또는 휴대폰 번호 중 최소 하나는 입력해 주세요!');
+      return;
+    }
     if (onInviteFriend) {
-      onInviteFriend(inviteName.trim(), inviteEmoji, inviteColor, invitePhone.trim());
+      onInviteFriend(cleanName, inviteEmoji, inviteColor, cleanPhone);
     }
     setInviteName('');
     setInvitePhone('');
@@ -79,6 +111,89 @@ export default function ChatRoom({
     lng: 126.9242
   };
 
+  // 실시간 장소 검색 디바운스
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!appPlaceQuery.trim() || confirmedAppPlace) {
+      setAppPlaceResults([]);
+      setIsAppSearching(false);
+      return;
+    }
+
+    setIsAppSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        if ((window as any).kakao?.maps?.services) {
+          const ps = new (window as any).kakao.maps.services.Places();
+          ps.keywordSearch(
+            appPlaceQuery,
+            (data: any[], status: string) => {
+              setIsAppSearching(false);
+              if (status === (window as any).kakao.maps.services.Status.OK && data.length > 0) {
+                setAppPlaceResults(data.slice(0, 6).map((item: any) => ({
+                  name: item.place_name,
+                  address: item.road_address_name || item.address_name,
+                  lat: parseFloat(item.y),
+                  lng: parseFloat(item.x),
+                })));
+              }
+            }
+          );
+        } else {
+          const res = await fetch(`/api/places/search?q=${encodeURIComponent(appPlaceQuery)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setAppPlaceResults(data.slice(0, 6));
+          }
+          setIsAppSearching(false);
+        }
+      } catch {
+        setIsAppSearching(false);
+      }
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [appPlaceQuery, confirmedAppPlace]);
+
+  const formatKoreanDatetime = (date: string, time: string) => {
+    if (!date) return '시간 조율 중';
+    const d = new Date(`${date}T${time || '00:00'}`);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hour = d.getHours();
+    const min = d.getMinutes();
+    const ampm = hour < 12 ? '오전' : '오후';
+    const h = hour % 12 || 12;
+    return `${year}년 ${month}월 ${day}일 ${ampm} ${h}:${String(min).padStart(2, '0')}`;
+  };
+
+  const handleCreateAppSubmit = () => {
+    if (!appTitle.trim() || !confirmedAppPlace || !onCreateAppointment) return;
+    const formattedDt = formatKoreanDatetime(appDate, appTime);
+    onCreateAppointment(
+      appTitle.trim(),
+      confirmedAppPlace.name,
+      formattedDt,
+      confirmedAppPlace.lat,
+      confirmedAppPlace.lng
+    );
+    resetAppForm();
+    setShowAppModal(false);
+    alert('약속방에 새로운 약속이 성공적으로 개설되었습니다! 📅');
+  };
+
+  const resetAppForm = () => {
+    setAppPlaceQuery('');
+    setConfirmedAppPlace(null);
+    setAppTitle('');
+    setAppDate(getLocalDateString());
+    setAppTime('19:00');
+  };
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
@@ -100,41 +215,34 @@ export default function ChatRoom({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      {/* Dynamic chat info header - Apple-Mango Rose-Amber Style */}
-      <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white px-3 py-2.5 flex items-center justify-between border-b-2 border-black select-none shadow-sm font-sans">
-        <div className="flex items-center gap-1.5">
-          <div className="flex -space-x-1 matches-design">
-            {friends.slice(0, 3).map(f => (
-              <div 
-                key={f.id} 
-                className="w-5.5 h-5.5 rounded-full border border-black flex items-center justify-center text-xs shadow-sm bg-white font-black shrink-0"
-              >
-                {f.avatar}
-              </div>
-            ))}
-          </div>
-          <div>
-            <div className="text-[11px] font-black leading-none flex items-center gap-1">
-              시그널 대화방 ({friends.length}명)
-            </div>
-            <span className="text-[7.5px] text-yellow-100 font-bold block mt-0.5">
-              {trackingStyle === 'continuous' ? '👵 24시간 실시간 상시 안심형' : '⏰ 모임 폭파형 약속방'}
-            </span>
-          </div>
+      <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white px-3 py-1.5 flex items-center justify-between border-b-2 border-black select-none shadow-sm font-sans">
+        <div className="text-[10px] font-black tracking-tight flex items-center gap-1">
+          <span>💬 안심톡</span>
         </div>
-         <div className="flex items-center gap-1.5 font-sans">
+        <div className="flex items-center gap-1 font-sans">
           {(!['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId) || trackingStyle === 'temporary') && !isDisbanded && onDisbandRoom && (
             <button
               onClick={onDisbandRoom}
               type="button"
-              className="bg-red-600 hover:bg-red-700 text-white font-extrabold text-[8.5px] px-2 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
+              className="bg-red-600 hover:bg-red-700 text-white font-extrabold text-[7.5px] px-1.5 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
               title={
                 !['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId)
                   ? "이 커스텀 모임방과 모든 기록을 완전 폭파(삭제)합니다."
                   : "이 모임을 해체하고 실시간 위치 공유를 모두 종료합니다."
               }
             >
-              {!['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId) ? '💥 방 완전히 폭파하기' : '⏰ 방 폭파하기'}
+              {!['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId) ? '💥 방 삭제' : '💥 방 폭파'}
+            </button>
+          )}
+
+          {!isDisbanded && onCreateAppointment && (
+            <button
+              type="button"
+              onClick={() => setShowAppModal(true)}
+              className="bg-sky-400 hover:bg-sky-500 text-slate-950 font-extrabold text-[7.5px] px-1.5 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer flex items-center gap-0.5"
+            >
+              <Calendar className="w-2.5 h-2.5" />
+              <span>약속 만들기</span>
             </button>
           )}
 
@@ -142,19 +250,64 @@ export default function ChatRoom({
             <button
               type="button"
               onClick={() => setShowInviteModal(true)}
-              className="bg-amber-400 hover:bg-amber-500 text-gray-900 font-extrabold text-[9px] px-2.5 py-1 rounded-lg border border-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer flex items-center gap-0.5"
+              className="bg-amber-400 hover:bg-amber-500 text-gray-900 font-extrabold text-[7.5px] px-1.5 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer flex items-center gap-0.5"
             >
-              <UserPlus className="w-3 h-3" />
+              <UserPlus className="w-2.5 h-2.5" />
               <span>초대</span>
             </button>
           )}
 
-          <div className="relative flex items-center gap-1 bg-black/30 px-1.5 py-0.5 rounded text-[8px] font-black uppercase text-yellow-200">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 border border-black animate-pulse"></span>
+          <div className="relative flex items-center gap-0.5 bg-black/30 px-1 py-0.5 rounded text-[7.5px] font-black uppercase text-yellow-200">
+            <span className="inline-block w-1 h-1 bg-green-500 rounded-full border border-black animate-pulse"></span>
             <span>Live</span>
           </div>
         </div>
       </div>
+
+      {/* 초대된 멤버 가로 스크롤 리스트 (전체 초대된 사람 리스트) */}
+      <div className="bg-[#FFFDF9] border-b-2 border-black px-3 py-2 flex items-center gap-2 select-none overflow-x-auto whitespace-nowrap shrink-0 scrollbar-none shadow-sm">
+        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+          <Users className="w-3.5 h-3.5 text-rose-500" />
+          <span>초대 멤버 ({friends.length}):</span>
+        </span>
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+          {friends.map((friend) => {
+            const isOwner = friend.id === ownerId || (friend.id === 'user-minsu' && !ownerId);
+            const isOnline = friend.isOnline !== false;
+            const isPending = friend.isPendingInvite;
+            
+            return (
+              <div 
+                key={friend.id}
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border-2 border-black text-[10px] font-extrabold shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] bg-white shrink-0 ${
+                  isPending ? 'border-dashed border-amber-500 text-amber-900 bg-amber-50/50' : 'text-slate-800'
+                }`}
+                title={`${friend.name} - ${friend.statusMsg || ''}`}
+              >
+                <div 
+                  style={{ backgroundColor: friend.color || '#3B82F6' }}
+                  className="w-5 h-5 rounded-full border border-black flex items-center justify-center text-xs shrink-0 font-black text-white"
+                >
+                  {friend.avatar}
+                </div>
+                <div className="flex flex-col justify-center leading-none text-left">
+                  <div className="flex items-center gap-0.5">
+                    <span className="max-w-[70px] truncate">{friend.name.replace(' (대기)', '').replace(' (합류)', '')}</span>
+                    {isOwner && <span className="text-[7px]" title="방장">👑</span>}
+                  </div>
+                  <span className="text-[6px] text-slate-400 font-bold">
+                    {isPending ? '수락대기' : isOnline ? '온라인' : '오프라인'}
+                  </span>
+                </div>
+                <span className={`w-1.5 h-1.5 rounded-full border border-black shrink-0 ${
+                  isPending ? 'bg-amber-400 animate-pulse' : isOnline ? 'bg-emerald-500' : 'bg-gray-300'
+                }`} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
 
       {/* Disbanded Status banner */}
       {isDisbanded && (
@@ -358,42 +511,19 @@ export default function ChatRoom({
 
             <div className="space-y-3">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">초대할 친구 이름 *</label>
+                <label className="text-xs font-semibold text-gray-600">초대할 친구 이름 (이름 또는 전화번호 중 하나 이상 입력)</label>
                 <input
-                  type="text" required placeholder="이름 (예: 김지우, 어머니)"
+                  type="text" placeholder="이름 (예: 김지우, 어머니)"
                   value={inviteName} onChange={e => setInviteName(e.target.value)}
                   className="bg-gray-50 border-2 border-black text-sm px-4 py-2.5 rounded-2xl focus:outline-none focus:border-rose-400 font-bold" />
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">휴대폰 번호 *</label>
+                <label className="text-xs font-semibold text-gray-600">휴대폰 번호 (이름 또는 전화번호 중 하나 이상 입력)</label>
                 <input
-                  type="tel" required placeholder="010-0000-0000"
+                  type="tel" placeholder="010-0000-0000"
                   value={invitePhone} onChange={e => setInvitePhone(e.target.value)}
                   className="bg-gray-50 border-2 border-black text-sm px-4 py-2.5 rounded-2xl focus:outline-none focus:border-rose-400 font-mono font-bold" />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">이모지 아바타 선택</label>
-                <div className="flex gap-1.5 overflow-x-auto py-1 scrollbar-none">
-                  {INVITE_EMOJIS.map(em => (
-                    <button key={em} type="button" onClick={() => setInviteEmoji(em)}
-                      className={`w-9 h-9 rounded-xl text-lg shrink-0 transition ${inviteEmoji === em ? 'bg-rose-500 text-white ring-2 ring-rose-400 border-2 border-black' : 'bg-gray-50 border border-gray-200 hover:bg-rose-50'}`}>
-                      {em}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">아바타 색상 선택</label>
-                <div className="flex gap-2.5 py-1">
-                  {INVITE_COLORS.map(col => (
-                    <button key={col} type="button" onClick={() => setInviteColor(col)}
-                      className={`w-6 h-6 rounded-full shrink-0 border-2 border-black transition ${inviteColor === col ? 'ring-2 ring-rose-400 scale-110' : 'opacity-70'}`}
-                      style={{ backgroundColor: col }} />
-                  ))}
-                </div>
               </div>
             </div>
 
@@ -413,6 +543,180 @@ export default function ChatRoom({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* 대화방 초대 멤버 전체 목록 모달 */}
+      {showMembersModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fadeIn font-sans">
+          <div className="bg-white border-2 border-black rounded-3xl w-full max-w-sm overflow-hidden shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col max-h-[80vh]">
+            <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white px-4 py-3 border-b-2 border-black flex justify-between items-center shrink-0">
+              <span className="text-sm font-black flex items-center gap-1.5">
+                <Users className="w-4 h-4" />
+                <span>대화방 초대 멤버 목록 ({friends.length}명)</span>
+              </span>
+              <button onClick={() => setShowMembersModal(false)} className="text-white hover:text-yellow-100 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto divide-y divide-gray-150 flex-1">
+              {friends.map((friend) => {
+                const isOwner = friend.id === ownerId || (friend.id === 'user-minsu' && !ownerId);
+                const isOnline = friend.isOnline !== false;
+                return (
+                  <div key={friend.id} className="py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div 
+                        style={{ backgroundColor: friend.color || '#3B82F6' }}
+                        className="w-10 h-10 rounded-full border-2 border-black flex items-center justify-center text-lg shadow-sm font-black text-white shrink-0"
+                      >
+                        {friend.avatar}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-black text-slate-800">{friend.name}</span>
+                          {isOwner && (
+                            <span className="bg-amber-400 border border-amber-500 text-slate-900 text-[8px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5 leading-none shadow-sm">
+                              👑 방장
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-gray-400">
+                          {friend.phone || '연락처 없음'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
+                      <span className="text-[9px] font-bold text-gray-500">
+                        {isOnline ? '온라인' : '오프라인'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 위치검색 우선 약속 만들기 모달 */}
+      {showAppModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fadeIn font-sans">
+          <div className="bg-white border-2 border-black rounded-3xl w-full max-w-sm overflow-hidden shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col max-h-[85vh]">
+            <div className="bg-amber-100 px-4 py-3 border-b-2 border-black flex justify-between items-center shrink-0">
+              <span className="text-sm font-black text-gray-800 flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-amber-600" />
+                <span>새 약속 만들기</span>
+              </span>
+              <button onClick={() => { setShowAppModal(false); resetAppForm(); }} className="text-gray-650 hover:text-black cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              {/* Step 1: 위치 검색 */}
+              <div className="space-y-1 relative">
+                <label className="text-xs font-bold text-gray-700">1. 모임 장소 검색 *</label>
+                {confirmedAppPlace ? (
+                  <div className="flex items-center justify-between bg-emerald-50 border border-emerald-250 rounded-xl px-3 py-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div className="truncate">
+                        <p className="text-xs font-bold text-emerald-800 truncate">{confirmedAppPlace.name}</p>
+                        <p className="text-[9px] text-gray-400 truncate">{confirmedAppPlace.address}</p>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setConfirmedAppPlace(null)} className="text-[10px] text-emerald-600 font-bold hover:underline shrink-0 ml-2 cursor-pointer">변경</button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    {isAppSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 animate-spin" />}
+                    <input
+                      type="text"
+                      value={appPlaceQuery}
+                      onChange={e => setAppPlaceQuery(e.target.value)}
+                      placeholder="예: 강남역, 홍대 스타벅스"
+                      className="w-full bg-white border-2 border-black rounded-xl py-2.5 pl-9 pr-9 text-xs focus:outline-none focus:border-amber-400 font-bold"
+                    />
+                    {appPlaceQuery.trim() && appPlaceResults.length > 0 && (
+                      <div className="absolute left-0 right-0 mt-1 bg-white border-2 border-black rounded-xl shadow-lg z-10 max-h-40 overflow-y-auto divide-y divide-gray-100">
+                        {appPlaceResults.map((place, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setConfirmedAppPlace(place);
+                              setAppPlaceQuery(place.name);
+                            }}
+                            className="w-full text-left hover:bg-amber-50 px-3 py-2 transition flex items-start gap-2 text-xs cursor-pointer"
+                          >
+                            <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-gray-800 truncate text-[11px]">{place.name}</p>
+                              <p className="text-[9px] text-gray-400 truncate">{place.address}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2: 위치 확정 시 폼 활성화 */}
+              {confirmedAppPlace && (
+                <div className="space-y-4 animate-slideDown">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-700">2. 약속 이름 *</label>
+                    <input
+                      type="text"
+                      value={appTitle}
+                      onChange={e => setAppTitle(e.target.value)}
+                      placeholder="예) 삼겹살 번개, 저녁 식사"
+                      className="w-full bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400 font-bold"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-700">3. 날짜 및 시간 *</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="date"
+                        value={appDate}
+                        onChange={e => setAppDate(e.target.value)}
+                        onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
+                        className="bg-white border-2 border-black rounded-xl px-2 py-1.5 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+                      />
+                      <input
+                        type="time"
+                        value={appTime}
+                        onChange={e => setAppTime(e.target.value)}
+                        onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
+                        className="bg-white border-2 border-black rounded-xl px-2 py-1.5 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+                      />
+                    </div>
+                    {appDate && (
+                      <p className="text-[10px] text-amber-600 font-bold mt-1 px-1">
+                        설정 시: {formatKoreanDatetime(appDate, appTime)}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleCreateAppSubmit}
+                    disabled={!appTitle.trim()}
+                    className="w-full bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-300 text-gray-950 font-black py-2.5 rounded-2xl text-xs transition border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none cursor-pointer"
+                  >
+                    약속 생성하기 📅
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

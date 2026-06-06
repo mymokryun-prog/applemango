@@ -13,7 +13,9 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2 } from 'lucide-react';
+import GamePanel from './components/GamePanel';
+
 import {
   queueOfflineAction,
   getOutboxCount,
@@ -29,6 +31,7 @@ import {
 } from './pushSubscription';
 import { useRealtimeLocation } from './hooks/useRealtimeLocation';
 import type { LocationUpdatedPayload } from './realtime/types';
+import { getLocationSocket } from './realtime/socketClient';
 
 // 앱 로고 — ApmtLogo를 OnboardingScreen에서 재사용
 export { ApmtLogo as AppleMangoLogo };
@@ -40,7 +43,7 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game'>('rooms');
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -65,6 +68,18 @@ export default function App() {
   const [regPhone, setRegPhone] = useState(() => localStorage.getItem('aemang_phone') || '');
   const [regRealName, setRegRealName] = useState(() => localStorage.getItem('aemang_name') || '');
   const [regAlias, setRegAlias] = useState(() => localStorage.getItem('aemang_nickname') || '');
+  const [regFruit, setRegFruit] = useState(() => localStorage.getItem('aemang_fruit') || '🍎');
+
+  const [activeGameInvite, setActiveGameInvite] = useState<{
+    from: string;
+    fromName: string;
+    game: 'drone_battle' | 'yut_nori';
+  } | null>(null);
+  const [multiplayerGameConfig, setMultiplayerGameConfig] = useState<{
+    game: 'drone_battle' | 'yut_nori';
+    opponentId: string;
+    role: 'p1' | 'p2';
+  } | null>(null);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(() => {
@@ -228,6 +243,26 @@ export default function App() {
     }
   };
 
+  // Helper to append Authorization headers and user ID identification
+  const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
+    const headers = new Headers(options.headers || {});
+    
+    if (!headers.has('Content-Type') && options.body) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    const token = localStorage.getItem('aemang_token');
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    
+    if (activeProfileId) {
+      headers.set('x-user-id', activeProfileId);
+    }
+    
+    return fetch(url, { ...options, headers });
+  }, [activeProfileId]);
+
   const queueOrSend = async (endpoint: string, body: any, showQueuedNotification = true) => {
     if (!isOnline) {
       await queueOfflineAction(endpoint, body);
@@ -243,9 +278,8 @@ export default function App() {
     }
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await authFetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       if (!response.ok) {
@@ -265,7 +299,10 @@ export default function App() {
     try {
       const res = await fetch('/api/friends/profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-id': newUserId
+        },
         body: JSON.stringify({ phone, realName: name, alias: nickname, avatar: fruit })
       });
       if (res.ok) {
@@ -278,6 +315,12 @@ export default function App() {
     localStorage.setItem('aemang_name', name);
     localStorage.setItem('aemang_nickname', nickname);
     localStorage.setItem('aemang_fruit', fruit);
+    
+    setRegPhone(phone);
+    setRegRealName(name);
+    setRegAlias(nickname);
+    setRegFruit(fruit);
+    
     setActiveProfileId(newUserId);
     setShowOnboarding(false);
     fetchAllStates(activeRoomId);
@@ -391,9 +434,8 @@ export default function App() {
 
     if (registered && phone && name && nickname) {
       try {
-        const res = await fetch('/api/friends/profile', {
+        const res = await authFetch('/api/friends/profile', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone, realName: name, alias: nickname, avatar: fruit })
         });
         if (res.ok) {
@@ -417,11 +459,11 @@ export default function App() {
   const fetchAllStates = async (targetRoomId = activeRoomId) => {
     try {
       const [friendsRes, chatRes, appRes, notifRes, roomsRes] = await Promise.all([
-        fetch(`/api/friends?roomId=${targetRoomId}`),
-        fetch(`/api/chat?roomId=${targetRoomId}`),
-        fetch(`/api/appointments?roomId=${targetRoomId}`),
-        fetch(`/api/notifications?roomId=${targetRoomId}`),
-        fetch('/api/rooms')
+        authFetch(`/api/friends?roomId=${targetRoomId}`),
+        authFetch(`/api/chat?roomId=${targetRoomId}`),
+        authFetch(`/api/appointments?roomId=${targetRoomId}`),
+        authFetch(`/api/notifications?roomId=${targetRoomId}`),
+        authFetch('/api/rooms')
       ]);
 
       if (roomsRes.ok) {
@@ -434,7 +476,7 @@ export default function App() {
         
         // 내 프로필이 친구 목록에 없다면 (서버 리셋 등), 백그라운드에서 동기화 진행
         const registered = localStorage.getItem('apmt_v3_registered') === 'true';
-        if (registered && data.length > 0 && !data.some((f: any) => f.id === activeProfileId)) {
+        if (registered && !data.some((f: any) => f.id === activeProfileId)) {
           syncProfileWithServer();
         }
       }
@@ -483,22 +525,45 @@ export default function App() {
     hasCenteredOnGpsRef.current = false;
   }, [activeRoomId]);
 
-  // SpeechSynthesis 아기목소리 헬퍼 함수
-  const speakText = useCallback((text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis || !isSoundEnabled) return;
+  // Web Audio API 기반 "애플" 비프음 재생
+  const speakText = useCallback((text: string, force = false) => {
+    if (!isSoundEnabled && !force) return;
+    if (typeof window === 'undefined') return;
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
     
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ko-KR';
-    utterance.pitch = 1.8; // 높은 톤 (아기 목소리)
-    utterance.rate = 1.4;  // 빠르게 말함
-
-    const voices = window.speechSynthesis.getVoices();
-    const koVoice = voices.find(v => v.lang.includes('KO') || v.lang.includes('ko'));
-    if (koVoice) {
-      utterance.voice = koVoice;
+    try {
+      const ctx = new AudioContextClass();
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      const gain2 = ctx.createGain();
+      
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, ctx.currentTime); // '애' (A5)
+      gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(659, ctx.currentTime + 0.07); // '플' (E5)
+      gain2.gain.setValueAtTime(0, ctx.currentTime);
+      gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.07);
+      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      
+      osc1.start(ctx.currentTime);
+      osc1.stop(ctx.currentTime + 0.16);
+      
+      osc2.start(ctx.currentTime + 0.07);
+      osc2.stop(ctx.currentTime + 0.25);
+    } catch (e) {
+      console.error('AudioContext error:', e);
     }
-    window.speechSynthesis.speak(utterance);
   }, [isSoundEnabled]);
 
   // 새 채팅 메시지 감지 시 TTS 말하기
@@ -511,36 +576,55 @@ export default function App() {
         const msgTime = new Date(newMsg.timestamp).getTime();
         const isRecent = Date.now() - msgTime < 3000;
         if (isRecent) {
-          const avatar = newMsg.senderAvatar || '🍎';
-          const emojiMap: Record<string, string> = {
-            '🍎': '사과',
-            '🥭': '망고',
-            '👵': '할머니',
-            '🏠': '집',
-            '🍻': '맥주',
-            '💼': '회사',
-            '🟢': '초록',
-            '👤': '사람'
-          };
-          const nameToSpeak = emojiMap[avatar] || '애플망고';
-          speakText(`${nameToSpeak}${nameToSpeak}`);
+          speakText('애망! 애망!');
         }
       }
     }
     prevMessagesCountRef.current = messages.length;
   }, [messages, speakText]);
 
-  // 새 알림 감지 시 TTS "알림" 말하기
+  // 새 알림 감지 시 TTS 말하기
   const prevNotificationsCountRef = useRef(0);
   useEffect(() => {
     if (notifications.length > prevNotificationsCountRef.current) {
       const latestNotif = notifications[0];
       if (latestNotif && !latestNotif.read && prevNotificationsCountRef.current > 0) {
-        speakText('알림');
+        speakText('애망! 애망!');
       }
     }
     prevNotificationsCountRef.current = notifications.length;
   }, [notifications, speakText]);
+
+  // 실시간 멀티플레이어 초대/수락 소켓 리스너
+  useEffect(() => {
+    if (showOnboarding || !activeProfileId) return;
+    const socket = getLocationSocket();
+    
+    const handleGameRelayed = (payload: any) => {
+      if (payload.type === 'invite' && payload.to === activeProfileId) {
+        const sender = friends.find(f => f.id === payload.from) || { name: '친구' };
+        setActiveGameInvite({
+          from: payload.from,
+          fromName: sender.alias || sender.name || '친구',
+          game: payload.game
+        });
+      } else if (payload.type === 'accept' && payload.to === activeProfileId) {
+        setMultiplayerGameConfig({
+          game: payload.game,
+          opponentId: payload.from,
+          role: 'p1'
+        });
+        setActiveTab('game');
+      } else if (payload.type === 'decline' && payload.to === activeProfileId) {
+        alert('상대방이 초대를 거절했습니다.');
+      }
+    };
+
+    socket.on('game-relayed', handleGameRelayed);
+    return () => {
+      socket.off('game-relayed', handleGameRelayed);
+    };
+  }, [showOnboarding, activeProfileId, friends]);
 
   // Handle dial timing simulation
   useEffect(() => {
@@ -568,8 +652,46 @@ export default function App() {
 
   // 2. Action triggers linked to Express REST endpoints
   const handleSendMessage = async (text: string, locationShared?: { lat: number; lng: number; placeName: string }) => {
-    const activeFriendObj = friends.find(f => f.id === activeProfileId);
-    if (!activeFriendObj) return;
+    let activeFriendObj = friends.find(f => f.id === activeProfileId);
+    
+    if (!activeFriendObj) {
+      const registered = localStorage.getItem('apmt_v3_registered') === 'true';
+      if (registered) {
+        activeFriendObj = {
+          id: activeProfileId,
+          name: localStorage.getItem('aemang_nickname') || localStorage.getItem('aemang_name') || '나 (민수)',
+          avatar: localStorage.getItem('aemang_fruit') || '🍎',
+          color: '#EF4444',
+          lat: 37.5568,
+          lng: 126.9238,
+          isOnline: true,
+          battery: 100,
+          speed: 0,
+          heading: '정지',
+          route: [],
+          routeIndex: 0,
+          updatedAt: new Date().toISOString()
+        };
+        // 백그라운드 동기화 수행
+        syncProfileWithServer();
+      } else {
+        activeFriendObj = {
+          id: activeProfileId,
+          name: '나 (민수)',
+          avatar: '🍎',
+          color: '#EF4444',
+          lat: 37.5568,
+          lng: 126.9238,
+          isOnline: true,
+          battery: 100,
+          speed: 0,
+          heading: '정지',
+          route: [],
+          routeIndex: 0,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    }
 
     const payload = {
       senderId: activeProfileId,
@@ -604,9 +726,8 @@ export default function App() {
 
   const handleDeleteFriend = async (id: string) => {
     try {
-      await fetch('/api/friends/delete', {
+      await authFetch('/api/friends/delete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id,
           roomId: activeRoomId
@@ -654,9 +775,8 @@ export default function App() {
 
   const handleVote = async (promiseId: string, vote: 'yes' | 'no' | 'maybe') => {
     try {
-      await fetch('/api/appointments/vote', {
+      await authFetch('/api/appointments/vote', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: promiseId,
           friendId: activeProfileId,
@@ -672,9 +792,8 @@ export default function App() {
 
   const handleInviteFriend = async (name: string, emoji: string, color: string, phone: string) => {
     try {
-      const response = await fetch('/api/friends/invite', {
+      const response = await authFetch('/api/friends/invite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
           avatar: emoji,
@@ -685,6 +804,7 @@ export default function App() {
         })
       });
       if (response.ok) {
+        alert('📩 초대장이 발송되었습니다! 상대방이 수락하면 그룹에 자동 합류합니다.');
         fetchAllStates(activeRoomId);
       }
     } catch (err) {
@@ -694,9 +814,8 @@ export default function App() {
 
   const handleAcceptInvite = async (id: string) => {
     try {
-      const response = await fetch('/api/friends/accept', {
+      const response = await authFetch('/api/friends/accept', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id,
           roomId: activeRoomId
@@ -715,9 +834,8 @@ export default function App() {
     if (!friend) return;
 
     try {
-      await fetch('/api/friends/move', {
+      await authFetch('/api/friends/move', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: friend.id,
           lat: friend.lat + latOffset,
@@ -733,9 +851,8 @@ export default function App() {
 
   const handleUpdateStatusMsg = async (id: string, text: string) => {
     try {
-      await fetch('/api/friends/move', {
+      await authFetch('/api/friends/move', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id,
           statusMsg: text,
@@ -776,9 +893,8 @@ export default function App() {
 
   const handleMarkAllNotificationsAsRead = async () => {
     try {
-      await fetch('/api/notifications/read', {
+      await authFetch('/api/notifications/read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           roomId: activeRoomId
         })
@@ -801,9 +917,8 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/rooms', {
+      const res = await authFetch('/api/rooms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
           emoji,
@@ -824,7 +939,7 @@ export default function App() {
         setRecentCreatedRoomName(newRoom.name);
         setTimeout(() => setRecentCreatedRoomName(null), 5000);
         // 서버에서 전체 방 목록 명시적 재조회
-        fetch('/api/rooms').then(r => r.json()).then(data => setRooms(data)).catch(() => {});
+        authFetch('/api/rooms').then(r => r.json()).then(data => setRooms(data)).catch(() => {});
         fetchAllStates(newRoom.id);
       } else {
         const errorText = await res.text();
@@ -836,15 +951,41 @@ export default function App() {
     }
   };
 
-  const handleSaveProfile = async (phone: string, realName: string, alias: string) => {
+  const handleOpenProfileModal = () => {
+    setRegPhone(localStorage.getItem('aemang_phone') || '');
+    setRegRealName(localStorage.getItem('aemang_name') || '');
+    setRegAlias(localStorage.getItem('aemang_nickname') || '');
+    setRegFruit(localStorage.getItem('aemang_fruit') || '🍎');
+    setShowProfileModal(true);
+  };
+
+  const handleSaveProfile = async (phone: string, realName: string, alias: string, fruit: string) => {
     try {
-      const avatar = localStorage.getItem('aemang_fruit') || '🍎';
-      await fetch('/api/friends/profile', {
+      const avatar = fruit;
+      const res = await authFetch('/api/friends/profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, realName, alias, avatar })
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.token) {
+          localStorage.setItem('aemang_token', data.token);
+        }
+      }
       localStorage.setItem('apmt_v3_registered', 'true');
+      localStorage.setItem('aemang_phone', phone);
+      localStorage.setItem('aemang_name', realName);
+      localStorage.setItem('aemang_nickname', alias);
+      localStorage.setItem('aemang_fruit', fruit);
+
+      setRegPhone(phone);
+      setRegRealName(realName);
+      setRegAlias(alias);
+      setRegFruit(fruit);
+
+      const newUserId = 'user-' + phone.replace(/\D/g, '');
+      setActiveProfileId(newUserId);
+
       setShowOnboarding(false);
       setShowProfileModal(false);
       fetchAllStates(activeRoomId);
@@ -860,19 +1001,18 @@ export default function App() {
       const confirmExplode = window.confirm('💣 정말로 이 안심 모임그룹방을 완전히 폭파(삭제)하시겠습니까?\n대화 기록 및 약속 위치 공유 등 방 안의 모든 정보가 복구 불가능하게 파괴됩니다!');
       if (!confirmExplode) return;
     } else {
-      const confirmDisband = window.confirm('🔒 이 기본 안심 모임방의 위치 공조를 완료(종료)하시겠습니까?\n방과 대화 기록은 유지되지만 실시간 위치 전송이 전면 중단됩니다.');
+      const confirmDisband = window.confirm('💣 이 기본 안심 대화방을 완전히 폭파(삭제)하시겠습니까?\n방과 대화 기록, 위치 공유가 완전히 삭제됩니다.');
       if (!confirmDisband) return;
     }
 
     try {
-      const response = await fetch('/api/rooms/disband', {
+      const response = await authFetch('/api/rooms/disband', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roomId })
       });
       if (response.ok) {
         const result = await response.json();
-        if (result.deleted || !isSystemRoom) {
+        if (result.deleted) {
           alert('💥 안심 모임그룹방이 완전히 폭파되어 삭제되었습니다!');
           const remain = rooms.filter(r => r.id !== roomId);
           if (remain.length > 0) {
@@ -883,9 +1023,6 @@ export default function App() {
             setActiveRoomId('room-friends');
             fetchAllStates('room-friends');
           }
-        } else {
-          alert('🔒 모임 약속 완료 및 실시간 위치 동기화 수집이 긴급 해제되었습니다. 프라이버시가 안전하게 보호됩니다!');
-          fetchAllStates(roomId);
         }
       }
     } catch (err) {
@@ -897,14 +1034,9 @@ export default function App() {
     if (!pendingDeleteRoomId) return;
     const roomToRemove = rooms.find((room) => room.id === pendingDeleteRoomId);
     if (!roomToRemove) { setPendingDeleteRoomId(null); return; }
-    if (deleteRoomConfirmKey.trim() !== roomToRemove.name) {
-      alert('삭제하려면 방 이름을 정확히 입력해 주세요.');
-      return;
-    }
     try {
-      const response = await fetch('/api/rooms/delete', {
+      const response = await authFetch('/api/rooms/delete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roomId: pendingDeleteRoomId })
       });
       if (response.ok) {
@@ -937,9 +1069,8 @@ export default function App() {
   const handleLeaveRoom = async () => {
     if (!window.confirm('이 그룹에서 탈퇴하시겠습니까?')) return;
     try {
-      await fetch('/api/friends/delete', {
+      await authFetch('/api/friends/delete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: activeProfileId, roomId: activeRoomId })
       });
       const otherRoom = rooms.find(r => r.id !== activeRoomId);
@@ -986,9 +1117,8 @@ export default function App() {
         }
 
         // Log telemetry message in the Chat
-        fetch('/api/chat', {
+        authFetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             senderId: 'system',
             senderName: '원격 헬스케어',
@@ -1129,11 +1259,12 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setShowProfileModal(true)}
-              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base"
+              onClick={handleOpenProfileModal}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-full transition text-[11px] font-bold text-slate-700 shadow-sm cursor-pointer"
               title="내 프로필"
             >
-              {(() => { const f = localStorage.getItem('aemang_fruit'); return f || activeProfile?.avatar || '👤'; })()}
+              <span className="text-sm leading-none">{regFruit || activeProfile?.avatar || '👤'}</span>
+              <span className="max-w-[75px] truncate leading-none">{regAlias || regRealName || '내 프로필'}</span>
             </button>
             {/* 설정 버튼 */}
             <button
@@ -1144,28 +1275,7 @@ export default function App() {
             >
               <Settings className="w-4 h-4 text-gray-500" />
             </button>
-            {/* 방 삭제 버튼 — + 버튼 옆에 나란히 */}
-            <button
-              type="button"
-              onClick={() => { setIsRoomEditMode(!isRoomEditMode); setIsCreatingRoom(false); }}
-              style={{ backgroundColor: isRoomEditMode ? '#ef4444' : '#f3f4f6', minWidth: 32, minHeight: 32 }}
-              className="w-8 h-8 rounded-full flex items-center justify-center transition text-base border border-gray-200"
-              title="방 삭제 모드"
-            >
-              <span style={{ fontSize: 16 }}>🗑</span>
-            </button>
-            {/* 방 생성 버튼 → 그룹방 탭으로 이동 */}
-            <button
-              type="button"
-              onClick={() => { setActiveTab('rooms'); setIsCreatingRoom(false); setIsRoomEditMode(false); }}
-              style={{ backgroundColor: '#fb923c', minWidth: 32, minHeight: 32 }}
-              className="w-8 h-8 rounded-full flex items-center justify-center transition shadow-sm"
-              title="그룹방 목록"
-            >
-              <span className="text-white font-bold" style={{ fontSize: 20, lineHeight: 1 }}>
-                +
-              </span>
-            </button>
+
           </div>
         </div>
 
@@ -1358,6 +1468,8 @@ export default function App() {
             onAcceptInvite={handleAcceptInvite}
             onInviteFriend={handleInviteFriend}
             roomId={activeRoomId}
+            ownerId={rooms.find(r => r.id === activeRoomId)?.ownerId || ''}
+            onCreateAppointment={handleCreateAppointment}
           />
         )}
 
@@ -1402,6 +1514,16 @@ export default function App() {
           <NotificationPanel
             notifications={notifications}
             onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+          />
+        )}
+
+        {activeTab === 'game' && (
+          <GamePanel
+            friends={friends}
+            activeProfileId={activeProfileId}
+            activeRoomId={activeRoomId}
+            multiplayerConfig={multiplayerGameConfig}
+            onResetMultiplayer={() => setMultiplayerGameConfig(null)}
           />
         )}
       </div>
@@ -1539,12 +1661,13 @@ export default function App() {
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
+          { id: 'game' as const, Icon: Gamepad2, label: '게임방(beta)', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
           <button
             key={id}
             type="button"
             onClick={onClick}
-            className={`relative flex flex-col items-center justify-center gap-0.5 w-14 h-12 rounded-2xl transition-all ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-xl transition-all ${
               activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
             }`}
           >
@@ -1577,43 +1700,115 @@ export default function App() {
               <div className="flex items-center justify-between pb-1">
                 <div>
                   <p className="text-sm font-semibold text-gray-800">소리 알림</p>
-                  <p className="text-[11px] text-gray-400">채팅 및 알림 시 아기 목소리로 읽어줍니다</p>
+                  <p className="text-[11px] text-gray-400">채팅 및 알림 시 경쾌한 비프음이 울립니다</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextVal = !isSoundEnabled;
-                    setIsSoundEnabled(nextVal);
-                    localStorage.setItem('aemang_sound_enabled', String(nextVal));
-                  }}
-                  className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-200 ${
-                    isSoundEnabled ? 'bg-rose-500' : 'bg-gray-200'
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${
-                      isSoundEnabled ? 'translate-x-6' : 'translate-x-0'
+                <div className="flex items-center gap-2 font-sans">
+                  <button
+                    type="button"
+                    onClick={() => speakText('애망! 애망!', true)}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] whitespace-nowrap font-bold px-2 py-1 rounded-xl transition border border-rose-200"
+                  >
+                    🔊 소리 테스트
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextVal = !isSoundEnabled;
+                      setIsSoundEnabled(nextVal);
+                      localStorage.setItem('aemang_sound_enabled', String(nextVal));
+                    }}
+                    className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-200 ${
+                      isSoundEnabled ? 'bg-rose-500' : 'bg-gray-200'
                     }`}
-                  />
-                </button>
+                  >
+                    <div
+                      className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${
+                        isSoundEnabled ? 'translate-x-6' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">현재 그룹방 나가기</p>
-                  <p className="text-[11px] text-gray-400">이 안심 모임그룹방에서 즉시 탈퇴합니다</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowSettingsModal(false);
-                    handleLeaveRoom();
-                  }}
-                  className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
-                >
-                  탈퇴하기
-                </button>
-              </div>
+              {(() => {
+                const currentRoom = rooms.find(r => r.id === activeRoomId);
+                if (!currentRoom) return null;
+                const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(activeRoomId);
+                const isOwner = currentRoom.ownerId === activeProfileId;
+
+                if (isSystemRoom) {
+                  return (
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">대화방 삭제 (기록 초기화)</p>
+                        <p className="text-[11px] text-gray-400">이 안심 대화방의 메시지 및 약속 기록을 삭제하고 초기화합니다</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setShowSettingsModal(false);
+                          if (!window.confirm('이 대화방의 모든 기록(대화 및 약속)을 삭제하시겠습니까?')) return;
+                          try {
+                            const response = await authFetch('/api/rooms/reset', {
+                              method: 'POST',
+                              body: JSON.stringify({ roomId: activeRoomId })
+                            });
+                            if (response.ok) {
+                              alert('대화방 기록이 초기화되었습니다.');
+                              fetchAllStates(activeRoomId);
+                            } else {
+                              alert('삭제 실패');
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                      >
+                        방 삭제
+                      </button>
+                    </div>
+                  );
+                } else if (isOwner) {
+                  return (
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">이 그룹방 삭제 (폭파)</p>
+                        <p className="text-[11px] text-gray-400">이 그룹방을 폭파하고 완전히 삭제합니다</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSettingsModal(false);
+                          handleDeleteRoom(activeRoomId);
+                        }}
+                        className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                      >
+                        방 삭제
+                      </button>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">이 그룹방 삭제 (탈퇴)</p>
+                        <p className="text-[11px] text-gray-400">이 그룹방을 내 화면에서 나가고 삭제합니다</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSettingsModal(false);
+                          handleLeaveRoom();
+                        }}
+                        className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                      >
+                        방 삭제
+                      </button>
+                    </div>
+                  );
+                }
+              })()}
             </div>
 
             <button
@@ -1630,12 +1825,43 @@ export default function App() {
       {/* A. 프로필 등록 모달 */}
       {showProfileModal && (
         <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
-          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl">
+          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
             <h3 className="text-base font-bold text-gray-900">내 프로필 설정</h3>
-            <p className="text-sm text-gray-500">전화번호와 이름을 등록하면 그룹에 위치가 공유됩니다.</p>
+
+            {/* 상단 프로필 카드 요약 */}
+            <div className="bg-rose-50/50 border border-rose-100 rounded-2xl p-4 flex items-center gap-4">
+              <div className="w-14 h-14 bg-white border-2 border-rose-200 rounded-2xl shadow-sm flex items-center justify-center text-3xl shrink-0">
+                {regFruit}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-rose-500 font-bold tracking-wider uppercase">현재 프로필 정보</p>
+                <h4 className="text-sm font-black text-slate-800 truncate">{regAlias || regRealName || '이름 미등록'}</h4>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">{regPhone || '번호 미등록'}</p>
+              </div>
+            </div>
 
             <div className="space-y-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-600">아바타 과일 선택</label>
+                <div className="grid grid-cols-5 gap-2 pt-1">
+                  {['🍎', '🥭', '🍊', '🍑', '🍓', '🍉', '🍇', '🍈', '🍌', '🍒'].map((fruit) => (
+                    <button
+                      key={fruit}
+                      type="button"
+                      onClick={() => setRegFruit(fruit)}
+                      className={`text-2xl h-11 w-full rounded-xl flex items-center justify-center transition border ${
+                        regFruit === fruit
+                          ? 'bg-rose-100 border-rose-400 shadow-sm font-bold scale-110'
+                          : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
+                      }`}
+                    >
+                      {fruit}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">휴대전화 번호</label>
                 <input
@@ -1670,7 +1896,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => setShowProfileModal(false)}
@@ -1680,7 +1906,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => handleSaveProfile(regPhone, regRealName, regAlias)}
+                onClick={() => handleSaveProfile(regPhone, regRealName, regAlias, regFruit)}
                 className="py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl text-sm font-semibold transition"
               >
                 저장
@@ -1697,15 +1923,8 @@ export default function App() {
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
             <h3 className="text-base font-bold text-gray-900">그룹 삭제</h3>
             <p className="text-sm text-gray-500 leading-relaxed">
-              이 작업은 취소할 수 없습니다. 삭제하려면 방 이름 <span className="font-semibold text-rose-600">"{rooms.find(r => r.id === pendingDeleteRoomId)?.name}"</span>을 정확히 입력하세요.
+              정말로 이 그룹방 <span className="font-semibold text-rose-600">"{rooms.find(r => r.id === pendingDeleteRoomId)?.name}"</span>을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
             </p>
-            <input
-              type="text"
-              value={deleteRoomConfirmKey}
-              onChange={(e) => setDeleteRoomConfirmKey(e.target.value)}
-              placeholder="방 이름 입력..."
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-rose-400"
-            />
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
@@ -1717,10 +1936,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={confirmDeleteRoom}
-                disabled={deleteRoomConfirmKey !== rooms.find(r => r.id === pendingDeleteRoomId)?.name}
-                className="py-3 bg-rose-500 hover:bg-rose-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl text-sm font-semibold transition"
+                className="py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl text-sm font-semibold transition"
               >
-                삭제
+                확인
               </button>
             </div>
           </div>
@@ -1812,6 +2030,69 @@ export default function App() {
             >
               {measurementProgress < 100 ? '측정 판독 중...' : '확인 완료'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 게임 초대 모달 */}
+      {activeGameInvite && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 font-sans">
+          <div className="bg-slate-900 border-2 border-rose-500 rounded-3xl p-5 w-full max-w-[280px] text-center shadow-2xl text-white">
+            <span className="text-4xl block mb-2">🕹️</span>
+            <h4 className="text-sm font-black text-rose-400 text-[13px]">게임 초대 도착!</h4>
+            <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+              <span className="font-bold text-white">[{activeGameInvite.fromName}]</span> 님이 <br />
+              <span className="font-extrabold text-yellow-400">
+                {activeGameInvite.game === 'drone_battle' ? '드론 전쟁 🛸' : '전통 윷놀이 🎲'}
+              </span>
+              에 초대하셨습니다!
+            </p>
+            <div className="grid grid-cols-2 gap-2 mt-4 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const socket = getLocationSocket();
+                  socket.emit('game-relay', {
+                    roomId: activeRoomId,
+                    payload: {
+                      type: 'decline',
+                      from: activeProfileId,
+                      to: activeGameInvite.from,
+                      game: activeGameInvite.game
+                    }
+                  });
+                  setActiveGameInvite(null);
+                }}
+                className="py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl text-slate-400"
+              >
+                거절
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const socket = getLocationSocket();
+                  socket.emit('game-relay', {
+                    roomId: activeRoomId,
+                    payload: {
+                      type: 'accept',
+                      from: activeProfileId,
+                      to: activeGameInvite.from,
+                      game: activeGameInvite.game
+                    }
+                  });
+                  setMultiplayerGameConfig({
+                    game: activeGameInvite.game,
+                    opponentId: activeGameInvite.from,
+                    role: 'p2'
+                  });
+                  setActiveGameInvite(null);
+                  setActiveTab('game');
+                }}
+                className="py-2 bg-rose-500 hover:bg-rose-600 text-xs font-bold rounded-xl text-white shadow-md"
+              >
+                수락!
+              </button>
+            </div>
           </div>
         </div>
       )}
