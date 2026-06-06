@@ -105,7 +105,7 @@ export default function MapComponent({
 
   // ─── 1. 카카오맵 SDK 동적 로드 ──────────────────────────────────────────────
   useEffect(() => {
-    fetch('/api/places/config')
+    fetch('/api/config')
       .then(res => res.json())
       .then(data => {
         const key = data.kakaoMapKey;

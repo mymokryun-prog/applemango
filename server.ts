@@ -726,11 +726,13 @@ async function startServer() {
   });
 
   // 프론트엔드 런타임 설정 — 빌드 없이 카카오 키 전달
-  app.get('/api/config', (_req, res) => {
+  const sendConfig = (_req: Request, res: Response) => {
     res.json({
       kakaoMapKey: process.env.KAKAO_MAP_KEY || process.env.VITE_KAKAO_MAP_KEY || '',
     });
-  });
+  };
+  app.get('/api/config', sendConfig);
+  app.get('/api/places/config', sendConfig);
 
   // Link pending invitations by phone number to the actual registered userId
   function linkPendingInvitations(phone: string, userId: string, realName: string, alias: string, avatar: string, color: string) {
