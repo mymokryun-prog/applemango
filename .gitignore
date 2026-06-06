@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+aemang_db.json

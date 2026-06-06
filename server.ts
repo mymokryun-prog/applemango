@@ -411,20 +411,49 @@ const dbRooms: Record<string, any> = {
   }
 };
 
-// 데이터 저장 위치 — Railway 등에서는 영구 볼륨 경로를 DATA_DIR 환경변수로 지정.
-// (미지정 시 현재 작업 디렉터리. 배포 시 파일시스템이 휘발성이면 DATA_DIR로 볼륨을 가리켜야 데이터가 유지됨)
+// 데이터 저장 위치
+// 1순위: Upstash Redis(영구) — Render처럼 파일시스템이 휘발성이어도 재배포/재시작에 데이터 유지
+// 2순위: 파일(DATA_DIR) — 로컬 개발 또는 영구 볼륨이 있는 환경
 const DATA_DIR = process.env.DATA_DIR || process.cwd();
 const DB_FILE = path.join(DATA_DIR, 'aemang_db.json');
 
+const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const useRedis = !!(UPSTASH_URL && UPSTASH_TOKEN);
+const REDIS_DB_KEY = 'aemang_db';
+
+async function redisSet(key: string, value: string): Promise<void> {
+  // 큰 값은 본문(body)에 그대로 실어 보낸다: POST {URL}/set/{key}
+  const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    body: value,
+  });
+  if (!res.ok) throw new Error(`Upstash SET ${res.status}: ${await res.text()}`);
+}
+
+async function redisGet(key: string): Promise<string | null> {
+  const res = await fetch(`${UPSTASH_URL}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`Upstash GET ${res.status}`);
+  const data: any = await res.json();
+  return data?.result ?? null;
+}
+
 function saveDatabase() {
+  const payload = JSON.stringify({ dbRooms, dbUserProfiles });
+  // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
+  if (useRedis) {
+    redisSet(REDIS_DB_KEY, payload).catch(err =>
+      console.error('Failed to save database to Upstash:', err?.message || err));
+  }
+  // 2) 파일 — 로컬/폴백
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(DB_FILE, JSON.stringify({
-      dbRooms,
-      dbUserProfiles
-    }, null, 2), 'utf8');
+    fs.writeFileSync(DB_FILE, payload, 'utf8');
   } catch (err) {
-    console.error('Failed to save database:', err);
+    console.error('Failed to save database to file:', err);
   }
 }
 
@@ -437,23 +466,44 @@ function saveDatabaseDebounced() {
   }, 2000);
 }
 
+function applyLoadedData(data: any, source: string) {
+  if (!data) return false;
+  if (data.dbRooms) {
+    Object.keys(dbRooms).forEach(key => delete dbRooms[key]);
+    Object.assign(dbRooms, data.dbRooms);
+  }
+  if (data.dbUserProfiles) {
+    Object.keys(dbUserProfiles).forEach(key => delete dbUserProfiles[key]);
+    Object.assign(dbUserProfiles, data.dbUserProfiles);
+  }
+  console.log(`Database loaded successfully from ${source}.`);
+  return true;
+}
+
 function loadDatabase() {
+  // 파일에서 로드(로컬/폴백). Redis 사용 시에는 startServer에서 비동기로 덮어씀.
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf8');
-      const data = JSON.parse(raw);
-      if (data.dbRooms) {
-        Object.keys(dbRooms).forEach(key => delete dbRooms[key]);
-        Object.assign(dbRooms, data.dbRooms);
-      }
-      if (data.dbUserProfiles) {
-        Object.keys(dbUserProfiles).forEach(key => delete dbUserProfiles[key]);
-        Object.assign(dbUserProfiles, data.dbUserProfiles);
-      }
-      console.log('Database loaded successfully from file.');
+      applyLoadedData(JSON.parse(raw), 'file');
     }
   } catch (err) {
-    console.error('Failed to load database:', err);
+    console.error('Failed to load database from file:', err);
+  }
+}
+
+// 서버 시작 시 Redis에서 우선 로드(있으면 파일 데이터를 덮어씀)
+async function loadDatabaseFromRedis(): Promise<void> {
+  if (!useRedis) return;
+  try {
+    const raw = await redisGet(REDIS_DB_KEY);
+    if (raw) {
+      applyLoadedData(JSON.parse(raw), 'Upstash Redis');
+    } else {
+      console.log('Upstash Redis is empty — starting fresh (will persist on first change).');
+    }
+  } catch (err: any) {
+    console.error('Failed to load database from Upstash (using file fallback):', err?.message || err);
   }
 }
 
@@ -484,8 +534,7 @@ function cleanupOldData() {
 }
 
 loadDatabase();
-cleanupOldData();
-// 하루에 한 번 오래된 데이터 정리
+// 하루에 한 번 오래된 데이터 정리 (최초 정리는 Redis 로드 후 startServer에서 수행)
 setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
 
 const nameOptions = ['애플짱 🍎', '메론이 🍈', '오렌지 🍊', '망고킹 🥭', '피치피치 🍑', '그레이프 🍇'];
@@ -770,6 +819,10 @@ function simulateMovement() {
 setInterval(simulateMovement, 6000);
 
 async function startServer() {
+  // 영구 저장소(Upstash Redis)에서 데이터 로드 후 최초 정리 (파일 데이터를 덮어씀)
+  await loadDatabaseFromRedis();
+  cleanupOldData();
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
