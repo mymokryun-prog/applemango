@@ -1,4 +1,4 @@
-const CACHE_NAME = 'applemangotalk-cache-v3';
+const CACHE_NAME = 'applemangotalk-cache-v4';
 const OFFLINE_URL = '/offline.html';
 const ASSETS = [
   '/',
@@ -149,18 +149,30 @@ self.addEventListener('fetch', (event) => {
   // 네비게이션 및 JS/CSS는 항상 네트워크 우선 → 배포 즉시 반영
   const url = new URL(event.request.url);
   const isAsset = url.pathname.startsWith('/assets/') || url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+  // API 요청은 실시간 데이터이므로 절대 캐시 우선 금지 (방 생성/삭제·알림·친구 목록 stale 방지)
+  const isApi = url.pathname.startsWith('/api/');
 
-  if (event.request.mode === 'navigate' || isAsset) {
+  if (event.request.mode === 'navigate' || isAsset || isApi) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response && response.status === 200) {
+          // API 응답은 캐시에 저장하지 않음 — 항상 서버 최신 상태를 사용
+          if (!isApi && response && response.status === 200) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
           return response;
         })
-        .catch(() => caches.match(event.request).then(r => r || caches.match(OFFLINE_URL)))
+        .catch(() => {
+          // 네트워크 실패(오프라인) 시에만 캐시/오프라인 페이지로 폴백
+          if (isApi) {
+            return caches.match(event.request).then(r => r || new Response(
+              JSON.stringify({ error: 'offline' }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            ));
+          }
+          return caches.match(event.request).then(r => r || caches.match(OFFLINE_URL));
+        })
     );
     return;
   }

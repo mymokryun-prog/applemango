@@ -420,7 +420,7 @@ function DroneCrashGame({
   const [angle, setAngle] = useState(45);
   const [power, setPower] = useState(70);
   const [useSkill, setUseSkill] = useState(false);
-  const [skillCount, setSkillCount] = useState(1);
+  const [skillCount, setSkillCount] = useState(5);
   const [moveFuel, setMoveFuel] = useState(100);
   const [playerHp, setPlayerHp] = useState<number[]>([100, 100]);
   const [isFiringState, setIsFiringState] = useState(false);
@@ -575,8 +575,8 @@ function DroneCrashGame({
     const p2Name = isMultiplayer ? (multiplayerConfig.role === 'p2' ? '나 (P2)' : '상대방 (P2)') : 'Player 2';
 
     const newPlayers: Player[] = [
-      { id: 1, name: p1Name, x: 220, y: 0, color: "#3b82f6", hp: 100, angle: 45, power: 70, moveFuel: 100, skills: 1, bullets: 20 },
-      { id: 2, name: p2Name, x: width - 220, y: 0, color: "#ef4444", hp: 100, angle: 135, power: 70, moveFuel: 100, skills: 1, bullets: 20 }
+      { id: 1, name: p1Name, x: 220, y: 0, color: "#3b82f6", hp: 100, angle: 45, power: 70, moveFuel: 100, skills: 5, bullets: 20 },
+      { id: 2, name: p2Name, x: width - 220, y: 0, color: "#ef4444", hp: 100, angle: 135, power: 70, moveFuel: 100, skills: 5, bullets: 20 }
     ];
 
     updateTankY(newPlayers[0], newTerrain);
@@ -839,13 +839,13 @@ function DroneCrashGame({
       }
 
       const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      skyGrad.addColorStop(0, "#090d16"); 
-      skyGrad.addColorStop(0.6, "#0f172a");
-      skyGrad.addColorStop(1, "#1e1b4b");
+      skyGrad.addColorStop(0, "#2563eb");   // 밝은 하늘 블루
+      skyGrad.addColorStop(0.55, "#7c3aed"); // 보라빛 황혼
+      skyGrad.addColorStop(1, "#312e81");    // 지평선 인디고
       ctx.fillStyle = skyGrad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
       for (let i = 0; i < 40; i++) {
         const sx = (i * 12345) % canvas.width;
         const sy = (i * 54321) % (canvas.height * 0.65);
@@ -1015,8 +1015,9 @@ function DroneCrashGame({
 
           // Predicted trajectory guide dashes
           ctx.beginPath();
-          ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
-          ctx.setLineDash([4, 4]);
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = "rgba(253, 224, 71, 0.9)"; // 밝은 노란 점선 — 가시성 향상
+          ctx.setLineDash([6, 5]);
           let simX = p.x + Math.cos(angleRad) * 45;
           let simY = droneY - Math.sin(angleRad) * 45;
           let simVx = Math.cos(angleRad) * (p.power * powerMultiplier);

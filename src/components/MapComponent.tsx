@@ -43,7 +43,8 @@ const getFruitColor = (fruitEmoji: string): string => {
     case '🍍': return '#F59E0B'; // Gold
     case '🍒': return '#F43F5E'; // Cherry Red
     case '🥝': return '#84CC16'; // Kiwi Green
-    default: return '#rose-500';
+    case '🍈': return '#22C55E'; // Melon Green
+    default: return '#F43F5E'; // rose-500 (유효한 HEX — 잘못된 값이면 선이 안 그려짐)
   }
 };
 
@@ -305,20 +306,19 @@ export default function MapComponent({
       });
 
       // 3-2.5. 임시 핀 연결선 그리기 (내 위치에서 임시 핀까지 과일색 실선)
+      // 내 위치는 myGpsCoords로 이미 알고 있으므로, friends 목록에 내가 없어도 항상 그린다.
       if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
         const me = friends.find(f => f.id === activeProfileId);
-        if (me) {
-          const fruitColor = me.avatar ? getFruitColor(me.avatar) : '#EF4444';
-          const tempPolyline = new window.kakao.maps.Polyline({
-            path: [new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]), new window.kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1])],
-            strokeWeight: 4.5,
-            strokeColor: fruitColor,
-            strokeOpacity: 0.95,
-            strokeStyle: 'solid',
-          });
-          tempPolyline.setMap(map);
-          kakaoPolylinesRef.current.push(tempPolyline);
-        }
+        const fruitColor = getFruitColor(me?.avatar || localStorage.getItem('aemang_fruit') || '🍎');
+        const tempPolyline = new window.kakao.maps.Polyline({
+          path: [new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]), new window.kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1])],
+          strokeWeight: 4.5,
+          strokeColor: fruitColor,
+          strokeOpacity: 0.95,
+          strokeStyle: 'solid',
+        });
+        tempPolyline.setMap(map);
+        kakaoPolylinesRef.current.push(tempPolyline);
       }
 
       // 3-3. 약속 마커 그리기
@@ -409,17 +409,16 @@ export default function MapComponent({
       });
 
       // 임시 핀 연결선 (내 위치에서 임시 핀까지 과일색 실선)
+      // 내 위치는 myGpsCoords로 이미 알고 있으므로, friends 목록에 내가 없어도 항상 그린다.
       if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
         const me = friends.find(f => f.id === activeProfileId);
-        if (me) {
-          const fruitColor = me.avatar ? getFruitColor(me.avatar) : '#EF4444';
-          const tempLine = L.polyline([myGpsCoords, tempPromiseCoords] as L.LatLngTuple[], {
-            color: fruitColor,
-            weight: 4,
-            opacity: 0.9,
-          });
-          pg.addLayer(tempLine);
-        }
+        const fruitColor = getFruitColor(me?.avatar || localStorage.getItem('aemang_fruit') || '🍎');
+        const tempLine = L.polyline([myGpsCoords, tempPromiseCoords] as L.LatLngTuple[], {
+          color: fruitColor,
+          weight: 4,
+          opacity: 0.9,
+        });
+        pg.addLayer(tempLine);
       }
 
       // 약속 마커
@@ -462,7 +461,7 @@ export default function MapComponent({
         mg.addLayer(m);
       });
     }
-  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, isKakaoReady, useFallbackMap]);
+  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, myGpsCoords, isKakaoReady, useFallbackMap]);
 
   // ─── 4. 내 GPS 위치 마커 실시간 업데이트 ──────────────────────────────────
   useEffect(() => {
