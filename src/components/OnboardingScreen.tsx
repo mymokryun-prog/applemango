@@ -84,12 +84,25 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
     if (phoneError) setPhoneError('');
   };
 
-  const handleStep1 = (e: React.FormEvent) => {
+  const handleStep1 = async (e: React.FormEvent) => {
     e.preventDefault();
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 10 || digits.length > 11) {
       setPhoneError('올바른 전화번호를 입력해 주세요 (예: 010-1234-5678)');
       return;
+    }
+    try {
+      const res = await fetch(`/api/profile-lookup?phone=${digits}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.exists) {
+          setName(data.realName || '');
+          setNickname(data.alias || '');
+          setSelectedFruit(data.avatar || '🍎');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to lookup profile:', err);
     }
     setStep(2);
   };

@@ -13,8 +13,9 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2 } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints } from 'lucide-react';
 import GamePanel from './components/GamePanel';
+import PedometerPanel from './components/PedometerPanel';
 
 import {
   queueOfflineAction,
@@ -45,7 +46,7 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer'>('rooms');
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -685,7 +686,7 @@ export default function App() {
     }
   }, [isSoundEnabled]);
 
-  // 기존 컴포넌트와의 호환성을 위한 speakText 맵핑 함수 (진동 및 한국어 TTS 연동)
+  // 기존 컴포넌트와의 호환성을 위한 speakText 맵핑 함수 (진동 및 비프음 재생)
   const speakText = useCallback((text: string, force = false) => {
     // 1. 비프음 재생
     playBipSound(selectedSoundIdx, force);
@@ -693,20 +694,6 @@ export default function App() {
     // 2. 스마트폰 진동 피드백 (진동 API 지원 시)
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       navigator.vibrate([150, 100, 150]);
-    }
-
-    // 3. TTS 음성 출력 (한국어 목소리)
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel(); // 진행 중인 음성 즉시 취소
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ko-KR';
-        utterance.volume = 1.0;
-        utterance.rate = 1.0;
-        window.speechSynthesis.speak(utterance);
-      } catch (err) {
-        console.warn('SpeechSynthesis error:', err);
-      }
     }
   }, [playBipSound, selectedSoundIdx]);
 
@@ -1065,6 +1052,20 @@ export default function App() {
     }
   };
 
+  const handleSyncSteps = async (steps: number) => {
+    try {
+      await queueOrSend('/api/friends/pedometer', {
+        id: activeProfileId,
+        pedometerEnabled: true,
+        stepsToday: steps,
+        roomId: activeRoomId
+      }, false);
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error('Pedometer sync failed:', err);
+    }
+  };
+
   const handleToggleHeartRate = async (id: string, enabled: boolean) => {
     try {
       await queueOrSend('/api/friends/heartRate', {
@@ -1269,6 +1270,26 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleAppLogout = () => {
+    if (!window.confirm('정말로 로그아웃하고 앱을 나가시겠습니까?')) return;
+    localStorage.removeItem('aemang_token');
+    localStorage.removeItem('apmt_v3_registered');
+    localStorage.removeItem('aemang_phone');
+    localStorage.removeItem('aemang_name');
+    localStorage.removeItem('aemang_nickname');
+    localStorage.removeItem('aemang_fruit');
+
+    setActiveProfileId('');
+    setRooms([]);
+    setMessages([]);
+    setFriends([]);
+    setAppointments([]);
+    setNotifications([]);
+
+    setShowSettingsModal(false);
+    setShowOnboarding(true);
   };
 
   // Outbox (Offline Queue) Management Helpers
@@ -1794,6 +1815,15 @@ export default function App() {
             onResetMultiplayer={() => setMultiplayerGameConfig(null)}
           />
         )}
+
+        {activeTab === 'pedometer' && (
+          <PedometerPanel
+            phone={regPhone}
+            activeProfileId={activeProfileId}
+            activeRoomId={activeRoomId}
+            onSyncSteps={handleSyncSteps}
+          />
+        )}
       </div>
 
       {/* 119 Emergency Calling Simulation Overlay */}
@@ -1928,8 +1958,9 @@ export default function App() {
           { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); setSelectedPromiseId(null); } },
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
+          { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
-          { id: 'game' as const, Icon: Gamepad2, label: '게임방(beta)', onClick: () => setActiveTab('game') },
+          { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
           <button
             key={id}
@@ -2191,6 +2222,21 @@ export default function App() {
                   );
                 }
               })()}
+              
+              {/* 앱 나가기 / 로그아웃 */}
+              <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">앱 로그아웃 (나가기)</p>
+                  <p className="text-[11px] text-gray-400">앱 세션을 종료하고 안전하게 로그아웃합니다</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAppLogout}
+                  className="bg-gray-500 hover:bg-gray-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                >
+                  로그아웃
+                </button>
+              </div>
             </div>
 
             <button

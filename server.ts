@@ -1037,6 +1037,7 @@ async function startServer() {
       ]
     };
 
+    saveDatabaseDebounced();
     res.json({
       id: newRoomId,
       name,
@@ -1148,6 +1149,7 @@ async function startServer() {
     const { roomId } = req.body;
     if (dbRooms[roomId]) {
       delete dbRooms[roomId];
+      saveDatabaseDebounced();
       return res.json({ success: true, isDisbanded: true, deleted: true });
     }
     res.status(404).json({ error: 'Room not found' });
@@ -1173,12 +1175,14 @@ async function startServer() {
         room.friends = {};
         room.appointments = [];
         room.notifications = [];
+        saveDatabaseDebounced();
         return res.json({ success: true, resetRoomId: roomId });
       }
     }
 
     if (dbRooms[roomId]) {
       delete dbRooms[roomId];
+      saveDatabaseDebounced();
       return res.json({ success: true, deletedRoomId: roomId });
     }
     res.status(404).json({ error: 'Room not found' });
@@ -1201,6 +1205,7 @@ async function startServer() {
       room.friends = {};
       room.appointments = [];
       room.notifications = [];
+      saveDatabaseDebounced();
       return res.json({ success: true, resetRoomId: roomId });
     }
     res.status(404).json({ error: 'Room not found' });
@@ -1330,6 +1335,24 @@ async function startServer() {
     res.status(404).json({ error: 'Invited friend not found or already accepted' });
   });
 
+  // Profile Lookup by Phone Number
+  app.get('/api/profile-lookup', (req, res) => {
+    const { phone } = req.query;
+    if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+    const digits = (phone as string).replace(/\D/g, '');
+    const userId = `user-${digits}`;
+    const profile = dbUserProfiles[userId];
+    if (profile) {
+      return res.json({
+        exists: true,
+        realName: profile.realName || '',
+        alias: profile.alias || '',
+        avatar: profile.avatar || '🍎'
+      });
+    }
+    res.json({ exists: false });
+  });
+
   // Profile signup / authentication (Phone number, Real Name, and Pseudonym)
   app.post('/api/friends/profile', validateRequest(ProfileSchema), (req: AuthRequest, res: Response) => {
     const { phone, realName, alias, avatar } = req.body;
@@ -1400,7 +1423,7 @@ async function startServer() {
         }
       });
       // Also delete old profile from global storage if it was a temporary guest profile
-      if (oldUserId.startsWith('guest-') && dbUserProfiles[oldUserId]) {
+      if ((oldUserId.startsWith('guest-') || oldUserId.startsWith('user-guest-')) && dbUserProfiles[oldUserId]) {
         delete dbUserProfiles[oldUserId];
       }
     }
@@ -1445,6 +1468,7 @@ async function startServer() {
     }
 
     const token = generateToken(userId);
+    saveDatabaseDebounced();
     res.json({ success: true, userId, token });
   });
 
@@ -1912,6 +1936,7 @@ async function startServer() {
       friend.stepsToday = 0;
     }
 
+    saveDatabaseDebounced();
     res.json({ success: true, friend });
   });
 

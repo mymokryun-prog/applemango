@@ -29,6 +29,24 @@ interface MapComponentProps {
 
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
 
+const getFruitColor = (fruitEmoji: string): string => {
+  switch (fruitEmoji) {
+    case '🍎': return '#EF4444'; // Red
+    case '🥭': return '#F59E0B'; // Mango
+    case '🍊': return '#F97316'; // Orange
+    case '🍋': return '#EAB308'; // Yellow
+    case '🍇': return '#8B5CF6'; // Purple
+    case '🍓': return '#EC4899'; // Pink
+    case '🫐': return '#3B82F6'; // Blue
+    case '🍑': return '#F472B6'; // Peach Pink
+    case '🍉': return '#10B981'; // Green
+    case '🍍': return '#F59E0B'; // Gold
+    case '🍒': return '#F43F5E'; // Cherry Red
+    case '🥝': return '#84CC16'; // Kiwi Green
+    default: return '#rose-500';
+  }
+};
+
 // ─── 마커 HTML ───────────────────────────────────────────────────────────────
 function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
   const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
@@ -271,17 +289,37 @@ export default function MapComponent({
 
           if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
 
+          const isMe = f.id === activeProfileId;
+          const fruitColor = isMe && f.avatar ? getFruitColor(f.avatar) : (f.color || '#3B82F6');
+
           const polyline = new window.kakao.maps.Polyline({
             path: [new window.kakao.maps.LatLng(lat, lng), new window.kakao.maps.LatLng(app.lat, app.lng)],
             strokeWeight: selectedFriendId === f.id ? 4.5 : 2.5,
-            strokeColor: f.color || '#3B82F6',
+            strokeColor: fruitColor,
             strokeOpacity: selectedFriendId === f.id ? 0.95 : 0.65,
-            strokeStyle: 'solid',
+            strokeStyle: isMe ? 'dashed' : 'solid',
           });
           polyline.setMap(map);
           kakaoPolylinesRef.current.push(polyline);
         });
       });
+
+      // 3-2.5. 임시 핀 연결선 그리기 (내 위치에서 임시 핀까지 과일색 점선)
+      if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
+        const me = friends.find(f => f.id === activeProfileId);
+        if (me) {
+          const fruitColor = me.avatar ? getFruitColor(me.avatar) : '#EF4444';
+          const tempPolyline = new window.kakao.maps.Polyline({
+            path: [new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]), new window.kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1])],
+            strokeWeight: 4.5,
+            strokeColor: fruitColor,
+            strokeOpacity: 0.95,
+            strokeStyle: 'dashed',
+          });
+          tempPolyline.setMap(map);
+          kakaoPolylinesRef.current.push(tempPolyline);
+        }
+      }
 
       // 3-3. 약속 마커 그리기
       appointments.forEach(app => {
@@ -358,14 +396,33 @@ export default function MapComponent({
           
           if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
           
+          const isMe = f.id === activeProfileId;
+          const fruitColor = isMe && f.avatar ? getFruitColor(f.avatar) : (f.color || '#3B82F6');
+
           const line = L.polyline([[lat, lng], [app.lat, app.lng]] as L.LatLngTuple[], {
-            color: f.color || '#3B82F6',
+            color: fruitColor,
             weight: selectedFriendId === f.id ? 4 : 2.5,
             opacity: selectedFriendId === f.id ? 0.9 : 0.6,
+            dashArray: isMe ? '5, 5' : undefined,
           });
           pg.addLayer(line);
         });
       });
+
+      // 임시 핀 연결선 (내 위치에서 임시 핀까지 과일색 점선)
+      if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
+        const me = friends.find(f => f.id === activeProfileId);
+        if (me) {
+          const fruitColor = me.avatar ? getFruitColor(me.avatar) : '#EF4444';
+          const tempLine = L.polyline([myGpsCoords, tempPromiseCoords] as L.LatLngTuple[], {
+            color: fruitColor,
+            weight: 4,
+            opacity: 0.9,
+            dashArray: '5, 5',
+          });
+          pg.addLayer(tempLine);
+        }
+      }
 
       // 약속 마커
       appointments.forEach(app => {

@@ -91,52 +91,52 @@ export default function GroupRoomsPanel({
         </button>
       </div>
 
-      {/* 그룹 생성 폼 */}
-      {showCreate && (
-        <div className="mx-4 mt-3 mb-1 bg-rose-50 border border-rose-100 rounded-2xl p-4 space-y-3">
-          <p className="text-[13px] font-bold text-rose-700">새 그룹방 만들기</p>
-
-          {/* 이모지 선택 */}
-          <div className="flex gap-1.5 flex-wrap">
-            {EMOJI_OPTIONS.map(e => (
-              <button key={e} type="button" onClick={() => setNewEmoji(e)}
-                className={`w-9 h-9 rounded-xl text-lg transition ${newEmoji === e ? 'bg-rose-500 text-white ring-2 ring-rose-400' : 'bg-white border border-gray-200 hover:bg-rose-50'}`}>
-                {e}
-              </button>
-            ))}
-          </div>
-
-          <input
-            type="text"
-            placeholder="그룹 이름 (예: 대학 동창, 가족 안심방)"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleCreate()}
-            className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-rose-400"
-          />
-
-          <div className="grid grid-cols-2 gap-2">
-            {ROOM_TYPE_OPTIONS.map(t => (
-              <button key={t.value} type="button" onClick={() => setNewType(t.value)}
-                className={`py-2 rounded-xl text-xs font-semibold transition text-left px-3 ${newType === t.value ? 'bg-rose-500 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-rose-50'}`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={!newName.trim() || isCreating}
-            className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold py-3 rounded-2xl text-sm transition"
-          >
-            {isCreating ? '생성 중...' : `${newEmoji} ${newName || '그룹'} 만들기`}
-          </button>
-        </div>
-      )}
-
       {/* 방 목록 */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+        {/* 그룹 생성 폼 */}
+        {showCreate && (
+          <div className="mx-4 mt-3 mb-3 bg-rose-50 border border-rose-100 rounded-2xl p-4 space-y-3 shrink-0">
+            <p className="text-[13px] font-bold text-rose-700">새 그룹방 만들기</p>
+
+            {/* 이모지 선택 */}
+            <div className="flex gap-1.5 flex-wrap">
+              {EMOJI_OPTIONS.map(e => (
+                <button key={e} type="button" onClick={() => setNewEmoji(e)}
+                  className={`w-9 h-9 rounded-xl text-lg transition ${newEmoji === e ? 'bg-rose-500 text-white ring-2 ring-rose-400' : 'bg-white border border-gray-200 hover:bg-rose-50'}`}>
+                  {e}
+                </button>
+              ))}
+            </div>
+
+            <input
+              type="text"
+              placeholder="그룹 이름 (예: 대학 동창, 가족 안심방)"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleCreate()}
+              className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-rose-400"
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              {ROOM_TYPE_OPTIONS.map(t => (
+                <button key={t.value} type="button" onClick={() => setNewType(t.value)}
+                  className={`py-2 rounded-xl text-xs font-semibold transition text-left px-3 ${newType === t.value ? 'bg-rose-500 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-rose-50'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={!newName.trim() || isCreating}
+              className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold py-3 rounded-2xl text-sm transition"
+            >
+              {isCreating ? '생성 중...' : `${newEmoji} ${newName || '그룹'} 만들기`}
+            </button>
+          </div>
+        )}
+
         {rooms.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
             <Users className="w-12 h-12 opacity-20" />
@@ -187,7 +187,21 @@ export default function GroupRoomsPanel({
                   )}
                 </div>
 
-                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* 삭제 버튼 */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteRoom(room.id);
+                    }}
+                    className="p-2 text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition"
+                    title={isOwner ? "삭제" : "탈퇴/삭제"}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
+                </div>
               </div>
             );
           })
