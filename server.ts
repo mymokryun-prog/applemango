@@ -882,6 +882,8 @@ async function startServer() {
         routeIndex: 0,
         updatedAt: new Date().toISOString()
       };
+      // Explicitly remove isPendingInvite to ensure owner is immediately active
+      delete customFriends[ownerId].isPendingInvite;
     } else {
       customFriends[ownerId] = {
         id: ownerId,

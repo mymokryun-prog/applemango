@@ -666,9 +666,29 @@ export default function App() {
     }
   }, [isSoundEnabled]);
 
-  // 기존 컴포넌트와의 호환성을 위한 speakText 맵핑 함수
+  // 기존 컴포넌트와의 호환성을 위한 speakText 맵핑 함수 (진동 및 한국어 TTS 연동)
   const speakText = useCallback((text: string, force = false) => {
+    // 1. 비프음 재생
     playBipSound(selectedSoundIdx, force);
+    
+    // 2. 스마트폰 진동 피드백 (진동 API 지원 시)
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([150, 100, 150]);
+    }
+
+    // 3. TTS 음성 출력 (한국어 목소리)
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel(); // 진행 중인 음성 즉시 취소
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ko-KR';
+        utterance.volume = 1.0;
+        utterance.rate = 1.0;
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        console.warn('SpeechSynthesis error:', err);
+      }
+    }
   }, [playBipSound, selectedSoundIdx]);
 
   // 새 채팅 메시지 감지 시 TTS 말하기
@@ -681,7 +701,7 @@ export default function App() {
         const msgTime = new Date(newMsg.timestamp).getTime();
         const isRecent = Date.now() - msgTime < 3000;
         if (isRecent) {
-          speakText('애망! 애망!');
+          speakText(`${newMsg.senderName} 님: ${newMsg.text.slice(0, 30)}`, true);
         }
       }
     }
@@ -694,7 +714,7 @@ export default function App() {
     if (notifications.length > prevNotificationsCountRef.current) {
       const latestNotif = notifications[0];
       if (latestNotif && !latestNotif.read && prevNotificationsCountRef.current > 0) {
-        speakText('애망! 애망!');
+        speakText(`${latestNotif.title}. ${latestNotif.message}`, true);
       }
     }
     prevNotificationsCountRef.current = notifications.length;

@@ -8,6 +8,12 @@ import L from 'leaflet';
 import { Friend, Appointment } from '../types';
 import { Search, Loader2, X, MapPin, Crosshair } from 'lucide-react';
 
+declare global {
+  interface Window {
+    kakao: any;
+  }
+}
+
 interface MapComponentProps {
   friends: Friend[];
   appointments: Appointment[];
@@ -45,6 +51,29 @@ function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): s
   </div>`;
 }
 
+function appointmentMarkerHtml(app: Appointment): string {
+  return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+    <div style="width:36px;height:36px;background:#FBBF24;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:2px 2px 0 #111">📍</div>
+    <div style="background:#111;color:#FDE68A;font-size:9px;font-weight:900;padding:2px 6px;border-radius:5px;margin-top:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${app.title.length > 9 ? app.title.slice(0, 9) + '…' : app.title}</div>
+  </div>`;
+}
+
+function tempPromiseMarkerHtml(): string {
+  return `<div style="display:flex;flex-direction:column;align-items:center;animation:bounce 1s infinite;cursor:pointer">
+    <div style="width:32px;height:32px;background:#EF4444;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px">⭐️</div>
+    <div style="background:#111;color:#FCA5A5;font-size:8px;font-weight:900;padding:1px 5px;border-radius:4px;margin-top:2px;font-family:sans-serif">여기 소집</div>
+  </div>`;
+}
+
+function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string }): string {
+  return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+    <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1)">
+      ${myProfile.avatar}
+      <div style="position:absolute;bottom:-4px;right:-7px;background:#3B82F6;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;border:1px solid #111">내 위치</div>
+    </div>
+  </div>`;
+}
+
 export default function MapComponent({
   friends, appointments, activeProfileId,
   selectedFriendId, selectedPromiseId,
@@ -52,183 +81,337 @@ export default function MapComponent({
   myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const markerGroupRef = useRef<L.LayerGroup | null>(null);
-  const polyGroupRef = useRef<L.LayerGroup | null>(null);
-  const myMarkerRef = useRef<L.Marker | L.CircleMarker | null>(null);
 
+  // ─── Kakao Map State & Refs ───────────────────────────────────────────────
+  const [isKakaoReady, setIsKakaoReady] = useState(false);
+  const [useFallbackMap, setUseFallbackMap] = useState(false);
+  const kakaoMapInstanceRef = useRef<any>(null);
+  const kakaoOverlaysRef = useRef<any[]>([]);
+  const kakaoPolylinesRef = useRef<any[]>([]);
+  const kakaoMyMarkerRef = useRef<any>(null);
+
+  // ─── Leaflet Map Refs ──────────────────────────────────────────────────────
+  const leafletMapInstanceRef = useRef<L.Map | null>(null);
+  const leafletMarkerGroupRef = useRef<L.LayerGroup | null>(null);
+  const leafletPolyGroupRef = useRef<L.LayerGroup | null>(null);
+  const leafletMyMarkerRef = useRef<L.Marker | L.CircleMarker | null>(null);
+
+  // ─── Search States ────────────────────────────────────────────────────────
   const [mapSearch, setMapSearch] = useState('');
   const [mapResults, setMapResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── 지도 초기화 ──────────────────────────────────────────────────────────
+  // ─── 1. 카카오맵 SDK 동적 로드 ──────────────────────────────────────────────
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+    fetch('/api/places/config')
+      .then(res => res.json())
+      .then(data => {
+        const key = data.kakaoMapKey;
+        if (!key) {
+          console.warn('Kakao Map Key not found in config, using Leaflet fallback.');
+          setUseFallbackMap(true);
+          return;
+        }
 
-    const map = L.map(mapRef.current, {
-      center: [37.5565, 126.9242],
-      zoom: 15,
-      zoomControl: false,
-      attributionControl: false,
-    });
+        if (window.kakao && window.kakao.maps) {
+          setIsKakaoReady(true);
+          return;
+        }
 
-    // VWorld 한국 공식 지도 (1순위) → CartoDB 폴백
-    const vworld = L.tileLayer(
-      'https://xdworld.vworld.kr/2d/Base/service/{z}/{x}/{y}.png',
-      { maxZoom: 19, errorTileUrl: '' }
-    );
+        const scriptId = 'kakao-map-sdk';
+        let script = document.getElementById(scriptId) as HTMLScriptElement;
+        if (!script) {
+          script = document.createElement('script');
+          script.id = scriptId;
+          script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${key}&autoload=false&libraries=services`;
+          script.async = true;
+          document.head.appendChild(script);
+        }
 
-    const carto = L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      { maxZoom: 19, subdomains: 'abcd' }
-    );
+        script.onload = () => {
+          if (window.kakao && window.kakao.maps) {
+            window.kakao.maps.load(() => {
+              setIsKakaoReady(true);
+            });
+          } else {
+            console.warn('Kakao Maps load failed, falling back to Leaflet.');
+            setUseFallbackMap(true);
+          }
+        };
 
-    // VWorld 로드 실패 시 CartoDB로 자동 전환
-    vworld.on('tileerror', () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.removeLayer(vworld);
-        carto.addTo(mapInstanceRef.current);
-      }
-    });
-    vworld.addTo(map);
-
-    L.control.zoom({ position: 'topright' }).addTo(map);
-
-    map.on('click', (e: L.LeafletMouseEvent) => {
-      onMapClick(e.latlng.lat, e.latlng.lng);
-    });
-
-    mapInstanceRef.current = map;
-    markerGroupRef.current = L.layerGroup().addTo(map);
-    polyGroupRef.current = L.layerGroup().addTo(map);
-
-    return () => {
-      map.remove();
-      mapInstanceRef.current = null;
-    };
+        script.onerror = () => {
+          console.warn('Kakao Maps Script load error, falling back to Leaflet.');
+          setUseFallbackMap(true);
+        };
+      })
+      .catch(err => {
+        console.error('Error fetching Kakao Config:', err);
+        setUseFallbackMap(true);
+      });
   }, []);
 
-  // ── 마커 + 경로 업데이트 ─────────────────────────────────────────────────
+  // ─── 2. 지도 초기화 (카카오맵 vs Leaflet) ──────────────────────────────────
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    const mg = markerGroupRef.current;
-    const pg = polyGroupRef.current;
-    if (!map || !mg || !pg) return;
+    if (!mapRef.current) return;
 
-    mg.clearLayers();
-    pg.clearLayers();
-
-    // 경로 선
-    friends.forEach(f => {
-      if (!f.route || f.route.length < 2) return;
-      const validRoute = f.route.filter(coord => 
-        coord && typeof coord[0] === 'number' && typeof coord[1] === 'number' && !isNaN(coord[0]) && !isNaN(coord[1])
-      );
-      if (validRoute.length < 2) return;
-      
-      const poly = L.polyline(validRoute as L.LatLngTuple[], {
-        color: f.color,
-        weight: selectedFriendId === f.id ? 4 : 2,
-        opacity: selectedFriendId === f.id ? 0.85 : 0.4,
-      });
-      pg.addLayer(poly);
-    });
-
-    // 약속 장소까지 실선 연결 (각 멤버의 색상 사용)
-    appointments.forEach(app => {
-      if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
-      
-      friends.forEach(f => {
-        const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
-        const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
+    if (isKakaoReady && !useFallbackMap) {
+      // 카카오 맵 초기화
+      try {
+        const container = mapRef.current;
+        const options = {
+          center: new window.kakao.maps.LatLng(37.5565, 126.9242),
+          level: 4,
+        };
+        const map = new window.kakao.maps.Map(container, options);
         
-        if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
-        
-        const line = L.polyline([[lat, lng], [app.lat, app.lng]] as L.LatLngTuple[], {
-          color: f.color || '#3B82F6',
-          weight: selectedFriendId === f.id ? 4 : 2.5,
-          opacity: selectedFriendId === f.id ? 0.9 : 0.6,
-          dashArray: 'none', // 실선
+        // 줌 제어기 추가
+        const zoomControl = new window.kakao.maps.ZoomControl();
+        map.addControl(zoomControl, window.kakao.maps.ControlPosition.RIGHT);
+
+        window.kakao.maps.event.addListener(map, 'click', (mouseEvent: any) => {
+          const latlng = mouseEvent.latLng;
+          onMapClick(latlng.getLat(), latlng.getLng());
         });
-        line.bindTooltip(`${f.name} → 약속 장소`, { direction: 'top', sticky: true });
-        pg.addLayer(line);
-      });
-    });
 
-    // 약속 마커
-    appointments.forEach(app => {
-      if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
-      
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="display:flex;flex-direction:column;align-items:center">
-          <div style="width:36px;height:36px;background:#FBBF24;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:2px 2px 0 #111">📍</div>
-          <div style="background:#111;color:#FDE68A;font-size:9px;font-weight:900;padding:2px 6px;border-radius:5px;margin-top:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${app.title.length > 9 ? app.title.slice(0, 9) + '…' : app.title}</div>
-        </div>`,
-        iconSize: [40, 52],
-        iconAnchor: [20, 48],
-      });
-      const m = L.marker([app.lat, app.lng], { icon });
-      m.bindTooltip(`<b>${app.title}</b><br>📍 ${app.placeName}<br>🕒 ${app.datetime}`, { direction: 'top' });
-      mg.addLayer(m);
-    });
+        kakaoMapInstanceRef.current = map;
+      } catch (err) {
+        console.error('Error initializing Kakao Map:', err);
+        setUseFallbackMap(true);
+      }
+    } else if (useFallbackMap) {
+      // Leaflet 초기화 (기존 VWorld 폴백)
+      if (leafletMapInstanceRef.current) return;
 
-    // 임시 핀
-    if (tempPromiseCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="display:flex;flex-direction:column;align-items:center;animation:bounce 1s infinite">
-          <div style="width:32px;height:32px;background:#EF4444;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px">⭐️</div>
-          <div style="background:#111;color:#FCA5A5;font-size:8px;font-weight:900;padding:1px 5px;border-radius:4px;margin-top:2px;font-family:sans-serif">여기 소집</div>
-        </div>`,
-        iconSize: [36, 46],
-        iconAnchor: [18, 42],
+      const map = L.map(mapRef.current, {
+        center: [37.5565, 126.9242],
+        zoom: 15,
+        zoomControl: false,
+        attributionControl: false,
       });
-      mg.addLayer(L.marker(tempPromiseCoords, { icon }));
-    }
 
-    // 친구 마커
-    friends.forEach(f => {
-      // 내 실시간 GPS 마커가 지도 위에 표시되므로 중복 마커 방지를 위해 f.id === activeProfileId 이고 myGpsCoords가 있는 경우는 스킵
-      if (f.id === activeProfileId && myGpsCoords) return;
-      if (typeof f.lat !== 'number' || typeof f.lng !== 'number' || isNaN(f.lat) || isNaN(f.lng)) return;
-
-      const icon = L.divIcon({
-        className: '',
-        html: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
-        iconSize: [36, 48],
-        iconAnchor: [18, 42],
-      });
-      const m = L.marker([f.lat, f.lng], { icon, zIndexOffset: selectedFriendId === f.id ? 1000 : 0 });
-      m.bindTooltip(
-        `<b>${f.avatar} ${f.name}</b><br>"${f.statusMsg}"<br>속도: ${f.speed}km/h · ${f.heading}`,
-        { direction: 'top' }
+      const vworld = L.tileLayer(
+        'https://xdworld.vworld.kr/2d/Base/service/{z}/{x}/{y}.png',
+        { maxZoom: 19, errorTileUrl: '' }
       );
-      mg.addLayer(m);
-    });
-  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords]);
 
-  // ── 포커스 이동 ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    if (selectedFriendId) {
-      const f = friends.find(fr => fr.id === selectedFriendId);
-      if (f) map.flyTo([f.lat, f.lng], 16, { animate: true, duration: 1.2 });
-    } else if (selectedPromiseId) {
-      const a = appointments.find(ap => ap.id === selectedPromiseId);
-      if (a) map.flyTo([a.lat, a.lng], 16, { animate: true, duration: 1.2 });
-    } else if (tempPromiseCoords) {
-      map.flyTo(tempPromiseCoords, 16, { animate: true, duration: 1.0 });
+      const carto = L.tileLayer(
+        'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        { maxZoom: 19, subdomains: 'abcd' }
+      );
+
+      vworld.on('tileerror', () => {
+        if (leafletMapInstanceRef.current) {
+          leafletMapInstanceRef.current.removeLayer(vworld);
+          carto.addTo(leafletMapInstanceRef.current);
+        }
+      });
+      vworld.addTo(map);
+
+      L.control.zoom({ position: 'topright' }).addTo(map);
+
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        onMapClick(e.latlng.lat, e.latlng.lng);
+      });
+
+      leafletMapInstanceRef.current = map;
+      leafletMarkerGroupRef.current = L.layerGroup().addTo(map);
+      leafletPolyGroupRef.current = L.layerGroup().addTo(map);
     }
-  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords]);
 
-  // ── 내 위치 프로필 모양 마커 업데이트 ────────────────────────────────────────
+    return () => {
+      // 정리
+      if (leafletMapInstanceRef.current) {
+        leafletMapInstanceRef.current.remove();
+        leafletMapInstanceRef.current = null;
+      }
+      kakaoMapInstanceRef.current = null;
+    };
+  }, [isKakaoReady, useFallbackMap]);
+
+  // ─── 3. 마커 및 선 그리기 (카카오맵 / Leaflet 동시 분기) ───────────────────
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map || !myGpsCoords || typeof myGpsCoords[0] !== 'number' || typeof myGpsCoords[1] !== 'number' || isNaN(myGpsCoords[0]) || isNaN(myGpsCoords[1])) return;
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const map = kakaoMapInstanceRef.current;
+      
+      // 기존 오버레이 및 경로선 초기화
+      kakaoOverlaysRef.current.forEach(o => o.setMap(null));
+      kakaoOverlaysRef.current = [];
+      kakaoPolylinesRef.current.forEach(p => p.setMap(null));
+      kakaoPolylinesRef.current = [];
+
+      // 3-1. 친구 경로 그리기
+      friends.forEach(f => {
+        if (!f.route || f.route.length < 2) return;
+        const validRoute = f.route.filter(coord => 
+          coord && typeof coord[0] === 'number' && typeof coord[1] === 'number' && !isNaN(coord[0]) && !isNaN(coord[1])
+        );
+        if (validRoute.length < 2) return;
+
+        const path = validRoute.map(coord => new window.kakao.maps.LatLng(coord[0], coord[1]));
+        const polyline = new window.kakao.maps.Polyline({
+          path,
+          strokeWeight: selectedFriendId === f.id ? 4 : 2.5,
+          strokeColor: f.color || '#3B82F6',
+          strokeOpacity: selectedFriendId === f.id ? 0.9 : 0.45,
+          strokeStyle: 'solid',
+        });
+        polyline.setMap(map);
+        kakaoPolylinesRef.current.push(polyline);
+      });
+
+      // 3-2. 약속 장소 연결선 그리기
+      appointments.forEach(app => {
+        if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
+
+        friends.forEach(f => {
+          const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
+          const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
+
+          if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
+
+          const polyline = new window.kakao.maps.Polyline({
+            path: [new window.kakao.maps.LatLng(lat, lng), new window.kakao.maps.LatLng(app.lat, app.lng)],
+            strokeWeight: selectedFriendId === f.id ? 4.5 : 2.5,
+            strokeColor: f.color || '#3B82F6',
+            strokeOpacity: selectedFriendId === f.id ? 0.95 : 0.65,
+            strokeStyle: 'solid',
+          });
+          polyline.setMap(map);
+          kakaoPolylinesRef.current.push(polyline);
+        });
+      });
+
+      // 3-3. 약속 마커 그리기
+      appointments.forEach(app => {
+        if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
+
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(app.lat, app.lng),
+          content: appointmentMarkerHtml(app),
+          yAnchor: 1.0
+        });
+        overlay.setMap(map);
+        kakaoOverlaysRef.current.push(overlay);
+      });
+
+      // 3-4. 임시 핀 마커 그리기
+      if (tempPromiseCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1]),
+          content: tempPromiseCoords ? tempPromiseMarkerHtml() : '',
+          yAnchor: 1.0
+        });
+        overlay.setMap(map);
+        kakaoOverlaysRef.current.push(overlay);
+      }
+
+      // 3-5. 친구 마커 그리기
+      friends.forEach(f => {
+        if (f.id === activeProfileId && myGpsCoords) return; // 내 실시간 GPS 마커와 중복 방지
+        if (typeof f.lat !== 'number' || typeof f.lng !== 'number' || isNaN(f.lat) || isNaN(f.lng)) return;
+
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(f.lat, f.lng),
+          content: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
+          yAnchor: 1.0,
+          zIndex: selectedFriendId === f.id ? 100 : 10
+        });
+        overlay.setMap(map);
+        kakaoOverlaysRef.current.push(overlay);
+      });
+
+    } else if (useFallbackMap && leafletMapInstanceRef.current) {
+      // Leaflet 마커/경로 업데이트 (기존 코드와 완벽히 동일)
+      const map = leafletMapInstanceRef.current;
+      const mg = leafletMarkerGroupRef.current;
+      const pg = leafletPolyGroupRef.current;
+      if (!map || !mg || !pg) return;
+
+      mg.clearLayers();
+      pg.clearLayers();
+
+      // 경로 선
+      friends.forEach(f => {
+        if (!f.route || f.route.length < 2) return;
+        const validRoute = f.route.filter(coord => 
+          coord && typeof coord[0] === 'number' && typeof coord[1] === 'number' && !isNaN(coord[0]) && !isNaN(coord[1])
+        );
+        if (validRoute.length < 2) return;
+        
+        const poly = L.polyline(validRoute as L.LatLngTuple[], {
+          color: f.color,
+          weight: selectedFriendId === f.id ? 4 : 2,
+          opacity: selectedFriendId === f.id ? 0.85 : 0.4,
+        });
+        pg.addLayer(poly);
+      });
+
+      // 약속 장소 연결선
+      appointments.forEach(app => {
+        if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
+        
+        friends.forEach(f => {
+          const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
+          const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
+          
+          if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
+          
+          const line = L.polyline([[lat, lng], [app.lat, app.lng]] as L.LatLngTuple[], {
+            color: f.color || '#3B82F6',
+            weight: selectedFriendId === f.id ? 4 : 2.5,
+            opacity: selectedFriendId === f.id ? 0.9 : 0.6,
+          });
+          pg.addLayer(line);
+        });
+      });
+
+      // 약속 마커
+      appointments.forEach(app => {
+        if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
+        
+        const icon = L.divIcon({
+          className: '',
+          html: appointmentMarkerHtml(app),
+          iconSize: [40, 52],
+          iconAnchor: [20, 48],
+        });
+        const m = L.marker([app.lat, app.lng], { icon });
+        mg.addLayer(m);
+      });
+
+      // 임시 핀
+      if (tempPromiseCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
+        const icon = L.divIcon({
+          className: '',
+          html: tempPromiseMarkerHtml(),
+          iconSize: [36, 46],
+          iconAnchor: [18, 42],
+        });
+        mg.addLayer(L.marker(tempPromiseCoords, { icon }));
+      }
+
+      // 친구 마커
+      friends.forEach(f => {
+        if (f.id === activeProfileId && myGpsCoords) return;
+        if (typeof f.lat !== 'number' || typeof f.lng !== 'number' || isNaN(f.lat) || isNaN(f.lng)) return;
+
+        const icon = L.divIcon({
+          className: '',
+          html: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
+          iconSize: [36, 48],
+          iconAnchor: [18, 42],
+        });
+        const m = L.marker([f.lat, f.lng], { icon, zIndexOffset: selectedFriendId === f.id ? 1000 : 0 });
+        mg.addLayer(m);
+      });
+    }
+  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, isKakaoReady, useFallbackMap]);
+
+  // ─── 4. 내 GPS 위치 마커 실시간 업데이트 ──────────────────────────────────
+  useEffect(() => {
+    if (!myGpsCoords || typeof myGpsCoords[0] !== 'number' || typeof myGpsCoords[1] !== 'number' || isNaN(myGpsCoords[0]) || isNaN(myGpsCoords[1])) return;
 
     const myProfile = friends.find(f => f.id === activeProfileId) || {
       avatar: localStorage.getItem('aemang_fruit') || '🍎',
@@ -236,78 +419,166 @@ export default function MapComponent({
       name: '나'
     };
 
-    const myHtml = `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
-      <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1)">
-        ${myProfile.avatar}
-        <div style="position:absolute;bottom:-4px;right:-7px;background:#3B82F6;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;border:1px solid #111">내 위치</div>
-      </div>
-    </div>`;
-
-    if (myMarkerRef.current && 'setIcon' in myMarkerRef.current) {
-      (myMarkerRef.current as L.Marker).setLatLng(myGpsCoords);
-      (myMarkerRef.current as L.Marker).setIcon(L.divIcon({
-        className: '',
-        html: myHtml,
-        iconSize: [36, 42],
-        iconAnchor: [18, 36],
-      }));
-    } else {
-      // 기존에 circleMarker 등이 생성되어 있었다면 제거
-      if (myMarkerRef.current) {
-        myMarkerRef.current.remove();
-        myMarkerRef.current = null;
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const map = kakaoMapInstanceRef.current;
+      
+      if (kakaoMyMarkerRef.current) {
+        kakaoMyMarkerRef.current.setMap(null);
       }
-      myMarkerRef.current = L.marker(myGpsCoords, {
-        icon: L.divIcon({
+
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]),
+        content: selfMarkerHtml(myProfile),
+        yAnchor: 1.0,
+        zIndex: 200
+      });
+      overlay.setMap(map);
+      kakaoMyMarkerRef.current = overlay;
+
+    } else if (useFallbackMap && leafletMapInstanceRef.current) {
+      const map = leafletMapInstanceRef.current;
+      const myHtml = selfMarkerHtml(myProfile);
+
+      if (leafletMyMarkerRef.current && 'setLatLng' in leafletMyMarkerRef.current) {
+        (leafletMyMarkerRef.current as L.Marker).setLatLng(myGpsCoords);
+        (leafletMyMarkerRef.current as L.Marker).setIcon(L.divIcon({
           className: '',
           html: myHtml,
           iconSize: [36, 42],
           iconAnchor: [18, 36],
-        }),
-        pane: 'markerPane',
-      }).addTo(map) as any;
-      myMarkerRef.current.bindTooltip('내 위치', { direction: 'top', permanent: false });
+        }));
+      } else {
+        if (leafletMyMarkerRef.current) {
+          leafletMyMarkerRef.current.remove();
+        }
+        leafletMyMarkerRef.current = L.marker(myGpsCoords, {
+          icon: L.divIcon({
+            className: '',
+            html: myHtml,
+            iconSize: [36, 42],
+            iconAnchor: [18, 36],
+          }),
+          pane: 'markerPane',
+        }).addTo(map) as any;
+      }
     }
-  }, [myGpsCoords, friends, activeProfileId]);
+  }, [myGpsCoords, friends, activeProfileId, isKakaoReady, useFallbackMap]);
 
-  // ── 최초 GPS 이동 ────────────────────────────────────────────────────────
+  // ─── 5. 포커스 이동 (flyTo/panTo) ──────────────────────────────────────────
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map || !myGpsCoords || !centerOnMyGpsOnce) return;
+    let targetCoords: [number, number] | null = null;
+    
+    if (selectedFriendId) {
+      const f = friends.find(fr => fr.id === selectedFriendId);
+      if (f) targetCoords = [f.lat, f.lng];
+    } else if (selectedPromiseId) {
+      const a = appointments.find(ap => ap.id === selectedPromiseId);
+      if (a) targetCoords = [a.lat, a.lng];
+    } else if (tempPromiseCoords) {
+      targetCoords = tempPromiseCoords;
+    }
+
+    if (!targetCoords) return;
+
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const map = kakaoMapInstanceRef.current;
+      const latlng = new window.kakao.maps.LatLng(targetCoords[0], targetCoords[1]);
+      map.panTo(latlng);
+    } else if (useFallbackMap && leafletMapInstanceRef.current) {
+      const map = leafletMapInstanceRef.current;
+      map.flyTo(targetCoords, 16, { animate: true, duration: 1.2 });
+    }
+  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords, isKakaoReady, useFallbackMap]);
+
+  // ─── 6. 최초 GPS 중심 맞추기 ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!myGpsCoords || !centerOnMyGpsOnce) return;
     if (selectedFriendId || selectedPromiseId) return;
-    map.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
-    onMyGpsCentered?.();
-  }, [myGpsCoords, centerOnMyGpsOnce]);
 
-  // ── 내 위치로 이동 버튼 핸들러 ───────────────────────────────────────────
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const map = kakaoMapInstanceRef.current;
+      map.setCenter(new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]));
+      onMyGpsCentered?.();
+    } else if (useFallbackMap && leafletMapInstanceRef.current) {
+      const map = leafletMapInstanceRef.current;
+      map.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
+      onMyGpsCentered?.();
+    }
+  }, [myGpsCoords, centerOnMyGpsOnce, isKakaoReady, useFallbackMap]);
+
+  // ─── 7. 내 위치 바로가기 핸들러 ────────────────────────────────────────────
   const handleGoToMyLocation = useCallback(() => {
-    const map = mapInstanceRef.current;
-    if (!map || !myGpsCoords) return;
-    map.flyTo(myGpsCoords, 17, { animate: true, duration: 0.8 });
-  }, [myGpsCoords]);
+    if (!myGpsCoords) return;
 
-  // ── 장소 검색 (Nominatim) ────────────────────────────────────────────────
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const map = kakaoMapInstanceRef.current;
+      map.panTo(new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]));
+    } else if (useFallbackMap && leafletMapInstanceRef.current) {
+      const map = leafletMapInstanceRef.current;
+      map.flyTo(myGpsCoords, 17, { animate: true, duration: 0.8 });
+    }
+  }, [myGpsCoords, isKakaoReady, useFallbackMap]);
+
+  // ─── 8. 장소 검색 (카카오 검색 서비스 vs Nominatim 폴백) ────────────────────
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!mapSearch.trim()) { setMapResults([]); setShowResults(false); return; }
 
     setIsSearching(true);
     setShowResults(true);
+
     debounceRef.current = setTimeout(async () => {
+      if (isKakaoReady && !useFallbackMap && window.kakao && window.kakao.maps && window.kakao.maps.services) {
+        // 카카오 장소 검색 API 사용
+        try {
+          const ps = new window.kakao.maps.services.Places();
+          ps.keywordSearch(mapSearch, (data: any, status: any) => {
+            if (status === window.kakao.maps.services.Status.OK) {
+              const results: PlaceResult[] = data.map((item: any) => ({
+                name: item.place_name,
+                address: item.road_address_name || item.address_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x)
+              }));
+              setMapResults(results);
+            } else {
+              setMapResults([]);
+            }
+            setIsSearching(false);
+          });
+        } catch (err) {
+          console.warn('Kakao places search error, using Nominatim fallback:', err);
+          fallbackSearch();
+        }
+      } else {
+        fallbackSearch();
+      }
+    }, 450);
+
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+
+    async function fallbackSearch() {
       try {
         const res = await fetch(`/api/places/search?q=${encodeURIComponent(mapSearch)}`);
         const data: PlaceResult[] = await res.json();
         setMapResults(data);
-      } catch { setMapResults([]); }
-      finally { setIsSearching(false); }
-    }, 500);
-
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [mapSearch]);
+      } catch {
+        setMapResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }
+  }, [mapSearch, isKakaoReady, useFallbackMap]);
 
   const handleSelectResult = (place: PlaceResult) => {
-    const map = mapInstanceRef.current;
-    if (map) map.flyTo([place.lat, place.lng], 17, { animate: true, duration: 1.0 });
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const map = kakaoMapInstanceRef.current;
+      map.panTo(new window.kakao.maps.LatLng(place.lat, place.lng));
+    } else if (useFallbackMap && leafletMapInstanceRef.current) {
+      const map = leafletMapInstanceRef.current;
+      map.flyTo([place.lat, place.lng], 17, { animate: true, duration: 1.0 });
+    }
+
     onMapClick(place.lat, place.lng);
     setMapSearch('');
     setShowResults(false);

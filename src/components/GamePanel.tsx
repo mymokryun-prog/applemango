@@ -131,6 +131,23 @@ class AudioSynth {
     if (!this.ctx) return;
     const ctx = this.ctx;
 
+    // Traditional gong (징) percussion hit
+    try {
+      const oscGong = ctx.createOscillator();
+      const gainGong = ctx.createGain();
+      oscGong.type = 'triangle';
+      oscGong.frequency.setValueAtTime(160, ctx.currentTime);
+      oscGong.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.55);
+      gainGong.gain.setValueAtTime(0.35, ctx.currentTime);
+      gainGong.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+      oscGong.connect(gainGong);
+      gainGong.connect(ctx.destination);
+      oscGong.start(ctx.currentTime);
+      oscGong.stop(ctx.currentTime + 0.6);
+    } catch (e) {
+      console.warn('Gong sound error:', e);
+    }
+
     // 1. Swishing noise sweep (바람 소리)
     const bufferSize = ctx.sampleRate * 0.5;
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -1988,12 +2005,106 @@ const YUT_STATIONS = [
   { id: 28, x: 210, y: 210 }
 ];
 
+function moveOneStep(
+  current: number | null,
+  path: 'outer' | 'diagonal1' | 'diagonal2' | 'center-shortcut'
+): { next: number | null; nextPath: 'outer' | 'diagonal1' | 'diagonal2' | 'center-shortcut'; isGoal: boolean } {
+  if (current === null) {
+    return { next: 1, nextPath: 'outer', isGoal: false };
+  }
+
+  if (path === 'outer') {
+    if (current === 19) {
+      return { next: null, nextPath: 'outer', isGoal: true };
+    }
+    const next = current + 1;
+    return { next, nextPath: 'outer', isGoal: false };
+  }
+
+  if (path === 'diagonal1') {
+    if (current === 5) return { next: 20, nextPath: 'diagonal1', isGoal: false };
+    if (current === 20) return { next: 21, nextPath: 'diagonal1', isGoal: false };
+    if (current === 21) return { next: 22, nextPath: 'diagonal1', isGoal: false };
+    if (current === 22) return { next: 23, nextPath: 'diagonal1', isGoal: false };
+    if (current === 23) return { next: 24, nextPath: 'diagonal1', isGoal: false };
+    if (current === 24) return { next: 15, nextPath: 'diagonal1', isGoal: false };
+    if (current === 15) return { next: 16, nextPath: 'outer', isGoal: false };
+    if (current === 16) return { next: 17, nextPath: 'outer', isGoal: false };
+    if (current === 17) return { next: 18, nextPath: 'outer', isGoal: false };
+    if (current === 18) return { next: 19, nextPath: 'outer', isGoal: false };
+    if (current === 19) return { next: null, nextPath: 'outer', isGoal: true };
+  }
+
+  if (path === 'diagonal2') {
+    if (current === 10) return { next: 25, nextPath: 'diagonal2', isGoal: false };
+    if (current === 25) return { next: 26, nextPath: 'diagonal2', isGoal: false };
+    if (current === 26) return { next: 22, nextPath: 'diagonal2', isGoal: false };
+    if (current === 22) return { next: 27, nextPath: 'diagonal2', isGoal: false };
+    if (current === 27) return { next: 28, nextPath: 'diagonal2', isGoal: false };
+    if (current === 28) return { next: null, nextPath: 'diagonal2', isGoal: true };
+  }
+
+  if (path === 'center-shortcut') {
+    if (current === 22) return { next: 27, nextPath: 'center-shortcut', isGoal: false };
+    if (current === 27) return { next: 28, nextPath: 'center-shortcut', isGoal: false };
+    if (current === 28) return { next: null, nextPath: 'center-shortcut', isGoal: true };
+  }
+
+  return { next: null, nextPath: 'outer', isGoal: true };
+}
+
+function getPrevStep(
+  current: number | null,
+  path: 'outer' | 'diagonal1' | 'diagonal2' | 'center-shortcut'
+): { prev: number | null; prevPath: 'outer' | 'diagonal1' | 'diagonal2' | 'center-shortcut' } {
+  if (current === null) {
+    return { prev: null, prevPath: 'outer' };
+  }
+
+  if (path === 'outer') {
+    if (current === 1) {
+      return { prev: null, prevPath: 'outer' };
+    }
+    const prev = current - 1;
+    return { prev, prevPath: 'outer' };
+  }
+
+  if (path === 'diagonal1') {
+    if (current === 20) return { prev: 5, prevPath: 'outer' };
+    if (current === 21) return { prev: 20, prevPath: 'diagonal1' };
+    if (current === 22) return { prev: 21, prevPath: 'diagonal1' };
+    if (current === 23) return { prev: 22, prevPath: 'diagonal1' };
+    if (current === 24) return { prev: 23, prevPath: 'diagonal1' };
+    if (current === 15) return { prev: 24, prevPath: 'diagonal1' };
+    if (current === 16) return { prev: 15, prevPath: 'outer' };
+    if (current === 17) return { prev: 16, prevPath: 'outer' };
+    if (current === 18) return { prev: 17, prevPath: 'outer' };
+    if (current === 19) return { prev: 18, prevPath: 'outer' };
+  }
+
+  if (path === 'diagonal2') {
+    if (current === 25) return { prev: 10, prevPath: 'outer' };
+    if (current === 26) return { prev: 25, prevPath: 'diagonal2' };
+    if (current === 22) return { prev: 26, prevPath: 'diagonal2' };
+    if (current === 27) return { prev: 22, prevPath: 'diagonal2' };
+    if (current === 28) return { prev: 27, prevPath: 'diagonal2' };
+  }
+
+  if (path === 'center-shortcut') {
+    if (current === 27) return { prev: 22, prevPath: 'diagonal1' };
+    if (current === 28) return { prev: 27, prevPath: 'center-shortcut' };
+  }
+
+  return { prev: null, prevPath: 'outer' };
+}
+
 interface Mal {
   id: number;
   player: 1 | 2;
   stationId: number | null; 
   isFinished: boolean;
   groupWith: number[]; 
+  path?: 'outer' | 'diagonal1' | 'diagonal2' | 'center-shortcut';
 }
 
 function YutNoriGame({ 
@@ -2014,15 +2125,18 @@ function YutNoriGame({
   const [selectedMalIdx, setSelectedMalIdx] = useState<number | null>(null);
   const [yutWinner, setYutWinner] = useState<1 | 2 | null>(null);
 
+  // 중앙(방)에 멈췄을 때 지름길(shortcut)로 갈 것인지 대각선 유지(diagonal)할 것인지 경로 선택 상태
+  const [centerChoice, setCenterChoice] = useState<'shortcut' | 'diagonal'>('shortcut');
+
   const [mals, setMals] = useState<Mal[]>([
-    { id: 0, player: 1, stationId: null, isFinished: false, groupWith: [] },
-    { id: 1, player: 1, stationId: null, isFinished: false, groupWith: [] },
-    { id: 2, player: 1, stationId: null, isFinished: false, groupWith: [] },
-    { id: 3, player: 1, stationId: null, isFinished: false, groupWith: [] },
-    { id: 4, player: 2, stationId: null, isFinished: false, groupWith: [] },
-    { id: 5, player: 2, stationId: null, isFinished: false, groupWith: [] },
-    { id: 6, player: 2, stationId: null, isFinished: false, groupWith: [] },
-    { id: 7, player: 2, stationId: null, isFinished: false, groupWith: [] }
+    { id: 0, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 1, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 2, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 3, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 4, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 5, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 6, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+    { id: 7, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' }
   ]);
 
   const [sticks, setSticks] = useState<Array<{ x: number; y: number; rot: number; scale: number; val: 0 | 1 }>>([
@@ -2044,15 +2158,16 @@ function YutNoriGame({
     setCanThrow(true);
     setSelectedMalIdx(null);
     setYutWinner(null);
+    setCenterChoice('shortcut');
     setMals([
-      { id: 0, player: 1, stationId: null, isFinished: false, groupWith: [] },
-      { id: 1, player: 1, stationId: null, isFinished: false, groupWith: [] },
-      { id: 2, player: 1, stationId: null, isFinished: false, groupWith: [] },
-      { id: 3, player: 1, stationId: null, isFinished: false, groupWith: [] },
-      { id: 4, player: 2, stationId: null, isFinished: false, groupWith: [] },
-      { id: 5, player: 2, stationId: null, isFinished: false, groupWith: [] },
-      { id: 6, player: 2, stationId: null, isFinished: false, groupWith: [] },
-      { id: 7, player: 2, stationId: null, isFinished: false, groupWith: [] }
+      { id: 0, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 1, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 2, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 3, player: 1, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 4, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 5, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 6, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' },
+      { id: 7, player: 2, stationId: null, isFinished: false, groupWith: [], path: 'outer' }
     ]);
     setSticks([
       { x: 0, y: 150, rot: 0, scale: 1, val: 0 },
@@ -2071,9 +2186,15 @@ function YutNoriGame({
       if (payload.type === 'sync-yut-action') {
         if (payload.actionType === 'throw') {
           localThrowAction(payload.yuts, true);
-        } else if (payload.actionType === 'move') {
-          localMoveAction(payload.malIdx, payload.steps, true);
         }
+      } else if (payload.type === 'sync-yut-state') {
+        const s = payload.state;
+        if (s.mals) setMals(s.mals);
+        if (s.yutTurn !== undefined) setYutTurn(s.yutTurn);
+        if (s.canThrow !== undefined) setCanThrow(s.canThrow);
+        if (s.thrownSteps !== undefined) setThrownSteps(s.thrownSteps);
+        if (s.thrownResult !== undefined) setThrownResult(s.thrownResult);
+        if (s.yutWinner !== undefined) setYutWinner(s.yutWinner);
       }
     };
     socket.on('game-relayed', handleYutSync);
@@ -2303,21 +2424,24 @@ function YutNoriGame({
         const sway = idx % 2 === 0 ? 1 : -1;
         let xOffset = 0;
         let yOffset = 160;
-        let rotVal = s.rot + 0.85;
+        let rotVal = s.rot + 1.35; // 빠른 윷가락 스핀
         let scaleVal = 1.0;
         
-        if (frame < 15) {
-          xOffset = Math.sin(frame * 0.5 + idx * 1.2) * 60 * sway;
-          yOffset = 160 - frame * 18;
-          scaleVal = 1.0 + frame * 0.08;
-        } else if (frame < 26) {
-          xOffset = Math.sin(frame * 0.5 + idx * 1.2) * 60 * sway;
-          yOffset = -110 + (frame - 15) * 25;
-          scaleVal = 2.2 - (frame - 15) * 0.11;
+        if (frame < 20) {
+          // 화면 전체를 현란하게 오가며 궤적 회전
+          xOffset = Math.cos(frame * 0.7 + idx * 1.8) * 110 * sway;
+          yOffset = 160 - Math.sin((frame / 20) * Math.PI) * 280;
+          scaleVal = 1.0 + Math.sin((frame / 20) * Math.PI) * 1.3;
+        } else if (frame < 32) {
+          // 회수되어 매트로 떨어지면서 통통 튕기는 바운싱
+          const t = (frame - 20) / 12;
+          xOffset = Math.sin(idx * 1.5) * (1 - t) * 40;
+          yOffset = -120 + t * 285;
+          scaleVal = 2.3 - t * 1.3;
         } else {
-          if (frame === 26) synthRef.current?.playYutWoodSound();
-          xOffset = Math.sin(idx * 1.5) * 8;
-          yOffset = 165 + (frame % 2 === 0 ? 3 : -3);
+          if (frame === 32) synthRef.current?.playYutWoodSound();
+          xOffset = Math.sin(idx * 1.5) * 15;
+          yOffset = 165 + (frame % 2 === 0 ? 2.5 : -2.5); // 미세한 진동
           rotVal = Math.round(s.rot / Math.PI) * Math.PI;
           scaleVal = 1.0;
         }
@@ -2327,11 +2451,11 @@ function YutNoriGame({
           y: yOffset,
           rot: rotVal,
           scale: scaleVal,
-          val: frame >= 26 ? (yuts[idx] as (0 | 1)) : 0
+          val: frame >= 32 ? (yuts[idx] as (0 | 1)) : 0
         };
       }));
       
-      if (frame >= 30) {
+      if (frame >= 36) {
         clearInterval(interval);
         setIsThrowingAnimation(false);
         const roundCount = yuts.filter(v => v === 0).length;
@@ -2364,65 +2488,160 @@ function YutNoriGame({
     }, 40);
   };
 
-  const getNextStation = (curr: number | null, steps: number) => {
-    if (steps === -1) {
-      if (curr === null) return { next: null, isGoal: false };
-      if (curr === 1) return { next: 0, isGoal: false };
-      if (curr === 20) return { next: 5, isGoal: false };
-      if (curr === 25) return { next: 10, isGoal: false };
-      if (curr === 22) return { next: 21, isGoal: false };
-      return { next: curr - 1 < 0 ? 19 : curr - 1, isGoal: false };
-    }
-    let c = curr === null ? 0 : curr;
-    for (let i = 0; i < steps; i++) {
-      if (c === 5) c = 20; else if (c === 10) c = 25; else if (c === 22) c = 23; else if (c === 24) c = 15; else if (c === 28) return { next: 0, isGoal: true };
-      else c = (c + 1) % 20;
-    }
-    return { next: c === 0 ? 0 : c, isGoal: c === 0 };
-  };
-
   const moveMal = (malIdx: number) => {
     if (!isMyTurn || canThrow || isThrowingAnimation || thrownSteps === 0) return;
-    if (isMultiplayer) {
-      const socket = getLocationSocket();
-      socket.emit('game-relay', { roomId: activeRoomId, payload: { type: 'sync-yut-action', actionType: 'move', malIdx, steps: thrownSteps } });
-    }
     localMoveAction(malIdx, thrownSteps, false);
   };
 
   const localMoveAction = (malIdx: number, steps: number, isFromSync = false) => {
     const nextMals = [...mals];
-    const targetMal = nextMals[malIdx];
+    const targetMal = { ...nextMals[malIdx] };
     const groupIndices = [malIdx, ...targetMal.groupWith];
-    const { next: nextStation, isGoal } = getNextStation(targetMal.stationId, steps);
-    groupIndices.forEach(idx => {
-      const m = nextMals[idx];
-      m.isFinished = isGoal;
-      m.stationId = isGoal ? 0 : nextStation;
-    });
-    let extraThrow = steps === 4 || steps === 5;
-    if (!isGoal && nextStation !== null && nextStation !== 0) {
-      const enemy = nextMals.filter(m => !m.isFinished && m.player !== yutTurn && m.stationId === nextStation);
-      if (enemy.length > 0) {
-        extraThrow = true;
-        synthRef.current?.playExplosion();
-        enemy.forEach(m => { m.stationId = null; m.groupWith = []; });
-      } else {
-        const own = nextMals.filter(m => !m.isFinished && m.player === yutTurn && m.stationId === nextStation && !groupIndices.includes(m.id));
-        if (own.length > 0) {
-          const host = own[0];
-          groupIndices.forEach(idx => { if (idx !== host.id && !host.groupWith.includes(idx)) host.groupWith.push(idx); });
-          groupIndices.forEach(idx => { if (idx !== host.id) nextMals[idx].groupWith = []; });
+    
+    let tempPos = targetMal.stationId;
+    let tempPath = targetMal.path || 'outer';
+    let isGoal = false;
+
+    if (steps === -1) {
+      // 빽도 처리
+      if (tempPos === null) {
+        // 출발 전 빽도는 무효 처리
+        setSelectedMalIdx(null);
+        setThrownResult(null);
+        setThrownSteps(0);
+        setCanThrow(true);
+        return;
+      }
+      const prevRes = getPrevStep(tempPos, tempPath);
+      tempPos = prevRes.prev;
+      tempPath = prevRes.prevPath;
+    } else {
+      // 일반 전진
+      // 중앙(22)에서 출발하면서 지름길을 택한 경우 경로 강제 오버라이드
+      if (tempPos === 22 && tempPath === 'diagonal1' && centerChoice === 'shortcut') {
+        tempPath = 'center-shortcut';
+      }
+
+      for (let i = 0; i < steps; i++) {
+        const stepRes = moveOneStep(tempPos, tempPath);
+        tempPos = stepRes.next;
+        tempPath = stepRes.nextPath;
+        if (stepRes.isGoal) {
+          isGoal = true;
+          break;
+        }
+      }
+
+      // 전진 완료 후 정확히 모서리에 안착한 경우 경로 속성 전환
+      if (!isGoal && tempPos !== null) {
+        if (tempPos === 5) {
+          tempPath = 'diagonal1';
+        } else if (tempPos === 10) {
+          tempPath = 'diagonal2';
         }
       }
     }
+
+    // 그룹 말 전체 업데이트
+    groupIndices.forEach(idx => {
+      nextMals[idx] = {
+        ...nextMals[idx],
+        isFinished: isGoal,
+        stationId: isGoal ? 0 : tempPos,
+        path: tempPath
+      };
+    });
+
+    let extraThrow = steps === 4 || steps === 5;
+
+    // 상대방 말 잡기 및 내 말 업기 판정
+    if (!isGoal && tempPos !== null && tempPos !== 0) {
+      const enemy = nextMals.filter(m => !m.isFinished && m.player !== yutTurn && m.stationId === tempPos);
+      if (enemy.length > 0) {
+        // 상대 말 잡기 성공!
+        extraThrow = true;
+        synthRef.current?.playExplosion();
+        enemy.forEach(m => {
+          nextMals[m.id] = {
+            ...nextMals[m.id],
+            stationId: null,
+            groupWith: [],
+            path: 'outer'
+          };
+        });
+      } else {
+        const own = nextMals.filter(m => !m.isFinished && m.player === yutTurn && m.stationId === tempPos && !groupIndices.includes(m.id));
+        if (own.length > 0) {
+          // 내 말 업기 (Up-gi)
+          const host = own[0];
+          const newGroup = [...host.groupWith];
+          groupIndices.forEach(idx => {
+            if (idx !== host.id && !newGroup.includes(idx)) {
+              newGroup.push(idx);
+            }
+          });
+          nextMals[host.id] = {
+            ...nextMals[host.id],
+            groupWith: newGroup
+          };
+          groupIndices.forEach(idx => {
+            if (idx !== host.id) {
+              nextMals[idx] = {
+                ...nextMals[idx],
+                groupWith: []
+              };
+            }
+          });
+        }
+      }
+    }
+
     setMals(nextMals);
     setSelectedMalIdx(null);
     setThrownResult(null);
     setThrownSteps(0);
-    if (nextMals.filter(m => m.player === yutTurn).every(m => m.isFinished)) { setYutWinner(yutTurn); synthRef.current?.playVictory(); return; }
-    if (!extraThrow) { setYutTurn(prev => prev === 1 ? 2 : 1); }
-    setCanThrow(true);
+
+    let nextYutWinner: 1 | 2 | null = null;
+    if (nextMals.filter(m => m.player === yutTurn).every(m => m.isFinished)) {
+      nextYutWinner = yutTurn;
+      setYutWinner(yutTurn);
+      synthRef.current?.playVictory();
+    }
+
+    let nextYutTurn = yutTurn;
+    let nextCanThrow = true;
+    if (!nextYutWinner) {
+      if (!extraThrow) {
+        nextYutTurn = yutTurn === 1 ? 2 : 1;
+        setYutTurn(nextYutTurn);
+      }
+      setCanThrow(true);
+    } else {
+      nextCanThrow = false;
+      setCanThrow(false);
+    }
+
+    // 경로 선택 기본값 초기화
+    setCenterChoice('shortcut');
+
+    // 멀티플레이 웹소켓 상태 전체 싱크 전송 (데드락 및 로컬 계산 불일치 방지)
+    if (isMultiplayer && !isFromSync) {
+      const socket = getLocationSocket();
+      socket.emit('game-relay', {
+        roomId: activeRoomId,
+        payload: {
+          type: 'sync-yut-state',
+          state: {
+            mals: nextMals,
+            yutTurn: nextYutTurn,
+            canThrow: nextCanThrow,
+            thrownSteps: 0,
+            thrownResult: null,
+            yutWinner: nextYutWinner
+          }
+        }
+      });
+    }
   };
 
   return (
@@ -2531,6 +2750,37 @@ function YutNoriGame({
                         </button>
                       );
                     })}
+                </div>
+              </div>
+            )}
+
+            {/* 중앙 노드 경로 선택 UI */}
+            {!yutWinner && thrownSteps !== 0 && isMyTurn && selectedMalIdx !== null && mals.find(m => m.id === selectedMalIdx)?.stationId === 22 && mals.find(m => m.id === selectedMalIdx)?.path === 'diagonal1' && (
+              <div className="w-full bg-slate-950/40 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1.5 mt-2">
+                <p className="text-[9.5px] font-black text-amber-400 text-center">중앙(방) 진로 방향 선택</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCenterChoice('shortcut')}
+                    className={`py-1.5 text-[9px] font-black rounded border transition ${
+                      centerChoice === 'shortcut'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    🚀 지름길 (D1/출구)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCenterChoice('diagonal')}
+                    className={`py-1.5 text-[9px] font-black rounded border transition ${
+                      centerChoice === 'diagonal'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    대각선 유지 (B1/15번)
+                  </button>
                 </div>
               </div>
             )}
