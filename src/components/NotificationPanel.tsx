@@ -10,6 +10,7 @@ import { Bell, BellOff, MessageSquare, MapPin, Calendar, Sparkles, CheckCheck } 
 interface NotificationPanelProps {
   notifications: NotificationAlert[];
   onMarkAllAsRead: () => void;
+  onMarkAsRead: (id: string) => void;
   onAcceptRoomInvite: (id: string, roomId: string) => void;
   onAcceptGameInvite: (inviteId: string) => void;
   activeProfileId: string;
@@ -23,9 +24,10 @@ const TYPE_META: Record<string, { icon: React.ReactNode; color: string; bg: stri
   system: { icon: <Bell className="w-4 h-4" />, color: 'text-rose-600', bg: 'bg-rose-100' },
 };
 
-export default function NotificationPanel({ 
-  notifications, 
+export default function NotificationPanel({
+  notifications,
   onMarkAllAsRead,
+  onMarkAsRead,
   onAcceptRoomInvite,
   onAcceptGameInvite,
   activeProfileId
@@ -91,7 +93,8 @@ export default function NotificationPanel({
               return (
                 <div
                   key={notif.id}
-                  className={`flex items-start gap-3 px-4 py-3.5 transition-colors ${notif.read ? 'opacity-65' : 'hover:bg-gray-50'}`}
+                  onClick={() => { if (!notif.read) onMarkAsRead(notif.id); }}
+                  className={`flex items-start gap-3 px-4 py-3.5 transition-colors ${notif.read ? 'opacity-65' : 'hover:bg-gray-50 cursor-pointer'}`}
                 >
                   <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
                     {meta.icon}
@@ -110,7 +113,7 @@ export default function NotificationPanel({
                       <div className="mt-2 flex gap-1.5">
                         <button
                           type="button"
-                          onClick={() => onAcceptRoomInvite(nAny.inviteId, nAny.roomId)}
+                          onClick={(e) => { e.stopPropagation(); onAcceptRoomInvite(nAny.inviteId, nAny.roomId); }}
                           className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-[9.5px] px-3 py-1.5 rounded-lg border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
                         >
                           초대 수락 👍
@@ -123,7 +126,7 @@ export default function NotificationPanel({
                       <div className="mt-2 flex gap-1.5">
                         <button
                           type="button"
-                          onClick={() => onAcceptGameInvite(notif.id)}
+                          onClick={(e) => { e.stopPropagation(); onAcceptGameInvite(notif.id); }}
                           className="bg-indigo-650 hover:bg-indigo-700 text-white font-extrabold text-[9.5px] px-3 py-1.5 rounded-lg border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
                         >
                           대결 수락 ⚔️

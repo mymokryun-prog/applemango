@@ -50,6 +50,9 @@ const getFruitColor = (fruitEmoji: string): string => {
 
 // ─── 마커 HTML ───────────────────────────────────────────────────────────────
 function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
+  const isOffline = friend.isOnline === false;
+  // 로그아웃(오프라인) 친구는 마지막 위치에 고정되고 이모티콘 배경을 검정색으로 표시
+  const markerBg = isOffline ? '#111827' : friend.color;
   const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
   const border = isMe ? 'border:2px dashed #EAB308' : 'border:2px solid #111';
   const hrBadge = friend.heartRate
@@ -60,7 +63,7 @@ function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): s
     : '';
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
     ${statusSnippet}
-    <div style="position:relative;width:28px;height:28px;background:${friend.color};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring}">
+    <div style="position:relative;width:28px;height:28px;background:${markerBg};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring}">
       ${friend.avatar}
       ${hrBadge}
       <div style="position:absolute;bottom:-4px;right:-7px;background:#1F2937;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">${friend.battery}%</div>
@@ -249,6 +252,20 @@ export default function MapComponent({
     };
   }, [isKakaoReady, useFallbackMap]);
 
+  // 멤버(친구+나) 유효 좌표 목록 — 친구끼리 점선 연결용. 수락 대기 중인 초대는 제외.
+  const getMemberPositions = (): { lat: number; lng: number }[] => {
+    const positions: { lat: number; lng: number }[] = [];
+    friends.forEach(f => {
+      if (f.isPendingInvite) return;
+      const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
+      const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
+      if (typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)) {
+        positions.push({ lat, lng });
+      }
+    });
+    return positions;
+  };
+
   // ─── 3. 마커 및 선 그리기 (카카오맵 / Leaflet 동시 분기) ───────────────────
   useEffect(() => {
     if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
@@ -280,11 +297,34 @@ export default function MapComponent({
         kakaoPolylinesRef.current.push(polyline);
       });
 
-      // 3-2. 약속 장소 연결선 그리기
-      appointments.forEach(app => {
+      // 3-2a. 친구끼리 점선 연결 (멤버 간 네트워크)
+      const memberPositions = getMemberPositions();
+      for (let i = 0; i < memberPositions.length; i++) {
+        for (let j = i + 1; j < memberPositions.length; j++) {
+          const dashLine = new window.kakao.maps.Polyline({
+            path: [
+              new window.kakao.maps.LatLng(memberPositions[i].lat, memberPositions[i].lng),
+              new window.kakao.maps.LatLng(memberPositions[j].lat, memberPositions[j].lng),
+            ],
+            strokeWeight: 1.5,
+            strokeColor: '#64748b',
+            strokeOpacity: 0.5,
+            strokeStyle: 'shortdash',
+          });
+          dashLine.setMap(map);
+          kakaoPolylinesRef.current.push(dashLine);
+        }
+      }
+
+      // 3-2b. 약속 장소 연결선 — 선택된 약속(또는 약속이 1개뿐일 때)만 굵은 실선
+      const appsToConnect = selectedPromiseId
+        ? appointments.filter(a => a.id === selectedPromiseId)
+        : (appointments.length === 1 ? appointments : []);
+      appsToConnect.forEach(app => {
         if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
 
         friends.forEach(f => {
+          if (f.isPendingInvite) return;
           const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
           const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
 
@@ -295,9 +335,9 @@ export default function MapComponent({
 
           const polyline = new window.kakao.maps.Polyline({
             path: [new window.kakao.maps.LatLng(lat, lng), new window.kakao.maps.LatLng(app.lat, app.lng)],
-            strokeWeight: selectedFriendId === f.id ? 4.5 : 2.5,
+            strokeWeight: 5,
             strokeColor: fruitColor,
-            strokeOpacity: selectedFriendId === f.id ? 0.95 : 0.65,
+            strokeOpacity: 0.95,
             strokeStyle: 'solid',
           });
           polyline.setMap(map);
@@ -386,23 +426,44 @@ export default function MapComponent({
         pg.addLayer(poly);
       });
 
-      // 약속 장소 연결선
-      appointments.forEach(app => {
+      // 친구끼리 점선 연결 (멤버 간 네트워크)
+      const memberPositionsL = getMemberPositions();
+      for (let i = 0; i < memberPositionsL.length; i++) {
+        for (let j = i + 1; j < memberPositionsL.length; j++) {
+          const dash = L.polyline([
+            [memberPositionsL[i].lat, memberPositionsL[i].lng],
+            [memberPositionsL[j].lat, memberPositionsL[j].lng],
+          ] as L.LatLngTuple[], {
+            color: '#64748b',
+            weight: 1.5,
+            opacity: 0.5,
+            dashArray: '6 6',
+          });
+          pg.addLayer(dash);
+        }
+      }
+
+      // 약속 장소 연결선 — 선택된 약속(또는 약속이 1개뿐일 때)만 굵은 실선
+      const appsToConnectL = selectedPromiseId
+        ? appointments.filter(a => a.id === selectedPromiseId)
+        : (appointments.length === 1 ? appointments : []);
+      appsToConnectL.forEach(app => {
         if (typeof app.lat !== 'number' || typeof app.lng !== 'number' || isNaN(app.lat) || isNaN(app.lng)) return;
-        
+
         friends.forEach(f => {
+          if (f.isPendingInvite) return;
           const lat = f.id === activeProfileId && myGpsCoords ? myGpsCoords[0] : f.lat;
           const lng = f.id === activeProfileId && myGpsCoords ? myGpsCoords[1] : f.lng;
-          
+
           if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
-          
+
           const isMe = f.id === activeProfileId;
           const fruitColor = isMe && f.avatar ? getFruitColor(f.avatar) : (f.color || '#3B82F6');
 
           const line = L.polyline([[lat, lng], [app.lat, app.lng]] as L.LatLngTuple[], {
             color: fruitColor,
-            weight: selectedFriendId === f.id ? 4 : 2.5,
-            opacity: selectedFriendId === f.id ? 0.9 : 0.6,
+            weight: 5,
+            opacity: 0.95,
           });
           pg.addLayer(line);
         });
@@ -583,22 +644,44 @@ export default function MapComponent({
 
     debounceRef.current = setTimeout(async () => {
       if (isKakaoReady && !useFallbackMap && window.kakao && window.kakao.maps && window.kakao.maps.services) {
-        // 카카오 장소 검색 API 사용
+        // 카카오 장소(키워드) 검색 + 주소 검색 병행
         try {
           const ps = new window.kakao.maps.services.Places();
+          const geocoder = new window.kakao.maps.services.Geocoder();
+          const Status = window.kakao.maps.services.Status;
+          const merged: PlaceResult[] = [];
+          const pushUnique = (r: PlaceResult) => {
+            if (isNaN(r.lat) || isNaN(r.lng)) return;
+            if (!merged.some(m => Math.abs(m.lat - r.lat) < 1e-7 && Math.abs(m.lng - r.lng) < 1e-7)) merged.push(r);
+          };
+          let done = 0;
+          const finish = () => {
+            if (++done < 2) return;
+            setIsSearching(false);
+            if (merged.length > 0) setMapResults(merged.slice(0, 10));
+            else fallbackSearch();
+          };
           ps.keywordSearch(mapSearch, (data: any, status: any) => {
-            if (status === window.kakao.maps.services.Status.OK) {
-              const results: PlaceResult[] = data.map((item: any) => ({
+            if (status === Status.OK) {
+              data.forEach((item: any) => pushUnique({
                 name: item.place_name,
                 address: item.road_address_name || item.address_name,
                 lat: parseFloat(item.y),
-                lng: parseFloat(item.x)
+                lng: parseFloat(item.x),
               }));
-              setMapResults(results);
-            } else {
-              setMapResults([]);
             }
-            setIsSearching(false);
+            finish();
+          });
+          geocoder.addressSearch(mapSearch, (data: any, status: any) => {
+            if (status === Status.OK) {
+              data.forEach((item: any) => pushUnique({
+                name: item.road_address?.building_name || item.address_name,
+                address: item.road_address?.address_name || item.address_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x),
+              }));
+            }
+            finish();
           });
         } catch (err) {
           console.warn('Kakao places search error, using Nominatim fallback:', err);

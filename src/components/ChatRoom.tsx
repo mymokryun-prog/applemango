@@ -125,21 +125,43 @@ export default function ChatRoom({
     debounceRef.current = setTimeout(async () => {
       try {
         if ((window as any).kakao?.maps?.services) {
+          // 장소(키워드) + 주소 검색 병행
           const ps = new (window as any).kakao.maps.services.Places();
-          ps.keywordSearch(
-            appPlaceQuery,
-            (data: any[], status: string) => {
-              setIsAppSearching(false);
-              if (status === (window as any).kakao.maps.services.Status.OK && data.length > 0) {
-                setAppPlaceResults(data.slice(0, 6).map((item: any) => ({
-                  name: item.place_name,
-                  address: item.road_address_name || item.address_name,
-                  lat: parseFloat(item.y),
-                  lng: parseFloat(item.x),
-                })));
-              }
+          const geocoder = new (window as any).kakao.maps.services.Geocoder();
+          const Status = (window as any).kakao.maps.services.Status;
+          const merged: any[] = [];
+          const pushUnique = (r: any) => {
+            if (isNaN(r.lat) || isNaN(r.lng)) return;
+            if (!merged.some(m => Math.abs(m.lat - r.lat) < 1e-7 && Math.abs(m.lng - r.lng) < 1e-7)) merged.push(r);
+          };
+          let done = 0;
+          const finish = () => {
+            if (++done < 2) return;
+            setIsAppSearching(false);
+            setAppPlaceResults(merged.slice(0, 6));
+          };
+          ps.keywordSearch(appPlaceQuery, (data: any[], status: string) => {
+            if (status === Status.OK) {
+              data.forEach((item: any) => pushUnique({
+                name: item.place_name,
+                address: item.road_address_name || item.address_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x),
+              }));
             }
-          );
+            finish();
+          });
+          geocoder.addressSearch(appPlaceQuery, (data: any[], status: string) => {
+            if (status === Status.OK) {
+              data.forEach((item: any) => pushUnique({
+                name: item.road_address?.building_name || item.address_name,
+                address: item.road_address?.address_name || item.address_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x),
+              }));
+            }
+            finish();
+          });
         } else {
           const res = await fetch(`/api/places/search?q=${encodeURIComponent(appPlaceQuery)}`);
           if (res.ok) {
@@ -358,7 +380,12 @@ export default function ChatRoom({
             </button>
           </div>
         )}
-        {messages.map((msg) => {
+        {messages.filter((msg, i) => {
+          // 중복 의사표시 방지: 직전과 동일한 텍스트의 시스템 메시지는 표시하지 않음
+          if (!msg.isSystem) return true;
+          const prev = messages[i - 1];
+          return !(prev && prev.isSystem && prev.text === msg.text);
+        }).map((msg) => {
           const isMe = msg.senderId === activeProfileId;
           const isSystem = msg.isSystem;
 

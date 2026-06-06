@@ -198,7 +198,7 @@ export default function PedometerPanel({
                 cy={radius + stroke}
               />
               <circle
-                className="text-rose-500 transition-all duration-500 ease-out"
+                className={`${progressPercent >= 100 ? 'text-emerald-500' : 'text-rose-500'} transition-all duration-500 ease-out`}
                 strokeWidth={stroke}
                 strokeDasharray={circumference + ' ' + circumference}
                 style={{ strokeDashoffset }}
@@ -211,14 +211,19 @@ export default function PedometerPanel({
               />
             </svg>
             <div className="absolute flex flex-col items-center text-center">
-              <span className="text-3xl font-black text-gray-900 font-mono">
+              <span className="text-3xl font-black text-gray-900 font-mono leading-none">
                 {stepsToday.toLocaleString()}
               </span>
-              <span className="text-[11px] text-gray-400 font-medium mt-0.5">
-                목표 {stepGoal.toLocaleString()} 걸음
+              <span className="text-[11px] text-gray-400 font-bold mt-1 font-mono">
+                / {stepGoal.toLocaleString()} 걸음
               </span>
-              <span className="text-xs bg-rose-50 text-rose-600 font-bold px-2 py-0.5 rounded-lg mt-2 font-mono">
-                {progressPercent}% 완료
+              <span className="text-xs bg-rose-50 text-rose-600 font-black px-2.5 py-0.5 rounded-lg mt-2 font-mono">
+                {progressPercent}% 달성
+              </span>
+              <span className="text-[10px] text-gray-400 font-medium mt-1">
+                {stepsToday >= stepGoal
+                  ? '🎉 목표 달성!'
+                  : `${(stepGoal - stepsToday).toLocaleString()}걸음 남음`}
               </span>
             </div>
           </div>

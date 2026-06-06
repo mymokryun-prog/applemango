@@ -1093,6 +1093,19 @@ export default function App() {
     }
   };
 
+  const handleMarkNotificationRead = async (id: string) => {
+    // 즉시 UI 반영(낙관적 업데이트) — 읽음 카운트에서 바로 제외
+    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+    try {
+      await authFetch('/api/notifications/read', {
+        method: 'POST',
+        body: JSON.stringify({ id, roomId: activeRoomId })
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleCreateRoom = async (
     name: string, 
     emoji: string, 
@@ -1411,6 +1424,19 @@ export default function App() {
   };
 
   const handleMapTouchClick = (lat: number, lng: number) => {
+    // 약속이 선택된 상태에서 지도를 터치하면, 그 약속의 소집 장소를 이 위치로 변경할지 확인
+    if (selectedPromiseId) {
+      const appt = appointments.find(a => a.id === selectedPromiseId);
+      if (appt) {
+        const ok = window.confirm(`[${appt.title}] 약속의 소집 장소를 여기로 수정합니까?`);
+        if (ok) {
+          const newPlaceName = `📍 지도 지정 위치 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+          handleUpdateAppointment(appt.id, appt.title, newPlaceName, lat, lng, appt.datetime);
+        }
+        // 확인/취소 어느 쪽이든 새 임시 핀은 만들지 않고 선택 유지
+        return;
+      }
+    }
     // Drop potential coordinate pins to make schedule appointment easier
     setTempPromiseCoords([lat, lng]);
     setSelectedFriendId(null);
@@ -1755,6 +1781,13 @@ export default function App() {
             friends={friends}
             activeProfileId={activeProfileId}
             tempPromiseCoords={tempPromiseCoords}
+            selectedPromiseId={selectedPromiseId}
+            onSelectPromise={(id, lat, lng) => {
+              setSelectedFriendId(null);
+              setTempPromiseCoords(null);
+              setSelectedPromiseId(id);
+              setActiveTab('map');
+            }}
             onCreateAppointment={handleCreateAppointment}
             onUpdateAppointment={handleUpdateAppointment}
             onVote={handleVote}
@@ -1800,6 +1833,7 @@ export default function App() {
           <NotificationPanel
             notifications={notifications}
             onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+            onMarkAsRead={handleMarkNotificationRead}
             onAcceptRoomInvite={handleAcceptRoomInvite}
             onAcceptGameInvite={handleAcceptGameInvite}
             activeProfileId={activeProfileId}

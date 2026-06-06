@@ -1740,6 +1740,12 @@ async function startServer() {
       return res.status(404).json({ error: 'Appointment not found' });
     }
 
+    // 의사표시는 한 번이면 충분 — 직전과 동일한 투표면 알림/채팅 중복 생성하지 않고 그대로 반환
+    const prevVote = app.votes[friendId];
+    if (prevVote === vote) {
+      return res.json({ ...app, unchanged: true });
+    }
+
     app.votes[friendId] = vote;
     const friend = room.friends[friendId] || { name: '나 (민수)' };
     const name = friend.name;
@@ -1770,6 +1776,7 @@ async function startServer() {
       isSystem: true
     });
 
+    saveDatabaseDebounced();
     res.json(app);
   });
 
@@ -2141,6 +2148,14 @@ async function startServer() {
         roomSockets[roomId].add(socket.id);
         socketUsers[socket.id] = { userId, roomId };
 
+        // 접속한 사용자를 모든 방에서 온라인으로 표시
+        let onlineChanged = false;
+        Object.keys(dbRooms).forEach(rId => {
+          const fr = dbRooms[rId].friends[userId];
+          if (fr && fr.isOnline === false) { fr.isOnline = true; onlineChanged = true; }
+        });
+        if (onlineChanged) saveDatabaseDebounced();
+
         console.log(`✅ User ${userId} joined room ${roomId}`);
 
         // Notify room members
@@ -2282,6 +2297,16 @@ async function startServer() {
           roomSockets[roomId].delete(socket.id);
         }
         delete socketUsers[socket.id];
+
+        // 같은 userId의 다른 소켓이 남아있지 않으면 오프라인 처리(로그아웃 당시 위치에 고정)
+        const stillConnected = Object.values(socketUsers).some(u => u.userId === userId);
+        if (!stillConnected) {
+          Object.keys(dbRooms).forEach(rId => {
+            const fr = dbRooms[rId].friends[userId];
+            if (fr) fr.isOnline = false;
+          });
+          saveDatabaseDebounced();
+        }
 
         broadcastToRoom(roomId, 'user-left', {
           userId,

@@ -29,6 +29,8 @@ interface SchedulePanelProps {
   friends: Friend[];
   activeProfileId: string;
   tempPromiseCoords: [number, number] | null;
+  selectedPromiseId?: string | null;
+  onSelectPromise?: (id: string, lat: number, lng: number) => void;
   onCreateAppointment: (title: string, placeName: string, datetime: string, customLat?: number, customLng?: number) => void;
   onUpdateAppointment?: (id: string, title: string, placeName: string, lat: number, lng: number, datetime: string) => void;
   onVote: (id: string, vote: 'yes' | 'no' | 'maybe') => void;
@@ -50,7 +52,8 @@ interface SchedulePanelProps {
 
 export default function SchedulePanel({
   appointments, friends, activeProfileId,
-  tempPromiseCoords, onCreateAppointment,
+  tempPromiseCoords, selectedPromiseId, onSelectPromise,
+  onCreateAppointment,
   onUpdateAppointment, onVote, onClearTempCoords, onFocusLocation,
   title, setTitle, searchQuery, setSearchQuery,
   confirmedPlace, setConfirmedPlace, dateValue, setDateValue,
@@ -110,25 +113,45 @@ export default function SchedulePanel({
     debounceRef.current = setTimeout(async () => {
       try {
         if ((window as any).kakao?.maps?.services) {
+          // 장소(키워드) 검색 + 주소 검색을 함께 수행해 결과 병합
           const ps = new (window as any).kakao.maps.services.Places();
-          ps.keywordSearch(
-            searchQuery,
-            (data: any[], status: string) => {
-              setIsSearching(false);
-              if (status === (window as any).kakao.maps.services.Status.OK && data.length > 0) {
-                setSearchResults(data.slice(0, 8).map((item: any) => ({
-                  name: item.place_name,
-                  address: item.road_address_name || item.address_name,
-                  lat: parseFloat(item.y),
-                  lng: parseFloat(item.x),
-                })));
-              } else {
-                setSearchResults(LOCAL_PLACES.filter(p =>
-                  p.name.includes(searchQuery) || p.address.includes(searchQuery)
-                ));
-              }
+          const geocoder = new (window as any).kakao.maps.services.Geocoder();
+          const Status = (window as any).kakao.maps.services.Status;
+          const merged: PlaceResult[] = [];
+          const pushUnique = (r: PlaceResult) => {
+            if (isNaN(r.lat) || isNaN(r.lng)) return;
+            if (!merged.some(m => Math.abs(m.lat - r.lat) < 1e-7 && Math.abs(m.lng - r.lng) < 1e-7)) merged.push(r);
+          };
+          let done = 0;
+          const finish = () => {
+            if (++done < 2) return;
+            setIsSearching(false);
+            setSearchResults(merged.length > 0 ? merged.slice(0, 8) : LOCAL_PLACES.filter(p =>
+              p.name.includes(searchQuery) || p.address.includes(searchQuery)
+            ));
+          };
+          ps.keywordSearch(searchQuery, (data: any[], status: string) => {
+            if (status === Status.OK) {
+              data.forEach((item: any) => pushUnique({
+                name: item.place_name,
+                address: item.road_address_name || item.address_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x),
+              }));
             }
-          );
+            finish();
+          });
+          geocoder.addressSearch(searchQuery, (data: any[], status: string) => {
+            if (status === Status.OK) {
+              data.forEach((item: any) => pushUnique({
+                name: item.road_address?.building_name || item.address_name,
+                address: item.road_address?.address_name || item.address_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x),
+              }));
+            }
+            finish();
+          });
         } else {
           const res = await fetch(`/api/places/search?q=${encodeURIComponent(searchQuery)}`);
           if (!res.ok) throw new Error('search failed');
@@ -295,7 +318,7 @@ export default function SchedulePanel({
     <div className="flex flex-col h-full bg-white overflow-y-auto">
 
       {/* 약속 만들기 카드 */}
-      <div className="mx-4 mt-2.5 mb-1.5 bg-amber-50 border-2 border-black rounded-3xl overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
+      <div className="mx-4 mt-2.5 mb-1.5 bg-amber-50 border-2 border-black rounded-3xl overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
         <form onSubmit={handleSubmit} className="p-2.5 space-y-2 font-sans pb-2.5">
           {/* 약속 이름 */}
           <div className="space-y-1">
@@ -424,7 +447,7 @@ export default function SchedulePanel({
       </div>
 
       {/* 월별 약속 달력 */}
-      <div className="mx-4 my-1 bg-slate-50 border-2 border-black rounded-3xl p-2.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] select-none font-sans">
+      <div className="mx-4 my-1 bg-slate-50 border-2 border-black rounded-3xl p-2.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] select-none font-sans shrink-0">
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-xs font-black text-gray-900 flex items-center gap-1.5">
             <span className="text-sm">📅</span>
@@ -552,11 +575,14 @@ export default function SchedulePanel({
       </div>
 
       {/* 약속 목록 */}
-      <div className="px-4 pb-4 space-y-2.5">
+      <div className="px-4 pb-4 space-y-2.5 shrink-0">
         <div className="flex items-center justify-between py-1">
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
             약속 일정 {appointments.length}개
           </h3>
+          {appointments.length >= 2 && (
+            <span className="text-[10px] text-rose-500 font-bold">약속 선택 시 지도에 실선 표시</span>
+          )}
         </div>
 
         {appointments.length === 0 ? (
@@ -566,7 +592,9 @@ export default function SchedulePanel({
           </div>
         ) : (
           appointments.map((app) => {
-            const myVote = app.votes?.[activeProfileId] || 'maybe';
+            const hasVoted = !!(app.votes && activeProfileId in app.votes);
+            const myVote = hasVoted ? app.votes[activeProfileId] : null;
+            const isPromiseSelected = selectedPromiseId === app.id;
             const yesCount = Object.values(app.votes || {}).filter(v => v === 'yes').length;
             const noCount = Object.values(app.votes || {}).filter(v => v === 'no').length;
             const maybeCount = Object.values(app.votes || {}).filter(v => v === 'maybe').length;
@@ -589,10 +617,12 @@ export default function SchedulePanel({
             }
 
             return (
-              <div key={app.id} className="bg-white border border-gray-100 rounded-3xl overflow-hidden shadow-sm">
+              <div key={app.id} className={`bg-white border rounded-3xl overflow-hidden shadow-sm shrink-0 ${isPromiseSelected ? 'border-rose-400 border-2 ring-2 ring-rose-100' : 'border-gray-100'}`}>
                 <div className="px-4 pt-4 pb-3 space-y-2">
                   <div className="flex items-start justify-between gap-2">
-                    <h4 className="text-[14px] font-bold text-gray-900 leading-snug flex-1">{app.title}</h4>
+                    <h4 className="text-[14px] font-bold text-gray-900 leading-snug flex-1">
+                      {isPromiseSelected && <span className="text-rose-500">🚩 </span>}{app.title}
+                    </h4>
                     <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold shrink-0">
                       {app.creatorName.split(' ')[0]} 소집
                     </span>
@@ -619,9 +649,12 @@ export default function SchedulePanel({
                     <span className="text-gray-500">
                       참가 <strong className="text-emerald-600">{yesCount}</strong> · 불참 <strong className="text-red-400">{noCount}</strong> · 미정 <strong className="text-gray-400">{maybeCount}</strong>
                     </span>
-                    <button onClick={() => onFocusLocation(app.lat, app.lng)}
-                      className="ml-auto text-[11px] text-blue-500 hover:text-blue-700 font-semibold">
-                      지도 보기
+                    <button onClick={() => {
+                      if (onSelectPromise) onSelectPromise(app.id, app.lat, app.lng);
+                      else onFocusLocation(app.lat, app.lng);
+                    }}
+                      className={`ml-auto text-[11px] font-bold ${isPromiseSelected ? 'text-rose-600' : 'text-blue-500 hover:text-blue-700'}`}>
+                      {isPromiseSelected ? '✓ 지도 표시중' : '🗺️ 지도에 실선표시'}
                     </button>
                   </div>
                 </div>
@@ -631,12 +664,16 @@ export default function SchedulePanel({
                     { vote: 'yes' as const, label: '✅ 참가', active: 'bg-emerald-500 text-white', inactive: 'text-gray-500 hover:bg-emerald-50 hover:text-emerald-600' },
                     { vote: 'maybe' as const, label: '🤔 미정', active: 'bg-amber-400 text-gray-900', inactive: 'text-gray-500 hover:bg-amber-50 hover:text-amber-600' },
                     { vote: 'no' as const, label: '❌ 불참', active: 'bg-red-100 text-red-600', inactive: 'text-gray-500 hover:bg-red-50 hover:text-red-400' },
-                  ]).map(({ vote, label, active, inactive }) => (
-                    <button key={vote} type="button" onClick={() => onVote(app.id, vote)}
-                      className={`flex-1 py-3 text-[12px] font-semibold transition ${myVote === vote ? active : inactive}`}>
-                      {label}
-                    </button>
-                  ))}
+                  ]).map(({ vote, label, active, inactive }) => {
+                    const selected = myVote === vote;
+                    return (
+                      <button key={vote} type="button"
+                        onClick={() => { if (!selected) onVote(app.id, vote); }}
+                        className={`flex-1 py-3 text-[12px] font-semibold transition ${selected ? active : inactive}`}>
+                        {selected ? `${label} ✓` : label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="px-4 pb-3 pt-1 flex justify-end">
