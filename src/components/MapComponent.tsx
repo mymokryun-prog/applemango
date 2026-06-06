@@ -125,6 +125,15 @@ export default function MapComponent({
   const [showResults, setShowResults] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ─── 소집 장소 지정 모드 ──────────────────────────────────────────────────
+  // 지도를 실수로 눌러 좌표가 찍히는 것을 막기 위해, 버튼을 눌러 선택 모드일 때만 터치로 좌표를 지정한다.
+  const [placeSelectMode, setPlaceSelectMode] = useState(false);
+  const placeSelectModeRef = useRef(false);
+  useEffect(() => { placeSelectModeRef.current = placeSelectMode; }, [placeSelectMode]);
+  // 지도 클릭 리스너는 1회만 등록되므로 최신 onMapClick을 ref로 참조(stale 클로저 방지)
+  const onMapClickRef = useRef(onMapClick);
+  useEffect(() => { onMapClickRef.current = onMapClick; }, [onMapClick]);
+
   // ─── 1. 카카오맵 SDK 동적 로드 ──────────────────────────────────────────────
   useEffect(() => {
     fetch('/api/config')
@@ -182,8 +191,9 @@ export default function MapComponent({
       // 카카오 맵 초기화
       try {
         const container = mapRef.current;
+        // 접속자 본인 GPS 위치를 우선 중심으로 (없으면 홍대입구 기본값)
         const options = {
-          center: new window.kakao.maps.LatLng(37.5565, 126.9242),
+          center: new window.kakao.maps.LatLng(myGpsCoords?.[0] ?? 37.5565, myGpsCoords?.[1] ?? 126.9242),
           level: 4,
         };
         const map = new window.kakao.maps.Map(container, options);
@@ -193,8 +203,10 @@ export default function MapComponent({
         map.addControl(zoomControl, window.kakao.maps.ControlPosition.RIGHT);
 
         window.kakao.maps.event.addListener(map, 'click', (mouseEvent: any) => {
+          if (!placeSelectModeRef.current) return; // 선택 모드일 때만 좌표 지정
           const latlng = mouseEvent.latLng;
-          onMapClick(latlng.getLat(), latlng.getLng());
+          onMapClickRef.current(latlng.getLat(), latlng.getLng());
+          setPlaceSelectMode(false);
         });
 
         kakaoMapInstanceRef.current = map;
@@ -207,7 +219,7 @@ export default function MapComponent({
       if (leafletMapInstanceRef.current) return;
 
       const map = L.map(mapRef.current, {
-        center: [37.5565, 126.9242],
+        center: myGpsCoords || [37.5565, 126.9242],
         zoom: 15,
         zoomControl: false,
         attributionControl: false,
@@ -234,7 +246,9 @@ export default function MapComponent({
       L.control.zoom({ position: 'topright' }).addTo(map);
 
       map.on('click', (e: L.LeafletMouseEvent) => {
-        onMapClick(e.latlng.lat, e.latlng.lng);
+        if (!placeSelectModeRef.current) return; // 선택 모드일 때만 좌표 지정
+        onMapClickRef.current(e.latlng.lat, e.latlng.lng);
+        setPlaceSelectMode(false);
       });
 
       leafletMapInstanceRef.current = map;
@@ -605,21 +619,25 @@ export default function MapComponent({
     }
   }, [selectedFriendId, selectedPromiseId, tempPromiseCoords, isKakaoReady, useFallbackMap]);
 
-  // ─── 6. 최초 GPS 중심 맞추기 ──────────────────────────────────────────────
+  // ─── 6. 지도 진입(마운트) 시 내 위치로 1회 중심 맞추기 ─────────────────────
+  // MapComponent는 지도 탭에 들어올 때마다 마운트되므로, 마운트당 1회만 내 위치로 중심을 잡는다.
+  // (매 GPS 갱신마다 재중심되면 사용자가 지도를 못 움직이므로 ref로 1회 제한)
+  const didCenterOnGpsRef = useRef(false);
   useEffect(() => {
-    if (!myGpsCoords || !centerOnMyGpsOnce) return;
-    if (selectedFriendId || selectedPromiseId) return;
+    if (didCenterOnGpsRef.current) return;
+    if (selectedFriendId || selectedPromiseId) { didCenterOnGpsRef.current = true; return; }
+    if (!myGpsCoords) return;
 
     if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
-      const map = kakaoMapInstanceRef.current;
-      map.setCenter(new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]));
+      kakaoMapInstanceRef.current.setCenter(new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]));
+      didCenterOnGpsRef.current = true;
       onMyGpsCentered?.();
     } else if (useFallbackMap && leafletMapInstanceRef.current) {
-      const map = leafletMapInstanceRef.current;
-      map.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
+      leafletMapInstanceRef.current.flyTo(myGpsCoords, 16, { animate: true, duration: 1.0 });
+      didCenterOnGpsRef.current = true;
       onMyGpsCentered?.();
     }
-  }, [myGpsCoords, centerOnMyGpsOnce, isKakaoReady, useFallbackMap]);
+  }, [myGpsCoords, selectedFriendId, selectedPromiseId, isKakaoReady, useFallbackMap]);
 
   // ─── 7. 내 위치 바로가기 핸들러 ────────────────────────────────────────────
   const handleGoToMyLocation = useCallback(() => {
@@ -779,11 +797,17 @@ export default function MapComponent({
         </button>
       )}
 
-      {/* 안내 뱃지 */}
-      <div className="absolute bottom-4 left-4 bg-yellow-400 text-slate-950 font-black border-2 border-black text-[9.5px] px-3 py-2 rounded-xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] z-20 pointer-events-none flex items-center gap-1.5">
-        <span className="w-2.5 h-2.5 rounded-full bg-black border border-white animate-pulse" />
-        <span>지도를 터치하면 소집 장소로 지정됩니다 🧭</span>
-      </div>
+      {/* 소집 장소 지정 버튼 / 모드 안내 */}
+      <button
+        type="button"
+        onClick={() => setPlaceSelectMode(m => !m)}
+        className={`absolute bottom-4 left-4 z-30 font-black border-2 border-black text-[10px] px-3 py-2 rounded-xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] flex items-center gap-1.5 transition active:translate-y-0.5 ${
+          placeSelectMode ? 'bg-rose-500 text-white animate-pulse' : 'bg-yellow-400 text-slate-950'
+        }`}
+      >
+        <span className={`w-2.5 h-2.5 rounded-full border border-white ${placeSelectMode ? 'bg-white' : 'bg-black'}`} />
+        <span>{placeSelectMode ? '지도를 터치해 장소를 지정하세요 (취소하려면 다시 탭)' : '📍 소집 장소 지정하기'}</span>
+      </button>
     </div>
   );
 }

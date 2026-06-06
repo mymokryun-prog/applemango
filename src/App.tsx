@@ -1783,6 +1783,11 @@ export default function App() {
             tempPromiseCoords={tempPromiseCoords}
             selectedPromiseId={selectedPromiseId}
             onSelectPromise={(id, lat, lng) => {
+              // 이미 선택된 약속을 다시 누르면 해제(실선 끄기), 아니면 선택 후 지도로 이동
+              if (selectedPromiseId === id) {
+                setSelectedPromiseId(null);
+                return;
+              }
               setSelectedFriendId(null);
               setTempPromiseCoords(null);
               setSelectedPromiseId(id);
@@ -1855,6 +1860,7 @@ export default function App() {
             phone={regPhone}
             activeProfileId={activeProfileId}
             activeRoomId={activeRoomId}
+            liveSteps={stepsToday}
             onSyncSteps={handleSyncSteps}
           />
         )}
@@ -1989,7 +1995,7 @@ export default function App() {
       <div className="bg-white border-t border-gray-100 px-1 flex justify-around items-center select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
         {([
           { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
-          { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); setSelectedPromiseId(null); } },
+          { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); } },
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
           { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },

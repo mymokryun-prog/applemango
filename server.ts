@@ -411,10 +411,14 @@ const dbRooms: Record<string, any> = {
   }
 };
 
-const DB_FILE = path.join(process.cwd(), 'aemang_db.json');
+// 데이터 저장 위치 — Railway 등에서는 영구 볼륨 경로를 DATA_DIR 환경변수로 지정.
+// (미지정 시 현재 작업 디렉터리. 배포 시 파일시스템이 휘발성이면 DATA_DIR로 볼륨을 가리켜야 데이터가 유지됨)
+const DATA_DIR = process.env.DATA_DIR || process.cwd();
+const DB_FILE = path.join(DATA_DIR, 'aemang_db.json');
 
 function saveDatabase() {
   try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(DB_FILE, JSON.stringify({
       dbRooms,
       dbUserProfiles
@@ -453,7 +457,36 @@ function loadDatabase() {
   }
 }
 
+// 30일 지난 데이터 자동 정리 — 단, 약속(appointments) 설정은 보존
+function cleanupOldData() {
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  let changed = false;
+  Object.values(dbRooms).forEach((room: any) => {
+    if (Array.isArray(room.messages)) {
+      const before = room.messages.length;
+      room.messages = room.messages.filter((m: any) => {
+        const t = new Date(m.timestamp).getTime();
+        return isNaN(t) || t >= cutoff;
+      });
+      if (room.messages.length !== before) changed = true;
+    }
+    if (Array.isArray(room.notifications)) {
+      const before = room.notifications.length;
+      room.notifications = room.notifications.filter((n: any) => {
+        const t = new Date(n.timestamp).getTime();
+        return isNaN(t) || t >= cutoff;
+      });
+      if (room.notifications.length !== before) changed = true;
+    }
+    // room.appointments(약속 설정)는 의도적으로 보존 — 삭제하지 않음
+  });
+  if (changed) saveDatabase();
+}
+
 loadDatabase();
+cleanupOldData();
+// 하루에 한 번 오래된 데이터 정리
+setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
 
 const nameOptions = ['애플짱 🍎', '메론이 🍈', '오렌지 🍊', '망고킹 🥭', '피치피치 🍑', '그레이프 🍇'];
 const avatarOptions = ['🍎', '🍈', '🍊', '🥭', '🍑', '🍇'];
@@ -1648,6 +1681,9 @@ async function startServer() {
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
 
+    // 생성자를 실제 userId로 참가 처리 (하드코딩 'user-minsu' 제거 → 생성자 참가 클릭 시 중복 카운트 방지)
+    const creatorId = req.user?.userId || 'user-minsu';
+
     const newApp = {
       id: `promise-${Date.now()}`,
       title,
@@ -1658,11 +1694,12 @@ async function startServer() {
       creatorName: creatorName || '나 (민수)',
       attendees: [creatorName || '나 (민수)'],
       votes: {
-        'user-minsu': 'yes'
-      }
+        [creatorId]: 'yes'
+      } as Record<string, string>
     };
 
     room.appointments.push(newApp);
+    saveDatabaseDebounced();
 
     room.notifications.unshift({
       id: `notif-app-${Date.now()}`,

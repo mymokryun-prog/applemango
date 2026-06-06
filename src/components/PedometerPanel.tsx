@@ -10,6 +10,7 @@ interface PedometerPanelProps {
   phone: string;
   activeProfileId: string;
   activeRoomId: string;
+  liveSteps?: number; // 실시간 기기 만보기 걸음수 (상단 상태바와 동일 소스)
   onSyncSteps: (steps: number) => void;
 }
 
@@ -22,6 +23,7 @@ export default function PedometerPanel({
   phone,
   activeProfileId,
   activeRoomId,
+  liveSteps = 0,
   onSyncSteps,
 }: PedometerPanelProps) {
   const historyKey = `aemang_pedometer_history_${phone || 'guest'}`;
@@ -115,6 +117,14 @@ export default function PedometerPanel({
     const nextSteps = stepsToday + amount;
     updateSteps(nextSteps);
   };
+
+  // 실시간 기기 걸음수가 오늘 기록보다 많으면 오늘 기록에 반영(원/그래프에 표시)
+  useEffect(() => {
+    if (liveSteps > stepsToday) {
+      updateSteps(liveSteps);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSteps]);
 
   const handleReset = () => {
     if (window.confirm('오늘의 걸음 기록을 초기화하시겠습니까?')) {
