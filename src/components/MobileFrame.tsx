@@ -55,7 +55,7 @@ export default function MobileFrame({ children }: MobileFrameProps) {
     return (
       <div
         className="flex flex-col w-full bg-white overflow-hidden"
-        style={{ height: '100dvh' }}
+        style={{ height: '100dvh', paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
         {children}
       </div>
