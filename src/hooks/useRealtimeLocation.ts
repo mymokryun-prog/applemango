@@ -86,6 +86,17 @@ export interface UseRealtimeLocationResult {
 const STEP_THRESHOLD = 11.5;
 const STEP_COOLDOWN_MS = 300;
 
+// 로컬 날짜 문자열(YYYY-MM-DD) — 하루 기준 걸음 카운팅
+function pedometerTodayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function saveStepsToday(steps: number) {
+  try {
+    localStorage.setItem('aemang_steps_today', JSON.stringify({ date: pedometerTodayStr(), steps }));
+  } catch {}
+}
+
 export function useRealtimeLocation({
   roomId,
   userId,
@@ -97,7 +108,17 @@ export function useRealtimeLocation({
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [myCoords, setMyCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const [lastSentAt, setLastSentAt] = useState<string | null>(null);
-  const [stepsToday, setStepsToday] = useState(0);
+  // 오늘 걸음수를 날짜별로 localStorage에 영속화 — 앱을 나갔다 들어와도 누적 유지
+  const [stepsToday, setStepsToday] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('aemang_steps_today');
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && d.date === pedometerTodayStr()) return Number(d.steps) || 0;
+      }
+    } catch {}
+    return 0;
+  });
   const [pedometerAvailable, setPedometerAvailable] = useState(false);
   const stepMagnitudeRef = useRef(0);
   const stepLastTimeRef = useRef(0);
@@ -354,6 +375,8 @@ export function useRealtimeLocation({
         stepLastTimeRef.current = now;
         setStepsToday(prev => {
           const next = prev + 1;
+          // 날짜별로 localStorage에 영속화 (앱 재진입 시 누적 유지)
+          saveStepsToday(next);
           // 50걸음마다 서버에 동기화
           if (next % 50 === 0) {
             fetch('/api/friends/pedometer', {

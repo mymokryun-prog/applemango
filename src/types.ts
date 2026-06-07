@@ -52,6 +52,7 @@ export interface Message {
   isSystem?: boolean;
   isInviteCard?: boolean;
   inviteId?: string;
+  image?: string; // 첨부 이미지 ID (서버 /api/image/:id 로 조회)
 }
 
 export interface Appointment {

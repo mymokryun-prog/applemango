@@ -441,6 +441,32 @@ async function redisGet(key: string): Promise<string | null> {
   return data?.result ?? null;
 }
 
+// TTL(만료시간) 포함 저장 — 채팅 이미지처럼 일정 기간 후 자동 삭제할 값에 사용
+async function redisSetEx(key: string, value: string, ttlSec: number): Promise<void> {
+  const res = await fetch(UPSTASH_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(['SET', key, value, 'EX', String(ttlSec)]),
+  });
+  if (!res.ok) throw new Error(`Upstash SETEX ${res.status}: ${await res.text()}`);
+}
+
+// 채팅 이미지 저장/로드 — 메인 DB와 분리(별도 키), 30일 후 자동 만료. Redis 미사용 시 파일.
+const IMG_DIR = path.join(DATA_DIR, 'images');
+const IMG_TTL_SEC = 30 * 24 * 60 * 60;
+async function saveImage(id: string, dataUrl: string): Promise<void> {
+  if (useRedis) {
+    await redisSetEx(`aemang_img:${id}`, dataUrl, IMG_TTL_SEC);
+  } else {
+    fs.mkdirSync(IMG_DIR, { recursive: true });
+    fs.writeFileSync(path.join(IMG_DIR, `${id}.txt`), dataUrl, 'utf8');
+  }
+}
+async function loadImage(id: string): Promise<string | null> {
+  if (useRedis) return redisGet(`aemang_img:${id}`);
+  try { return fs.readFileSync(path.join(IMG_DIR, `${id}.txt`), 'utf8'); } catch { return null; }
+}
+
 function saveDatabase() {
   const payload = JSON.stringify({ dbRooms, dbUserProfiles });
   // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
@@ -1544,6 +1570,48 @@ async function startServer() {
     const room = dbRooms[roomId] || dbRooms['room-friends'];
     res.json(room.messages);
   });
+
+  // 채팅 이미지 업로드 — dataURL을 별도 저장(30일 만료)하고 메시지에 이미지 ID만 보관
+  app.post('/api/chat/image', tryCatch(async (req: AuthRequest, res: Response) => {
+    const { senderId, senderName, senderAvatar, senderColor, image, roomId } = req.body;
+    if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'invalid image' });
+    }
+    if (image.length > 1_000_000) {
+      return res.status(413).json({ error: 'image too large' });
+    }
+    const activeRoomId = roomId || 'room-friends';
+    const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
+    const imgId = `img-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    await saveImage(imgId, image);
+
+    const newMsg = {
+      id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      senderId: senderId || 'user-minsu',
+      senderName: senderName || '나 (민수)',
+      senderAvatar: senderAvatar || '🟢',
+      senderColor: senderColor || '#3B82F6',
+      text: '📷 사진',
+      image: imgId,
+      timestamp: new Date().toISOString(),
+    };
+    room.messages.push(newMsg);
+    saveDatabaseDebounced();
+    res.json(newMsg);
+  }));
+
+  // 채팅 이미지 서빙 — 저장된 dataURL을 실제 이미지 바이너리로 반환
+  app.get('/api/image/:id', tryCatch(async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!/^img-\d+-\d+$/.test(id)) return res.status(400).end();
+    const dataUrl = await loadImage(id);
+    if (!dataUrl) return res.status(404).end();
+    const m = /^data:(.+?);base64,(.*)$/s.exec(dataUrl);
+    if (!m) return res.status(404).end();
+    res.set('Content-Type', m[1]);
+    res.set('Cache-Control', 'public, max-age=2592000');
+    res.send(Buffer.from(m[2], 'base64'));
+  }));
 
   app.post('/api/chat', validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {
     const { senderId, senderName, senderAvatar, senderColor, text, locationShared, roomId } = req.body;

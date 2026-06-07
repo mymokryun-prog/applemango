@@ -13,9 +13,10 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music } from 'lucide-react';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
+import MusicPanel from './components/MusicPanel';
 
 import {
   queueOfflineAction,
@@ -39,6 +40,14 @@ import { getLocationSocket } from './realtime/socketClient';
 // 앱 로고 — ApmtLogo를 OnboardingScreen에서 재사용
 export { ApmtLogo as AppleMangoLogo };
 
+// 앱 잠금 비밀번호 해시 (이 기기 로컬 잠금용 — 서버 인증이 아닌 간단한 잠금)
+function hashLockPassword(pw: string): string {
+  let h = 5381;
+  const salted = `aemang::${pw}`;
+  for (let i = 0; i < salted.length; i++) h = ((h << 5) + h + salted.charCodeAt(i)) >>> 0;
+  return 'h' + h.toString(16);
+}
+
 export default function App() {
   // 온보딩 상태
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
@@ -46,7 +55,7 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music'>('rooms');
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -85,6 +94,13 @@ export default function App() {
   } | null>(null);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // 앱 잠금(이 기기) 비밀번호
+  const [lockHash, setLockHash] = useState<string>(() => localStorage.getItem('aemang_lock_hash') || '');
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => !localStorage.getItem('aemang_lock_hash'));
+  const [lockInput, setLockInput] = useState('');
+  const [lockError, setLockError] = useState('');
+
   const [isSoundEnabled, setIsSoundEnabled] = useState(() => {
     return localStorage.getItem('aemang_sound_enabled') !== 'false';
   });
@@ -838,6 +854,32 @@ export default function App() {
     fetchAllStates(activeRoomId);
   };
 
+  const handleSendImage = async (imageDataUrl: string) => {
+    const me = friends.find(f => f.id === activeProfileId);
+    try {
+      const res = await authFetch('/api/chat/image', {
+        method: 'POST',
+        body: JSON.stringify({
+          senderId: activeProfileId,
+          senderName: me?.name || localStorage.getItem('aemang_nickname') || '나',
+          senderAvatar: me?.avatar || localStorage.getItem('aemang_fruit') || '🍎',
+          senderColor: me?.color || '#EF4444',
+          image: imageDataUrl,
+          roomId: activeRoomId,
+        })
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        alert(res.status === 413 ? '이미지 용량이 너무 큽니다. 더 작은 사진을 선택해 주세요.' : `이미지 전송 실패: ${t}`);
+        return;
+      }
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+      alert('이미지 전송 중 오류가 발생했습니다.');
+    }
+  };
+
   const handleUpdateAppointment = async (id: string, title: string, placeName: string, lat: number, lng: number, datetime: string) => {
     try {
       await queueOrSend('/api/appointments/update', {
@@ -1091,6 +1133,40 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleUnlockApp = () => {
+    if (hashLockPassword(lockInput) === lockHash) {
+      setIsUnlocked(true);
+      setLockInput('');
+      setLockError('');
+    } else {
+      setLockError('비밀번호가 올바르지 않습니다.');
+    }
+  };
+
+  const handleSetLockPassword = () => {
+    const pw = window.prompt(lockHash ? '새 비밀번호를 입력하세요 (4자 이상):' : '앱 잠금 비밀번호를 설정하세요 (4자 이상):');
+    if (pw === null) return;
+    if (pw.length < 4) { alert('비밀번호는 4자 이상이어야 합니다.'); return; }
+    const pw2 = window.prompt('확인을 위해 다시 입력하세요:');
+    if (pw2 === null) return;
+    if (pw !== pw2) { alert('비밀번호가 일치하지 않습니다.'); return; }
+    const h = hashLockPassword(pw);
+    localStorage.setItem('aemang_lock_hash', h);
+    setLockHash(h);
+    setIsUnlocked(true);
+    alert('앱 잠금 비밀번호가 설정되었습니다. 다음 접속부터 입력이 필요합니다. 🔒');
+  };
+
+  const handleRemoveLockPassword = () => {
+    const pw = window.prompt('잠금을 해제하려면 현재 비밀번호를 입력하세요:');
+    if (pw === null) return;
+    if (hashLockPassword(pw) !== lockHash) { alert('비밀번호가 올바르지 않습니다.'); return; }
+    localStorage.removeItem('aemang_lock_hash');
+    setLockHash('');
+    setIsUnlocked(true);
+    alert('앱 잠금이 해제되었습니다.');
   };
 
   const handleMarkNotificationRead = async (id: string) => {
@@ -1452,6 +1528,36 @@ export default function App() {
     );
   }
 
+  // 앱 잠금 화면 — 비밀번호가 설정되어 있으면 접속 시 입력 필요
+  if (lockHash && !isUnlocked) {
+    return (
+      <MobileFrame>
+        <div className="flex flex-col items-center justify-center h-full bg-white p-8 gap-4 font-sans">
+          <ApmtLogo size={64} />
+          <h2 className="text-lg font-black text-gray-900">🔒 앱 잠금</h2>
+          <p className="text-xs text-gray-500 -mt-2">비밀번호를 입력해 주세요</p>
+          <input
+            type="password"
+            value={lockInput}
+            onChange={(e) => { setLockInput(e.target.value); setLockError(''); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleUnlockApp(); }}
+            autoFocus
+            className="w-full max-w-[240px] border-2 border-black rounded-xl px-4 py-3 text-center text-lg tracking-widest focus:outline-none focus:border-rose-500"
+            placeholder="••••"
+          />
+          {lockError && <p className="text-xs text-red-500 font-semibold">{lockError}</p>}
+          <button
+            type="button"
+            onClick={handleUnlockApp}
+            className="w-full max-w-[240px] bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 rounded-xl transition border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
+          >
+            잠금 해제
+          </button>
+        </div>
+      </MobileFrame>
+    );
+  }
+
   return (
     <MobileFrame>
       {/* 1. App Header — KakaoTalk + Apple Find My 스타일 */}
@@ -1761,6 +1867,7 @@ export default function App() {
             friends={friends}
             activeProfileId={activeProfileId}
             onSendMessage={handleSendMessage}
+            onSendImage={handleSendImage}
             onFocusLocation={handleFocusLocation}
             onEmergency119={handleEmergency119}
             isCareGroup={activeRoomId === 'room-care' || activeRoomId.includes('care')}
@@ -1863,6 +1970,10 @@ export default function App() {
             liveSteps={stepsToday}
             onSyncSteps={handleSyncSteps}
           />
+        )}
+
+        {activeTab === 'music' && (
+          <MusicPanel />
         )}
       </div>
 
@@ -1999,6 +2110,7 @@ export default function App() {
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
           { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
+          { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
           { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
@@ -2006,12 +2118,12 @@ export default function App() {
             key={id}
             type="button"
             onClick={onClick}
-            className={`relative flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-xl transition-all ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 min-w-0 h-12 rounded-xl transition-all ${
               activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
             }`}
           >
             <Icon className="w-5 h-5" />
-            <span className={`text-[10px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+            <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
             {id === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
               <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
                 {notifications.filter(n => !n.read).length}
@@ -2263,6 +2375,34 @@ export default function App() {
                 }
               })()}
               
+              {/* 앱 잠금 비밀번호 (이 기기) */}
+              <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">🔒 앱 잠금 비밀번호</p>
+                  <p className="text-[11px] text-gray-400">
+                    {lockHash ? '설정됨 — 다음 접속 시 비밀번호 입력 필요' : '이 기기에서 앱 열 때 비밀번호를 요구합니다'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSetLockPassword}
+                    className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-3 py-2 rounded-xl transition shadow-sm"
+                  >
+                    {lockHash ? '변경' : '설정'}
+                  </button>
+                  {lockHash && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLockPassword}
+                      className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-bold px-3 py-2 rounded-xl transition"
+                    >
+                      해제
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* 앱 나가기 / 로그아웃 */}
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
                 <div>

@@ -5,13 +5,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Message, Friend } from '../types';
-import { Send, MapPin, Smile, MessageSquareShare, UserPlus, Calendar, Users, Search, Loader2, CheckCircle2, X } from 'lucide-react';
+import { Send, MapPin, Smile, MessageSquareShare, UserPlus, Calendar, Users, Search, Loader2, CheckCircle2, X, Image as ImageIcon } from 'lucide-react';
 
 interface ChatRoomProps {
   messages: Message[];
   friends: Friend[];
   activeProfileId: string;
   onSendMessage: (text: string, locationShared?: { lat: number; lng: number; placeName: string }) => void;
+  onSendImage?: (imageDataUrl: string) => void;
   onFocusLocation: (lat: number, lng: number) => void;
   onEmergency119?: (friend: Friend) => void;
   isCareGroup?: boolean;
@@ -30,6 +31,7 @@ export default function ChatRoom({
   friends,
   activeProfileId,
   onSendMessage,
+  onSendImage,
   onFocusLocation,
   onEmergency119,
   isCareGroup = false,
@@ -221,6 +223,52 @@ export default function ChatRoom({
     if (!inputText.trim()) return;
     onSendMessage(inputText);
     setInputText('');
+  };
+
+  // 이미지 첨부 — 큰 사진을 자동 압축(최대 1000px, JPEG 0.7)해 용량을 줄여 전송
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  const compressImage = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1000;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width >= height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('canvas error'));
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+      img.src = reader.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const handlePickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 같은 파일 다시 선택 가능하도록 초기화
+    if (!file || !onSendImage) return;
+    if (!file.type.startsWith('image/')) { alert('이미지 파일만 보낼 수 있습니다.'); return; }
+    setIsUploadingImage(true);
+    try {
+      const dataUrl = await compressImage(file);
+      await onSendImage(dataUrl);
+    } catch (err) {
+      console.error(err);
+      alert('이미지 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const handleShareLocation = () => {
@@ -432,6 +480,17 @@ export default function ChatRoom({
                 >
                   <p className="whitespace-pre-line">{msg.text}</p>
 
+                  {/* 첨부 이미지 */}
+                  {msg.image && (
+                    <img
+                      src={`/api/image/${msg.image}`}
+                      alt="첨부 이미지"
+                      loading="lazy"
+                      onClick={() => window.open(`/api/image/${msg.image}`, '_blank')}
+                      className="mt-2 rounded-xl max-w-[200px] w-full border-2 border-black cursor-pointer"
+                    />
+                  )}
+
                   {/* Shared Location Card */}
                   {msg.locationShared && !isDisbanded && (
                     <button
@@ -502,12 +561,41 @@ export default function ChatRoom({
 
       {/* Main Send Form */}
       <form onSubmit={handleSend} className="p-3 bg-white border-t-2 border-black flex items-center gap-2 shrink-0 font-sans">
+        {/* 이미지 첨부 */}
+        {!isDisbanded && onSendImage && (
+          <>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handlePickImage}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={isUploadingImage}
+              title="사진 보내기"
+              className="w-8 h-8 rounded-lg bg-slate-100 border-2 border-black flex items-center justify-center shrink-0 shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] hover:bg-amber-50 transition active:translate-y-0.5 disabled:opacity-50"
+            >
+              {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin text-rose-500" /> : <ImageIcon className="w-4 h-4 text-rose-500" />}
+            </button>
+          </>
+        )}
         <input
           type="text"
+          name="aemang-chat-message"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           placeholder={isDisbanded ? "이 방은 폭파되었습니다 (입력 차단)" : "대화 나누기... (AI는 @애망봇 입력)"}
           disabled={isDisbanded}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-1p-ignore="true"
+          data-lpignore="true"
+          data-form-type="other"
           className="flex-1 bg-slate-100 border-2 border-black focus:border-rose-500 rounded-xl px-4 py-2 text-xs focus:outline-none placeholder-slate-400 text-slate-900 font-bold transition-all shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] disabled:opacity-55"
         />
         <button
