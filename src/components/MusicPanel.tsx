@@ -15,19 +15,9 @@ interface Track {
 
 const STORAGE_KEY = 'aemang_music_tracks';
 
-// 구글 드라이브 공유 링크 → 직접 재생 URL 변환
-// 지원 형식: /file/d/<id>/..., ?id=<id>, /d/<id>
+// 입력한 음악 링크를 그대로 재생 (별도 외부 서비스 연동 없음)
 function toPlayableUrl(raw: string): string {
-  const url = raw.trim();
-  const patterns = [/\/file\/d\/([a-zA-Z0-9_-]+)/, /[?&]id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m && m[1]) {
-      return `https://drive.google.com/uc?export=download&id=${m[1]}`;
-    }
-  }
-  // 드라이브 형식이 아니면 직접 오디오 URL로 간주
-  return url;
+  return raw.trim();
 }
 
 export default function MusicPanel() {
@@ -93,14 +83,14 @@ export default function MusicPanel() {
     if (currentId === track.id) {
       // 재생/일시정지 토글
       if (isPlaying) { audioRef.current?.pause(); }
-      else { audioRef.current?.play().catch(() => setError('재생할 수 없습니다. 링크 공유 설정(전체 공개)을 확인해 주세요.')); }
+      else { audioRef.current?.play().catch(() => setError('재생할 수 없습니다. 음악 링크(URL)를 확인해 주세요.')); }
       return;
     }
     setCurrentId(track.id);
     // 다음 렌더에서 src가 바뀐 뒤 재생
     setTimeout(() => {
       if (audioRef.current) {
-        audioRef.current.play().catch(() => setError('재생할 수 없습니다. 구글 드라이브 파일을 "링크가 있는 모든 사용자"로 공유했는지 확인해 주세요.'));
+        audioRef.current.play().catch(() => setError('재생할 수 없습니다. 음악 링크(URL)를 확인해 주세요.'));
       }
     }, 50);
   };
@@ -154,14 +144,14 @@ export default function MusicPanel() {
             />
             <input
               type="text"
-              placeholder="음악 파일 링크(mp3 등) 붙여넣기"
+              placeholder="음악 파일 링크(mp3 등 URL) 붙여넣기"
               value={newUrl}
               onChange={e => setNewUrl(e.target.value)}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
             />
             {error && <p className="text-[11px] text-red-500 font-semibold">{error}</p>}
             <p className="text-[10px] text-gray-400 leading-relaxed">
-              💡 음악 파일의 <b>직접 링크(URL)</b>를 붙여넣으면 바로 재생됩니다. 구글 드라이브 링크도 자동 변환해 시도하며, 이 경우 파일을 <b>"링크가 있는 모든 사용자"</b>로 공유해야 합니다.
+              💡 음악 파일의 <b>직접 링크(URL)</b>를 붙여넣으면 바로 재생됩니다. (예: mp3 파일 링크)
             </p>
             <button
               type="button"

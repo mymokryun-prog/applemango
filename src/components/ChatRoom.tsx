@@ -21,6 +21,7 @@ interface ChatRoomProps {
   onDisbandRoom?: () => void;
   onAcceptInvite?: (id: string) => void;
   onInviteFriend?: (name: string, emoji: string, color: string, phone: string) => void;
+  onRemoveFriend?: (id: string, name: string) => void;
   roomId?: string;
   ownerId?: string;
   onCreateAppointment?: (title: string, placeName: string, datetime: string, lat: number, lng: number) => void;
@@ -40,10 +41,12 @@ export default function ChatRoom({
   onDisbandRoom,
   onAcceptInvite,
   onInviteFriend,
+  onRemoveFriend,
   roomId = '',
   ownerId = '',
   onCreateAppointment
 }: ChatRoomProps) {
+  const iAmOwner = !!ownerId && ownerId === activeProfileId;
   const [inputText, setInputText] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
   
@@ -372,6 +375,20 @@ export default function ChatRoom({
                 <span className={`w-1.5 h-1.5 rounded-full border border-black shrink-0 ${
                   isPending ? 'bg-amber-400 animate-pulse' : isOnline ? 'bg-emerald-500' : 'bg-gray-300'
                 }`} />
+                {iAmOwner && friend.id !== activeProfileId && onRemoveFriend && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`${friend.name.replace(' (대기)', '').replace(' (합류)', '')} 님을 이 그룹방에서 탈퇴시키겠습니까?`)) {
+                        onRemoveFriend(friend.id, friend.name);
+                      }
+                    }}
+                    title="이 멤버 탈퇴시키기 (방장)"
+                    className="ml-0.5 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0 hover:bg-rose-600"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                )}
               </div>
             );
           })}

@@ -132,6 +132,8 @@ export default function App() {
   
   // Leaflet map selected coordinate for potential appointment creation
   const [tempPromiseCoords, setTempPromiseCoords] = useState<[number, number] | null>(null);
+  // 지도에서 '위치만 잠깐 보기'용 좌표 (맛집/지도보기) — 지도 탭을 나가면 초기화됨(약속 연동 아님)
+  const [mapViewCoords, setMapViewCoords] = useState<[number, number] | null>(null);
   
   // Promise (Appointment) Form Creation States
   const [promiseTitle, setPromiseTitle] = useState('');
@@ -1578,12 +1580,22 @@ export default function App() {
   };
 
   // Coordinate interactions (pans map smoothly)
+  // 맛집/지도보기 — 위치만 잠깐 표시(약속 좌표 연동 아님). 지도를 나가면 자동으로 사라짐.
   const handleFocusLocation = (lat: number, lng: number) => {
     setSelectedFriendId(null);
     setSelectedPromiseId(null);
-    setTempPromiseCoords([lat, lng]);
+    setTempPromiseCoords(null);
+    setMapViewCoords([lat, lng]);
     setActiveTab('map');
   };
+
+  // 지도 탭을 벗어나면 '보기용' 실선/좌표를 초기화 (다시 들어오면 실선 없음)
+  useEffect(() => {
+    if (activeTab !== 'map' && mapViewCoords) {
+      setMapViewCoords(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const handleMapTouchClick = (lat: number, lng: number) => {
     // 약속이 선택된 상태에서 지도를 터치하면, 그 약속의 소집 장소를 이 위치로 변경할지 확인
@@ -1941,6 +1953,7 @@ export default function App() {
             selectedPromiseId={selectedPromiseId}
             onMapClick={handleMapTouchClick}
             tempPromiseCoords={tempPromiseCoords}
+            mapViewCoords={mapViewCoords}
             myGpsCoords={myCoords ? [myCoords.lat, myCoords.lng] : null}
             centerOnMyGpsOnce={!hasCenteredOnGpsRef.current}
             onMyGpsCentered={() => { hasCenteredOnGpsRef.current = true; }}
@@ -1962,6 +1975,7 @@ export default function App() {
             onDisbandRoom={() => handleDisbandRoom(activeRoomId)}
             onAcceptInvite={handleAcceptInvite}
             onInviteFriend={handleInviteFriend}
+            onRemoveFriend={(id) => handleDeleteFriend(id)}
             roomId={activeRoomId}
             ownerId={rooms.find(r => r.id === activeRoomId)?.ownerId || ''}
             onCreateAppointment={handleCreateAppointment}

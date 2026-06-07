@@ -22,6 +22,7 @@ interface MapComponentProps {
   selectedPromiseId: string | null;
   onMapClick: (lat: number, lng: number) => void;
   tempPromiseCoords: [number, number] | null;
+  mapViewCoords?: [number, number] | null;
   myGpsCoords?: [number, number] | null;
   centerOnMyGpsOnce?: boolean;
   onMyGpsCentered?: () => void;
@@ -87,6 +88,13 @@ function tempPromiseMarkerHtml(): string {
   </div>`;
 }
 
+function viewMarkerHtml(): string {
+  return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+    <div style="width:30px;height:30px;background:#2563EB;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0 #111">📍</div>
+    <div style="background:#111;color:#BFDBFE;font-size:8px;font-weight:900;padding:1px 5px;border-radius:4px;margin-top:2px;font-family:sans-serif">검색 위치</div>
+  </div>`;
+}
+
 function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string }): string {
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
     <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1)">
@@ -99,10 +107,12 @@ function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string
 export default function MapComponent({
   friends, appointments, activeProfileId,
   selectedFriendId, selectedPromiseId,
-  onMapClick, tempPromiseCoords,
+  onMapClick, tempPromiseCoords, mapViewCoords = null,
   myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
+  // 지도 검색 결과 '보기'용 좌표 — 컴포넌트가 지도 탭 진입마다 새로 마운트되어 자동 초기화됨(약속 연동 아님)
+  const [searchFocusCoords, setSearchFocusCoords] = useState<[number, number] | null>(null);
 
   // ─── Kakao Map State & Refs ───────────────────────────────────────────────
   const [isKakaoReady, setIsKakaoReady] = useState(false);
@@ -399,6 +409,25 @@ export default function MapComponent({
         kakaoOverlaysRef.current.push(overlay);
       }
 
+      // 3-4.5. 보기용 좌표(맛집/검색) 마커+실선 — 지도 나가면 사라짐
+      const viewCoords = searchFocusCoords || mapViewCoords;
+      if (viewCoords && typeof viewCoords[0] === 'number' && !isNaN(viewCoords[0])) {
+        if (myGpsCoords) {
+          const line = new window.kakao.maps.Polyline({
+            path: [new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]), new window.kakao.maps.LatLng(viewCoords[0], viewCoords[1])],
+            strokeWeight: 4, strokeColor: '#2563EB', strokeOpacity: 0.9, strokeStyle: 'solid',
+          });
+          line.setMap(map);
+          kakaoPolylinesRef.current.push(line);
+        }
+        const vOverlay = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(viewCoords[0], viewCoords[1]),
+          content: viewMarkerHtml(), yAnchor: 1.0
+        });
+        vOverlay.setMap(map);
+        kakaoOverlaysRef.current.push(vOverlay);
+      }
+
       // 3-5. 친구 마커 그리기
       friends.forEach(f => {
         if (f.id === activeProfileId && myGpsCoords) return; // 내 실시간 GPS 마커와 중복 방지
@@ -521,6 +550,15 @@ export default function MapComponent({
         mg.addLayer(L.marker(tempPromiseCoords, { icon }));
       }
 
+      // 보기용 좌표(맛집/검색) 마커+실선 — 지도 나가면 사라짐
+      const viewCoordsL = searchFocusCoords || mapViewCoords;
+      if (viewCoordsL && typeof viewCoordsL[0] === 'number' && !isNaN(viewCoordsL[0])) {
+        if (myGpsCoords) {
+          pg.addLayer(L.polyline([myGpsCoords, viewCoordsL] as L.LatLngTuple[], { color: '#2563EB', weight: 4, opacity: 0.9 }));
+        }
+        mg.addLayer(L.marker(viewCoordsL, { icon: L.divIcon({ className: '', html: viewMarkerHtml(), iconSize: [34, 44], iconAnchor: [17, 40] }) }));
+      }
+
       // 친구 마커
       friends.forEach(f => {
         if (f.id === activeProfileId && myGpsCoords) return;
@@ -536,7 +574,7 @@ export default function MapComponent({
         mg.addLayer(m);
       });
     }
-  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, myGpsCoords, isKakaoReady, useFallbackMap]);
+  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, mapViewCoords, searchFocusCoords, myGpsCoords, isKakaoReady, useFallbackMap]);
 
   // ─── 4. 내 GPS 위치 마커 실시간 업데이트 ──────────────────────────────────
   useEffect(() => {
@@ -603,6 +641,10 @@ export default function MapComponent({
     } else if (selectedPromiseId) {
       const a = appointments.find(ap => ap.id === selectedPromiseId);
       if (a) targetCoords = [a.lat, a.lng];
+    } else if (searchFocusCoords) {
+      targetCoords = searchFocusCoords;
+    } else if (mapViewCoords) {
+      targetCoords = mapViewCoords;
     } else if (tempPromiseCoords) {
       targetCoords = tempPromiseCoords;
     }
@@ -617,7 +659,7 @@ export default function MapComponent({
       const map = leafletMapInstanceRef.current;
       map.flyTo(targetCoords, 16, { animate: true, duration: 1.2 });
     }
-  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords, isKakaoReady, useFallbackMap]);
+  }, [selectedFriendId, selectedPromiseId, tempPromiseCoords, mapViewCoords, searchFocusCoords, isKakaoReady, useFallbackMap]);
 
   // ─── 6. 지도 진입(마운트) 시 내 위치로 1회 중심 맞추기 ─────────────────────
   // MapComponent는 지도 탭에 들어올 때마다 마운트되므로, 마운트당 1회만 내 위치로 중심을 잡는다.
@@ -625,7 +667,7 @@ export default function MapComponent({
   const didCenterOnGpsRef = useRef(false);
   useEffect(() => {
     if (didCenterOnGpsRef.current) return;
-    if (selectedFriendId || selectedPromiseId) { didCenterOnGpsRef.current = true; return; }
+    if (selectedFriendId || selectedPromiseId || mapViewCoords || searchFocusCoords) { didCenterOnGpsRef.current = true; return; }
     if (!myGpsCoords) return;
 
     if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
@@ -637,7 +679,7 @@ export default function MapComponent({
       didCenterOnGpsRef.current = true;
       onMyGpsCentered?.();
     }
-  }, [myGpsCoords, selectedFriendId, selectedPromiseId, isKakaoReady, useFallbackMap]);
+  }, [myGpsCoords, selectedFriendId, selectedPromiseId, mapViewCoords, searchFocusCoords, isKakaoReady, useFallbackMap]);
 
   // ─── 7. 내 위치 바로가기 핸들러 ────────────────────────────────────────────
   const handleGoToMyLocation = useCallback(() => {
@@ -734,7 +776,8 @@ export default function MapComponent({
       map.flyTo([place.lat, place.lng], 17, { animate: true, duration: 1.0 });
     }
 
-    onMapClick(place.lat, place.lng);
+    // 지도 검색은 '위치 보기'만 — 약속방 좌표로 연동하지 않음. 지도를 나가면 자동으로 사라짐.
+    setSearchFocusCoords([place.lat, place.lng]);
     setMapSearch('');
     setShowResults(false);
   };
