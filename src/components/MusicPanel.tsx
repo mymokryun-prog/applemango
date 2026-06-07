@@ -138,14 +138,14 @@ export default function MusicPanel() {
             />
             <input
               type="text"
-              placeholder="구글 드라이브 공유 링크 또는 오디오 URL 붙여넣기"
+              placeholder="음악 파일 링크(mp3 등) 붙여넣기"
               value={newUrl}
               onChange={e => setNewUrl(e.target.value)}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400"
             />
             {error && <p className="text-[11px] text-red-500 font-semibold">{error}</p>}
             <p className="text-[10px] text-gray-400 leading-relaxed">
-              💡 구글 드라이브에서 파일을 <b>"링크가 있는 모든 사용자"</b>로 공유한 뒤 그 링크를 붙여넣으세요. (Suno에서 만든 mp3를 드라이브에 올린 뒤 사용)
+              💡 음악 파일의 <b>직접 링크(URL)</b>를 붙여넣으면 바로 재생됩니다. 구글 드라이브 링크도 자동 변환해 시도하며, 이 경우 파일을 <b>"링크가 있는 모든 사용자"</b>로 공유해야 합니다.
             </p>
             <button
               type="button"

@@ -6,6 +6,15 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* 스크롤바 숨김 (가로 슬라이드 탭 등) */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Vibrant Palette / Neo-Brutalist utility classes */
 .vibrant-border {
   border: 2px solid #000000;

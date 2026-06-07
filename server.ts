@@ -283,6 +283,11 @@ const hashPhoneNumber = (phone: string): string => {
   return CryptoJS.SHA256(phone + ENCRYPTION_KEY).toString();
 };
 
+// 앱 접속 비밀번호 해시 (전화번호 계정에 연동)
+const hashAppPassword = (pw: string): string => {
+  return CryptoJS.SHA256('aemang-pw::' + pw + ENCRYPTION_KEY).toString();
+};
+
 // ============= EMERGENCY 119 SERVICE INTEGRATION =============
 
 // Mock 119 Emergency API call 
@@ -383,6 +388,10 @@ const dbUserProfiles: Record<string, any> = {
   }
 };
 
+// 맛집·추천도서 (모든 사용자 공유, 영구 저장)
+const dbRestaurants: any[] = [];
+const dbBooks: any[] = [];
+
 // ── 기본 빈 룸 (데모 데이터 없음) ──────────────────────────────────────────
 const dbRooms: Record<string, any> = {
   'room-friends': {
@@ -468,7 +477,7 @@ async function loadImage(id: string): Promise<string | null> {
 }
 
 function saveDatabase() {
-  const payload = JSON.stringify({ dbRooms, dbUserProfiles });
+  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks });
   // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
   if (useRedis) {
     redisSet(REDIS_DB_KEY, payload).catch(err =>
@@ -501,6 +510,14 @@ function applyLoadedData(data: any, source: string) {
   if (data.dbUserProfiles) {
     Object.keys(dbUserProfiles).forEach(key => delete dbUserProfiles[key]);
     Object.assign(dbUserProfiles, data.dbUserProfiles);
+  }
+  if (Array.isArray(data.dbRestaurants)) {
+    dbRestaurants.length = 0;
+    dbRestaurants.push(...data.dbRestaurants);
+  }
+  if (Array.isArray(data.dbBooks)) {
+    dbBooks.length = 0;
+    dbBooks.push(...data.dbBooks);
   }
   console.log(`Database loaded successfully from ${source}.`);
   return true;
@@ -1520,48 +1537,91 @@ async function startServer() {
       }
     }
 
-    // 모든 기존 룸에 사용자 추가/업데이트 (시스템 방은 자동 가입, 커스텀 방은 이미 존재하는 경우만 프로필 동기화)
+    // 이미 속한 방은 프로필만 갱신 (자동 가입하지 않음 — 초대받은 방에만 추가되도록)
+    let isMemberAnywhere = false;
     Object.keys(dbRooms).forEach(roomId => {
       const r = dbRooms[roomId];
-      const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
-      if (isSystemRoom) {
-        if (!r.friends[userId]) {
-          r.friends[userId] = {
-            ...dbUserProfiles[userId],
-            route: [],
-            routeIndex: 0
-          };
-        } else {
-          r.friends[userId].name = displayName;
-          if (avatar) {
-            r.friends[userId].avatar = avatar;
-          }
-          r.friends[userId].phone = phone;
-          r.friends[userId].realName = realName;
-          r.friends[userId].alias = alias;
-          r.friends[userId].updatedAt = new Date().toISOString();
-        }
-      } else {
-        if (r.friends[userId]) {
-          r.friends[userId].name = displayName;
-          if (avatar) {
-            r.friends[userId].avatar = avatar;
-          }
-          r.friends[userId].phone = phone;
-          r.friends[userId].realName = realName;
-          r.friends[userId].alias = alias;
-          r.friends[userId].updatedAt = new Date().toISOString();
-        }
+      if (r.friends[userId] && !r.friends[userId].isPendingInvite) {
+        isMemberAnywhere = true;
+        r.friends[userId].name = displayName;
+        if (avatar) r.friends[userId].avatar = avatar;
+        r.friends[userId].phone = phone;
+        r.friends[userId].realName = realName;
+        r.friends[userId].alias = alias;
+        r.friends[userId].updatedAt = new Date().toISOString();
       }
     });
+
+    // 이 전화번호로 받은 초대(대기)가 있는지 확인 — 있으면 초대된 방에만 합류시킴
+    const digitsForInvite = digits;
+    const hasPendingInvite = Object.values(dbRooms).some((r: any) =>
+      Object.values(r.friends).some((f: any) =>
+        f.isPendingInvite && f.phone && f.phone.replace(/\D/g, '') === digitsForInvite
+      )
+    );
 
     if (phone) {
       linkPendingInvitations(phone, userId, realName || '', alias || '', userAvatar, color);
     }
 
+    // 어떤 방에도 속하지 않았고 초대도 없는 '신규 본인 사용자'만 기본 단짝방을 홈으로 자동 추가
+    if (!isMemberAnywhere && !hasPendingInvite && dbRooms['room-friends'] && !dbRooms['room-friends'].friends[userId]) {
+      dbRooms['room-friends'].friends[userId] = {
+        ...dbUserProfiles[userId],
+        route: [],
+        routeIndex: 0
+      };
+    }
+
     const token = generateToken(userId);
     saveDatabaseDebounced();
     res.json({ success: true, userId, token });
+  });
+
+  // ===== 앱 접속 비밀번호 (전화번호 계정 연동 — 다른 기기에서 같은 번호로 접속해도 비번 필요) =====
+  app.get('/api/auth/has-password', (req, res) => {
+    const digits = String(req.query.phone || '').replace(/\D/g, '');
+    const profile = dbUserProfiles[`user-${digits}`];
+    res.json({ hasPassword: !!(profile && profile.passwordHash) });
+  });
+
+  app.post('/api/auth/verify-password', (req, res) => {
+    const { phone, password } = req.body;
+    const digits = String(phone || '').replace(/\D/g, '');
+    const profile = dbUserProfiles[`user-${digits}`];
+    if (!profile || !profile.passwordHash) return res.json({ success: true });
+    res.json({ success: hashAppPassword(String(password || '')) === profile.passwordHash });
+  });
+
+  app.post('/api/auth/set-password', (req: AuthRequest, res: Response) => {
+    const { phone, password, currentPassword } = req.body;
+    const digits = String(phone || '').replace(/\D/g, '');
+    const userId = digits ? `user-${digits}` : req.user?.userId;
+    const profile = userId ? dbUserProfiles[userId] : null;
+    if (!profile) return res.status(404).json({ error: 'profile not found' });
+    if (profile.passwordHash) {
+      if (!currentPassword || hashAppPassword(String(currentPassword)) !== profile.passwordHash) {
+        return res.status(403).json({ error: 'wrong current password' });
+      }
+    }
+    if (!password || String(password).length < 4) return res.status(400).json({ error: 'too short' });
+    profile.passwordHash = hashAppPassword(String(password));
+    saveDatabaseDebounced();
+    res.json({ success: true });
+  });
+
+  app.post('/api/auth/remove-password', (req: AuthRequest, res: Response) => {
+    const { phone, currentPassword } = req.body;
+    const digits = String(phone || '').replace(/\D/g, '');
+    const userId = digits ? `user-${digits}` : req.user?.userId;
+    const profile = userId ? dbUserProfiles[userId] : null;
+    if (!profile) return res.status(404).json({ error: 'profile not found' });
+    if (profile.passwordHash && (!currentPassword || hashAppPassword(String(currentPassword)) !== profile.passwordHash)) {
+      return res.status(403).json({ error: 'wrong current password' });
+    }
+    delete profile.passwordHash;
+    saveDatabaseDebounced();
+    res.json({ success: true });
   });
 
   // 1. Chat Endpoints
@@ -1612,6 +1672,100 @@ async function startServer() {
     res.set('Cache-Control', 'public, max-age=2592000');
     res.send(Buffer.from(m[2], 'base64'));
   }));
+
+  // ===== 맛집 (모든 사용자 공유) =====
+  app.get('/api/restaurants', (_req, res) => {
+    res.json(dbRestaurants);
+  });
+
+  app.post('/api/restaurants', (req: AuthRequest, res: Response) => {
+    const { name, placeName, lat, lng, description, creatorName } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'name required' });
+    const item = {
+      id: `rest-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: String(name).trim(),
+      placeName: placeName || '',
+      lat: typeof lat === 'number' ? lat : null,
+      lng: typeof lng === 'number' ? lng : null,
+      description: description || '',
+      creatorId: req.user?.userId || 'user-minsu',
+      creatorName: creatorName || '익명',
+      reviews: [] as any[],
+      timestamp: new Date().toISOString(),
+    };
+    dbRestaurants.unshift(item);
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/restaurants/review', (req: AuthRequest, res: Response) => {
+    const { id, text, authorName } = req.body;
+    const item = dbRestaurants.find(r => r.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+    item.reviews.push({
+      id: `rev-${Date.now()}`,
+      text: String(text).trim(),
+      authorId: req.user?.userId || 'user-minsu',
+      authorName: authorName || '익명',
+      timestamp: new Date().toISOString(),
+    });
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/restaurants/delete', (req: AuthRequest, res: Response) => {
+    const { id } = req.body;
+    const idx = dbRestaurants.findIndex(r => r.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'not found' });
+    dbRestaurants.splice(idx, 1);
+    saveDatabaseDebounced();
+    res.json({ success: true });
+  });
+
+  // ===== 추천 도서 (모든 사용자 공유) =====
+  app.get('/api/books', (_req, res) => {
+    res.json(dbBooks);
+  });
+
+  app.post('/api/books', (req: AuthRequest, res: Response) => {
+    const { title, author, description, creatorName } = req.body;
+    if (!title || !title.trim()) return res.status(400).json({ error: 'title required' });
+    const item = {
+      id: `book-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      title: String(title).trim(),
+      author: author || '',
+      description: description || '',
+      creatorId: req.user?.userId || 'user-minsu',
+      creatorName: creatorName || '익명',
+      likes: [] as string[],
+      timestamp: new Date().toISOString(),
+    };
+    dbBooks.unshift(item);
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/books/like', (req: AuthRequest, res: Response) => {
+    const { id } = req.body;
+    const userId = req.user?.userId || 'user-minsu';
+    const item = dbBooks.find(b => b.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (!Array.isArray(item.likes)) item.likes = [];
+    const i = item.likes.indexOf(userId);
+    if (i === -1) item.likes.push(userId); else item.likes.splice(i, 1);
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/books/delete', (req: AuthRequest, res: Response) => {
+    const { id } = req.body;
+    const idx = dbBooks.findIndex(b => b.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'not found' });
+    dbBooks.splice(idx, 1);
+    saveDatabaseDebounced();
+    res.json({ success: true });
+  });
 
   app.post('/api/chat', validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {
     const { senderId, senderName, senderAvatar, senderColor, text, locationShared, roomId } = req.body;

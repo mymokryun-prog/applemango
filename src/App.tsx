@@ -13,10 +13,12 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen } from 'lucide-react';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
 import MusicPanel from './components/MusicPanel';
+import RestaurantPanel from './components/RestaurantPanel';
+import BookPanel from './components/BookPanel';
 
 import {
   queueOfflineAction,
@@ -40,13 +42,6 @@ import { getLocationSocket } from './realtime/socketClient';
 // 앱 로고 — ApmtLogo를 OnboardingScreen에서 재사용
 export { ApmtLogo as AppleMangoLogo };
 
-// 앱 잠금 비밀번호 해시 (이 기기 로컬 잠금용 — 서버 인증이 아닌 간단한 잠금)
-function hashLockPassword(pw: string): string {
-  let h = 5381;
-  const salted = `aemang::${pw}`;
-  for (let i = 0; i < salted.length; i++) h = ((h << 5) + h + salted.charCodeAt(i)) >>> 0;
-  return 'h' + h.toString(16);
-}
 
 export default function App() {
   // 온보딩 상태
@@ -55,7 +50,7 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book'>('rooms');
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -95,9 +90,9 @@ export default function App() {
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
-  // 앱 잠금(이 기기) 비밀번호
-  const [lockHash, setLockHash] = useState<string>(() => localStorage.getItem('aemang_lock_hash') || '');
-  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => !localStorage.getItem('aemang_lock_hash'));
+  // 앱 접속 비밀번호 (전화번호 계정에 연동 — 서버 확인)
+  const [accountHasPassword, setAccountHasPassword] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(true);
   const [lockInput, setLockInput] = useState('');
   const [lockError, setLockError] = useState('');
 
@@ -170,6 +165,11 @@ export default function App() {
   const [dialingTimeCounter, setDialingTimeCounter] = useState(0);
 
   const handleEmergency119 = async (friend: Friend) => {
+    // 실수 방지 — 119 연결 전 3번 확인
+    if (!window.confirm(`🚨 119에 긴급 연결하시겠습니까? (1/3)\n대상: ${friend.name}`)) return;
+    if (!window.confirm('정말로 119에 연결합니다. 실수가 아닌가요? (2/3)')) return;
+    if (!window.confirm('⚠️ 마지막 확인입니다. 지금 119로 연결됩니다. 진행하시겠습니까? (3/3)')) return;
+
     setEmergencyTarget(friend);
     setIsDialing119(true);
     setDialingStatus('calling');
@@ -1135,39 +1135,92 @@ export default function App() {
     }
   };
 
-  const handleUnlockApp = () => {
-    if (hashLockPassword(lockInput) === lockHash) {
-      setIsUnlocked(true);
-      setLockInput('');
-      setLockError('');
-    } else {
-      setLockError('비밀번호가 올바르지 않습니다.');
+  const handleUnlockApp = async () => {
+    const phone = localStorage.getItem('aemang_phone') || '';
+    try {
+      const res = await fetch('/api/auth/verify-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, password: lockInput })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsUnlocked(true);
+        setLockInput('');
+        setLockError('');
+      } else {
+        setLockError('비밀번호가 올바르지 않습니다.');
+      }
+    } catch {
+      setLockError('확인 중 오류가 발생했습니다. 네트워크를 확인해 주세요.');
     }
   };
 
-  const handleSetLockPassword = () => {
-    const pw = window.prompt(lockHash ? '새 비밀번호를 입력하세요 (4자 이상):' : '앱 잠금 비밀번호를 설정하세요 (4자 이상):');
+  const handleSetLockPassword = async () => {
+    const phone = localStorage.getItem('aemang_phone') || '';
+    if (!phone) { alert('먼저 프로필(전화번호) 등록이 필요합니다.'); return; }
+    let currentPassword = '';
+    if (accountHasPassword) {
+      const cur = window.prompt('현재 비밀번호를 입력하세요:');
+      if (cur === null) return;
+      currentPassword = cur;
+    }
+    const pw = window.prompt(accountHasPassword ? '새 비밀번호 (4자 이상):' : '앱 접속 비밀번호를 설정하세요 (4자 이상):');
     if (pw === null) return;
     if (pw.length < 4) { alert('비밀번호는 4자 이상이어야 합니다.'); return; }
     const pw2 = window.prompt('확인을 위해 다시 입력하세요:');
     if (pw2 === null) return;
     if (pw !== pw2) { alert('비밀번호가 일치하지 않습니다.'); return; }
-    const h = hashLockPassword(pw);
-    localStorage.setItem('aemang_lock_hash', h);
-    setLockHash(h);
-    setIsUnlocked(true);
-    alert('앱 잠금 비밀번호가 설정되었습니다. 다음 접속부터 입력이 필요합니다. 🔒');
+    try {
+      const res = await authFetch('/api/auth/set-password', {
+        method: 'POST',
+        body: JSON.stringify({ phone, password: pw, currentPassword })
+      });
+      if (res.ok) {
+        setAccountHasPassword(true);
+        setIsUnlocked(true);
+        alert('앱 접속 비밀번호가 설정되었습니다. 다음 접속부터 (다른 기기 포함) 비밀번호 입력이 필요합니다. 🔒');
+      } else if (res.status === 403) {
+        alert('현재 비밀번호가 올바르지 않습니다.');
+      } else {
+        alert('비밀번호 설정에 실패했습니다.');
+      }
+    } catch {
+      alert('네트워크 오류로 설정에 실패했습니다.');
+    }
   };
 
-  const handleRemoveLockPassword = () => {
-    const pw = window.prompt('잠금을 해제하려면 현재 비밀번호를 입력하세요:');
-    if (pw === null) return;
-    if (hashLockPassword(pw) !== lockHash) { alert('비밀번호가 올바르지 않습니다.'); return; }
-    localStorage.removeItem('aemang_lock_hash');
-    setLockHash('');
-    setIsUnlocked(true);
-    alert('앱 잠금이 해제되었습니다.');
+  const handleRemoveLockPassword = async () => {
+    const phone = localStorage.getItem('aemang_phone') || '';
+    const cur = window.prompt('잠금을 해제하려면 현재 비밀번호를 입력하세요:');
+    if (cur === null) return;
+    try {
+      const res = await authFetch('/api/auth/remove-password', {
+        method: 'POST',
+        body: JSON.stringify({ phone, currentPassword: cur })
+      });
+      if (res.ok) {
+        setAccountHasPassword(false);
+        setIsUnlocked(true);
+        alert('앱 접속 비밀번호가 해제되었습니다.');
+      } else {
+        alert('비밀번호가 올바르지 않습니다.');
+      }
+    } catch {
+      alert('네트워크 오류로 해제에 실패했습니다.');
+    }
   };
+
+  // 접속 시: 이 전화번호 계정에 비밀번호가 설정돼 있으면 잠금화면 표시
+  useEffect(() => {
+    const phone = localStorage.getItem('aemang_phone');
+    const registered = localStorage.getItem('apmt_v3_registered') === 'true';
+    if (!registered || !phone) return;
+    fetch(`/api/auth/has-password?phone=${encodeURIComponent(phone)}`)
+      .then(r => r.json())
+      .then(d => { if (d.hasPassword) { setAccountHasPassword(true); setIsUnlocked(false); } })
+      .catch(() => {});
+  }, []);
 
   const handleMarkNotificationRead = async (id: string) => {
     // 즉시 UI 반영(낙관적 업데이트) — 읽음 카운트에서 바로 제외
@@ -1529,7 +1582,7 @@ export default function App() {
   }
 
   // 앱 잠금 화면 — 비밀번호가 설정되어 있으면 접속 시 입력 필요
-  if (lockHash && !isUnlocked) {
+  if (accountHasPassword && !isUnlocked) {
     return (
       <MobileFrame>
         <div className="flex flex-col items-center justify-center h-full bg-white p-8 gap-4 font-sans">
@@ -1975,6 +2028,23 @@ export default function App() {
         {activeTab === 'music' && (
           <MusicPanel />
         )}
+
+        {activeTab === 'restaurant' && (
+          <RestaurantPanel
+            authFetch={authFetch}
+            activeProfileId={activeProfileId}
+            myName={friends.find(f => f.id === activeProfileId)?.name || localStorage.getItem('aemang_nickname') || '나'}
+            onFocusLocation={handleFocusLocation}
+          />
+        )}
+
+        {activeTab === 'book' && (
+          <BookPanel
+            authFetch={authFetch}
+            activeProfileId={activeProfileId}
+            myName={friends.find(f => f.id === activeProfileId)?.name || localStorage.getItem('aemang_nickname') || '나'}
+          />
+        )}
       </div>
 
       {/* 119 Emergency Calling Simulation Overlay */}
@@ -2103,7 +2173,7 @@ export default function App() {
       )}
 
       {/* 3. 하단 내비게이션 */}
-      <div className="bg-white border-t border-gray-100 px-1 flex justify-around items-center select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
+      <div className="bg-white border-t border-gray-100 px-1 flex items-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
         {([
           { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
           { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); } },
@@ -2111,6 +2181,8 @@ export default function App() {
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
           { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
           { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
+          { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
+          { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
           { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
@@ -2118,7 +2190,7 @@ export default function App() {
             key={id}
             type="button"
             onClick={onClick}
-            className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 min-w-0 h-12 rounded-xl transition-all ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
               activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
             }`}
           >
@@ -2375,12 +2447,12 @@ export default function App() {
                 }
               })()}
               
-              {/* 앱 잠금 비밀번호 (이 기기) */}
+              {/* 앱 접속 비밀번호 (전화번호 계정) */}
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
                 <div>
-                  <p className="text-sm font-semibold text-gray-800">🔒 앱 잠금 비밀번호</p>
+                  <p className="text-sm font-semibold text-gray-800">🔒 앱 접속 비밀번호</p>
                   <p className="text-[11px] text-gray-400">
-                    {lockHash ? '설정됨 — 다음 접속 시 비밀번호 입력 필요' : '이 기기에서 앱 열 때 비밀번호를 요구합니다'}
+                    {accountHasPassword ? '설정됨 — 접속 시(다른 기기 포함) 비밀번호 필요' : '내 번호로 다른 사람이 접속 못 하게 비밀번호 설정'}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -2389,9 +2461,9 @@ export default function App() {
                     onClick={handleSetLockPassword}
                     className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-3 py-2 rounded-xl transition shadow-sm"
                   >
-                    {lockHash ? '변경' : '설정'}
+                    {accountHasPassword ? '변경' : '설정'}
                   </button>
-                  {lockHash && (
+                  {accountHasPassword && (
                     <button
                       type="button"
                       onClick={handleRemoveLockPassword}
