@@ -2191,6 +2191,7 @@ export default function App() {
             activeProfileId={activeProfileId}
             activeRoomId={activeRoomId}
             liveSteps={stepsToday}
+            friends={friends}
             onSyncSteps={handleSyncSteps}
           />
         )}
@@ -2539,6 +2540,21 @@ export default function App() {
                     })}
                   </div>
                 </div>
+              </div>
+
+              {/* 이 방에서 나가기 — 누구나(멤버 자유 탈퇴). 방은 유지되고 나만 빠짐 */}
+              <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">🚪 이 방에서 나가기</p>
+                  <p className="text-[11px] text-gray-400">이 방에서 내 참여를 종료합니다 (방은 유지됨)</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setShowSettingsModal(false); handleLeaveRoom(); }}
+                  className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm shrink-0"
+                >
+                  나가기
+                </button>
               </div>
 
               {(() => {

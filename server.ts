@@ -392,6 +392,8 @@ const dbUserProfiles: Record<string, any> = {
 const dbRestaurants: any[] = [];
 const dbBooks: any[] = [];
 const dbMusic: any[] = [];
+// 일회성 마이그레이션 플래그 등 내부 메타데이터
+const dbMeta: Record<string, any> = {};
 
 // ── 기본 빈 룸 (데모 데이터 없음) ──────────────────────────────────────────
 const dbRooms: Record<string, any> = {
@@ -478,7 +480,7 @@ async function loadImage(id: string): Promise<string | null> {
 }
 
 function saveDatabase() {
-  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic });
+  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic, dbMeta });
   // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
   if (useRedis) {
     redisSet(REDIS_DB_KEY, payload).catch(err =>
@@ -523,6 +525,10 @@ function applyLoadedData(data: any, source: string) {
   if (Array.isArray(data.dbMusic)) {
     dbMusic.length = 0;
     dbMusic.push(...data.dbMusic);
+  }
+  if (data.dbMeta && typeof data.dbMeta === 'object') {
+    Object.keys(dbMeta).forEach(k => delete dbMeta[k]);
+    Object.assign(dbMeta, data.dbMeta);
   }
   console.log(`Database loaded successfully from ${source}.`);
   return true;
@@ -579,6 +585,25 @@ function cleanupOldData() {
     // room.appointments(약속 설정)는 의도적으로 보존 — 삭제하지 않음
   });
   if (changed) saveDatabase();
+}
+
+// 일회성 데이터 정리 — '신정강'을 애플망고 가족방(room-family) 제외 모든 방에서 제거
+function migrateRemoveSinjeonggang() {
+  if (dbMeta.mig_remove_sinjeong_v1) return;
+  let changed = false;
+  Object.keys(dbRooms).forEach(rId => {
+    if (rId === 'room-family') return;
+    const room = dbRooms[rId];
+    if (!room || !room.friends) return;
+    Object.keys(room.friends).forEach(fid => {
+      const f = room.friends[fid];
+      const nm = `${f?.name || ''}${f?.realName || ''}${f?.alias || ''}`;
+      if (nm.includes('신정강')) { delete room.friends[fid]; changed = true; }
+    });
+  });
+  dbMeta.mig_remove_sinjeong_v1 = true;
+  if (changed) console.log('Migration: removed 신정강 from non-family rooms.');
+  saveDatabase();
 }
 
 loadDatabase();
@@ -871,6 +896,7 @@ async function startServer() {
   // 영구 저장소(Upstash Redis)에서 데이터 로드 후 최초 정리 (파일 데이터를 덮어씀)
   await loadDatabaseFromRedis();
   cleanupOldData();
+  migrateRemoveSinjeonggang();
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));

@@ -4,13 +4,15 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Footprints, Calendar, TrendingUp, Plus, Trash2 } from 'lucide-react';
+import { Footprints, Calendar, TrendingUp, Trash2, Users } from 'lucide-react';
+import { Friend } from '../types';
 
 interface PedometerPanelProps {
   phone: string;
   activeProfileId: string;
   activeRoomId: string;
   liveSteps?: number; // 실시간 기기 만보기 걸음수 (상단 상태바와 동일 소스)
+  friends?: Friend[]; // 같은 방 친구들 — 걸음수 공유 표시용
   onSyncSteps: (steps: number) => void;
 }
 
@@ -24,6 +26,7 @@ export default function PedometerPanel({
   activeProfileId,
   activeRoomId,
   liveSteps = 0,
+  friends = [],
   onSyncSteps,
 }: PedometerPanelProps) {
   const historyKey = `aemang_pedometer_history_${phone || 'guest'}`;
@@ -111,11 +114,6 @@ export default function PedometerPanel({
 
     // 부모 컴포넌트로 전달 (서버 싱크)
     onSyncSteps(newSteps);
-  };
-
-  const addSteps = (amount: number) => {
-    const nextSteps = stepsToday + amount;
-    updateSteps(nextSteps);
   };
 
   // 실시간 기기 걸음수가 오늘 기록보다 많으면 오늘 기록에 반영(원/그래프에 표시)
@@ -238,25 +236,13 @@ export default function PedometerPanel({
             </div>
           </div>
 
-          {/* 걸음 수 조작 버튼 (테스트용) */}
-          <div className="grid grid-cols-3 gap-2 w-full mt-5">
-            <button
-              onClick={() => addSteps(500)}
-              className="flex items-center justify-center gap-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-2xl text-xs transition border border-rose-100"
-            >
-              <Plus className="w-3.5 h-3.5" /> 500
-            </button>
-            <button
-              onClick={() => addSteps(1000)}
-              className="flex items-center justify-center gap-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-2xl text-xs transition border border-rose-100"
-            >
-              <Plus className="w-3.5 h-3.5" /> 1000
-            </button>
+          {/* 실제 걸음수만 기록 — 수동 조작 버튼 제거. 오늘 기록 초기화만 제공 */}
+          <div className="w-full mt-5">
             <button
               onClick={handleReset}
-              className="flex items-center justify-center gap-1 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold rounded-2xl text-xs transition border border-gray-100"
+              className="w-full flex items-center justify-center gap-1 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold rounded-2xl text-xs transition border border-gray-100"
             >
-              <Trash2 className="w-3.5 h-3.5" /> 초기화
+              <Trash2 className="w-3.5 h-3.5" /> 오늘 기록 초기화
             </button>
           </div>
 
@@ -312,6 +298,43 @@ export default function PedometerPanel({
               </div>
             ))}
           </div>
+        </div>
+
+        {/* 친구 걸음수 공유 (같은 방 멤버) */}
+        <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm space-y-3">
+          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+            <Users className="w-4 h-4 text-rose-500" />
+            <span>친구 걸음수 (오늘)</span>
+          </h3>
+          {(() => {
+            const ranked = [...friends]
+              .map(f => ({
+                id: f.id,
+                name: (f.name || '').replace(' (대기)', '').replace(' (합류)', ''),
+                avatar: f.avatar,
+                steps: f.id === activeProfileId ? Math.max(stepsToday, (f as any).stepsToday || 0) : ((f as any).stepsToday || 0),
+                isMe: f.id === activeProfileId,
+              }))
+              .sort((a, b) => b.steps - a.steps);
+            if (ranked.length === 0) {
+              return <p className="text-[11px] text-gray-400 text-center py-2">같은 방 친구가 없습니다.</p>;
+            }
+            return (
+              <div className="space-y-2">
+                {ranked.map((f, idx) => (
+                  <div key={f.id} className={`flex items-center gap-2.5 ${f.isMe ? 'bg-rose-50 -mx-2 px-2 py-1.5 rounded-xl' : ''}`}>
+                    <span className="text-[11px] font-black text-gray-400 w-4 text-center shrink-0">{idx + 1}</span>
+                    <span className="text-base shrink-0">{f.avatar || '🙂'}</span>
+                    <span className="text-xs font-bold text-gray-800 flex-1 truncate">
+                      {f.name}{f.isMe && <span className="text-rose-500"> (나)</span>}
+                    </span>
+                    <span className="text-xs font-extrabold text-gray-900 font-mono">{f.steps.toLocaleString()}</span>
+                    <span className="text-[10px] text-gray-400">걸음</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* 히스토리 리스트 */}
