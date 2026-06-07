@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Music, Plus, Trash2, Play, Pause, X, ExternalLink } from 'lucide-react';
+import { Music, Plus, Trash2, Play, Pause, X, ExternalLink, Pencil } from 'lucide-react';
 
 interface Track {
   id: string;
@@ -40,6 +40,7 @@ export default function MusicPanel() {
     }
   });
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -54,17 +55,32 @@ export default function MusicPanel() {
 
   const handleAdd = () => {
     if (!newUrl.trim()) { setError('음악 링크를 입력해 주세요.'); return; }
-    const track: Track = {
-      id: `track-${Date.now()}`,
-      title: newTitle.trim() || '내 음악',
-      originalUrl: newUrl.trim(),
-      playUrl: toPlayableUrl(newUrl),
-    };
-    persist([...tracks, track]);
+    if (editingId) {
+      persist(tracks.map(t => t.id === editingId
+        ? { ...t, title: newTitle.trim() || '내 음악', originalUrl: newUrl.trim(), playUrl: toPlayableUrl(newUrl) }
+        : t));
+    } else {
+      const track: Track = {
+        id: `track-${Date.now()}`,
+        title: newTitle.trim() || '내 음악',
+        originalUrl: newUrl.trim(),
+        playUrl: toPlayableUrl(newUrl),
+      };
+      persist([...tracks, track]);
+    }
+    setEditingId(null);
     setNewTitle('');
     setNewUrl('');
     setError('');
     setShowAdd(false);
+  };
+
+  const startEdit = (track: Track) => {
+    setEditingId(track.id);
+    setNewTitle(track.title);
+    setNewUrl(track.originalUrl);
+    setError('');
+    setShowAdd(true);
   };
 
   const handleDelete = (id: string) => {
@@ -117,7 +133,7 @@ export default function MusicPanel() {
         </h2>
         <button
           type="button"
-          onClick={() => { setShowAdd(s => !s); setError(''); }}
+          onClick={() => { setShowAdd(s => !s); setEditingId(null); setNewTitle(''); setNewUrl(''); setError(''); }}
           className={`w-8 h-8 rounded-full flex items-center justify-center transition ${showAdd ? 'bg-gray-200 text-gray-600' : 'bg-rose-500 text-white'}`}
         >
           {showAdd ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -128,7 +144,7 @@ export default function MusicPanel() {
         {/* 추가 폼 */}
         {showAdd && (
           <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-2.5">
-            <p className="text-[13px] font-bold text-rose-700">새 음악 추가</p>
+            <p className="text-[13px] font-bold text-rose-700">{editingId ? '음악 수정' : '새 음악 추가'}</p>
             <input
               type="text"
               placeholder="제목 (예: 내가 만든 Suno 노래)"
@@ -152,7 +168,7 @@ export default function MusicPanel() {
               onClick={handleAdd}
               className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-2.5 rounded-xl text-sm transition"
             >
-              추가하기
+              {editingId ? '수정 완료' : '추가하기'}
             </button>
           </div>
         )}
@@ -204,6 +220,13 @@ export default function MusicPanel() {
                       <ExternalLink className="w-2.5 h-2.5" /> 원본 링크
                     </a>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => startEdit(track)}
+                    className="p-2 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition shrink-0"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleDelete(track.id)}

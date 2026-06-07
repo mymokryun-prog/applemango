@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Utensils, Plus, Trash2, X, MapPin, Search, Loader2, MessageCircle, Send } from 'lucide-react';
+import { Utensils, Plus, Trash2, X, MapPin, Search, Loader2, MessageCircle, Send, Pencil } from 'lucide-react';
 
 interface Review {
   id: string;
@@ -37,6 +37,7 @@ interface Props {
 export default function RestaurantPanel({ authFetch, activeProfileId, myName, onFocusLocation }: Props) {
   const [list, setList] = useState<Restaurant[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [query, setQuery] = useState('');
@@ -81,21 +82,33 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [query, confirmed]);
 
-  const resetForm = () => { setName(''); setDesc(''); setQuery(''); setResults([]); setConfirmed(null); };
+  const resetForm = () => { setEditingId(null); setName(''); setDesc(''); setQuery(''); setResults([]); setConfirmed(null); };
+
+  const startEdit = (r: Restaurant) => {
+    setEditingId(r.id);
+    setName(r.name);
+    setDesc(r.description || '');
+    setQuery('');
+    setResults([]);
+    setConfirmed(r.lat != null && r.lng != null ? { name: r.placeName || '현재 위치', address: r.placeName || '', lat: r.lat, lng: r.lng } : null);
+    setShowAdd(true);
+  };
 
   const handleAdd = async () => {
     if (!name.trim()) { alert('맛집 이름을 입력해 주세요.'); return; }
-    await authFetch('/api/restaurants', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: name.trim(),
-        placeName: confirmed?.name || confirmed?.address || '',
-        lat: confirmed?.lat ?? null,
-        lng: confirmed?.lng ?? null,
-        description: desc.trim(),
-        creatorName: myName,
-      })
-    });
+    const body = {
+      name: name.trim(),
+      placeName: confirmed?.name || confirmed?.address || '',
+      lat: confirmed?.lat ?? null,
+      lng: confirmed?.lng ?? null,
+      description: desc.trim(),
+      creatorName: myName,
+    };
+    if (editingId) {
+      await authFetch('/api/restaurants/update', { method: 'POST', body: JSON.stringify({ id: editingId, ...body }) });
+    } else {
+      await authFetch('/api/restaurants', { method: 'POST', body: JSON.stringify(body) });
+    }
     resetForm();
     setShowAdd(false);
     load();
@@ -121,7 +134,7 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
           <Utensils className="w-5 h-5 text-rose-500" />
           <span>맛집</span>
         </h2>
-        <button type="button" onClick={() => { setShowAdd(s => !s); resetForm(); }}
+        <button type="button" onClick={() => { resetForm(); setShowAdd(s => !s); }}
           className={`w-8 h-8 rounded-full flex items-center justify-center transition ${showAdd ? 'bg-gray-200 text-gray-600' : 'bg-rose-500 text-white'}`}>
           {showAdd ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
         </button>
@@ -130,7 +143,7 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
       <div className="flex-1 p-4 space-y-3">
         {showAdd && (
           <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-2.5">
-            <p className="text-[13px] font-bold text-rose-700">맛집 등록</p>
+            <p className="text-[13px] font-bold text-rose-700">{editingId ? '맛집 수정' : '맛집 등록'}</p>
             <input type="text" placeholder="맛집 이름 (예: 홍대 칼국수)" value={name} onChange={e => setName(e.target.value)}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400" />
             {/* 장소 검색 */}
@@ -163,7 +176,7 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
             )}
             <textarea placeholder="맛집 설명 (메뉴, 추천 이유 등)" value={desc} onChange={e => setDesc(e.target.value)} rows={2}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400 resize-none" />
-            <button type="button" onClick={handleAdd} className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-2.5 rounded-xl text-sm transition">등록하기</button>
+            <button type="button" onClick={handleAdd} className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-2.5 rounded-xl text-sm transition">{editingId ? '수정 완료' : '등록하기'}</button>
           </div>
         )}
 
@@ -182,19 +195,26 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
               <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded-full font-semibold shrink-0">{(r.creatorName || '').split(' ')[0]}</span>
             </div>
             {r.description && <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-line">{r.description}</p>}
-            <div className="flex items-center gap-2 pt-1">
-              {r.lat != null && r.lng != null && (
+            <div className="flex items-center gap-2.5 pt-1">
+              {r.lat != null && r.lng != null ? (
                 <button type="button" onClick={() => onFocusLocation(r.lat!, r.lng!)}
                   className="flex items-center gap-1 text-[11px] font-bold text-blue-500 hover:text-blue-700">
                   <MapPin className="w-3.5 h-3.5" /> 지도로 가기
                 </button>
+              ) : (
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-gray-300">
+                  <MapPin className="w-3.5 h-3.5" /> 위치 미등록
+                </span>
               )}
               <button type="button" onClick={() => setOpenReviewId(openReviewId === r.id ? null : r.id)}
                 className="flex items-center gap-1 text-[11px] font-bold text-gray-500 hover:text-gray-700">
                 <MessageCircle className="w-3.5 h-3.5" /> 후기 {r.reviews?.length || 0}
               </button>
               {r.creatorId === activeProfileId && (
-                <button type="button" onClick={() => handleDelete(r.id)} className="ml-auto text-gray-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                <div className="ml-auto flex items-center gap-2">
+                  <button type="button" onClick={() => startEdit(r)} className="text-gray-300 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button type="button" onClick={() => handleDelete(r.id)} className="text-gray-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
               )}
             </div>
 

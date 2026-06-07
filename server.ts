@@ -701,6 +701,7 @@ function applyFriendLocationUpdate(
   friend.speed = speed;
   friend.heading = heading;
   friend.isOnline = true;
+  friend.loggedOut = false; // 다시 활동하면 로그아웃 숨김 해제
   friend.updatedAt = new Date().toISOString();
   if (statusMsg !== undefined) friend.statusMsg = statusMsg;
 
@@ -1714,10 +1715,25 @@ async function startServer() {
     res.json(item);
   });
 
+  app.post('/api/restaurants/update', (req: AuthRequest, res: Response) => {
+    const { id, name, placeName, lat, lng, description } = req.body;
+    const item = dbRestaurants.find(r => r.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (item.creatorId !== (req.user?.userId || 'user-minsu')) return res.status(403).json({ error: 'not owner' });
+    if (name && name.trim()) item.name = String(name).trim();
+    if (placeName !== undefined) item.placeName = placeName;
+    if (typeof lat === 'number') item.lat = lat;
+    if (typeof lng === 'number') item.lng = lng;
+    if (description !== undefined) item.description = description;
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
   app.post('/api/restaurants/delete', (req: AuthRequest, res: Response) => {
     const { id } = req.body;
     const idx = dbRestaurants.findIndex(r => r.id === id);
     if (idx === -1) return res.status(404).json({ error: 'not found' });
+    if (dbRestaurants[idx].creatorId !== (req.user?.userId || 'user-minsu')) return res.status(403).json({ error: 'not owner' });
     dbRestaurants.splice(idx, 1);
     saveDatabaseDebounced();
     res.json({ success: true });
@@ -1758,10 +1774,23 @@ async function startServer() {
     res.json(item);
   });
 
+  app.post('/api/books/update', (req: AuthRequest, res: Response) => {
+    const { id, title, author, description } = req.body;
+    const item = dbBooks.find(b => b.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (item.creatorId !== (req.user?.userId || 'user-minsu')) return res.status(403).json({ error: 'not owner' });
+    if (title && title.trim()) item.title = String(title).trim();
+    if (author !== undefined) item.author = author;
+    if (description !== undefined) item.description = description;
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
   app.post('/api/books/delete', (req: AuthRequest, res: Response) => {
     const { id } = req.body;
     const idx = dbBooks.findIndex(b => b.id === id);
     if (idx === -1) return res.status(404).json({ error: 'not found' });
+    if (dbBooks[idx].creatorId !== (req.user?.userId || 'user-minsu')) return res.status(403).json({ error: 'not owner' });
     dbBooks.splice(idx, 1);
     saveDatabaseDebounced();
     res.json({ success: true });
@@ -1846,7 +1875,41 @@ async function startServer() {
   app.get('/api/friends', (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId] || dbRooms['room-friends'];
-    res.json(Object.values(room.friends));
+    // 로그아웃했거나 위치 공유를 끈 사용자는 위치정보(lat/lng/route)를 숨김 (멤버 목록에는 남음)
+    const list = Object.values(room.friends).map((f: any) => {
+      const locationHidden = f.loggedOut === true || f.shareLocation === false;
+      if (locationHidden) {
+        return { ...f, lat: null, lng: null, route: [], locationHidden: true };
+      }
+      return f;
+    });
+    res.json(list);
+  });
+
+  // 내 위치 공유 ON/OFF (사용자별, 모든 방에 반영)
+  app.post('/api/friends/location-sharing', (req: AuthRequest, res: Response) => {
+    const { enabled } = req.body;
+    const userId = req.user?.userId;
+    if (!userId) return res.status(400).json({ error: 'no user' });
+    Object.keys(dbRooms).forEach(rId => {
+      const fr = dbRooms[rId].friends[userId];
+      if (fr) fr.shareLocation = !!enabled;
+    });
+    if (dbUserProfiles[userId]) dbUserProfiles[userId].shareLocation = !!enabled;
+    saveDatabaseDebounced();
+    res.json({ success: true, enabled: !!enabled });
+  });
+
+  // 로그아웃 — 위치정보 숨김 처리(앱 미사용 오프라인과 구분)
+  app.post('/api/friends/logout', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(400).json({ error: 'no user' });
+    Object.keys(dbRooms).forEach(rId => {
+      const fr = dbRooms[rId].friends[userId];
+      if (fr) { fr.loggedOut = true; fr.isOnline = false; }
+    });
+    saveDatabaseDebounced();
+    res.json({ success: true });
   });
 
   app.post('/api/friends/move', validateRequest(LocationUpdateSchema), (req: AuthRequest, res: Response) => {
@@ -2460,11 +2523,14 @@ async function startServer() {
         roomSockets[roomId].add(socket.id);
         socketUsers[socket.id] = { userId, roomId };
 
-        // 접속한 사용자를 모든 방에서 온라인으로 표시
+        // 접속한 사용자를 모든 방에서 온라인으로 표시 + 로그아웃 숨김 해제
         let onlineChanged = false;
         Object.keys(dbRooms).forEach(rId => {
           const fr = dbRooms[rId].friends[userId];
-          if (fr && fr.isOnline === false) { fr.isOnline = true; onlineChanged = true; }
+          if (fr) {
+            if (fr.isOnline === false) { fr.isOnline = true; onlineChanged = true; }
+            if (fr.loggedOut) { fr.loggedOut = false; onlineChanged = true; }
+          }
         });
         if (onlineChanged) saveDatabaseDebounced();
 

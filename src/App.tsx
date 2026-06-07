@@ -99,6 +99,10 @@ export default function App() {
   const [isSoundEnabled, setIsSoundEnabled] = useState(() => {
     return localStorage.getItem('aemang_sound_enabled') !== 'false';
   });
+  // 내 위치 공유 여부 (off면 다른 사람에게 내 위치가 안 보임)
+  const [shareLocation, setShareLocation] = useState(() => {
+    return localStorage.getItem('aemang_share_location') !== 'false';
+  });
   const [selectedSoundIdx, setSelectedSoundIdx] = useState<number>(() => {
     const saved = localStorage.getItem('aemang_sound_idx');
     return saved ? parseInt(saved, 10) : 0;
@@ -1211,6 +1215,31 @@ export default function App() {
     }
   };
 
+  const handleToggleLocationSharing = async () => {
+    const next = !shareLocation;
+    setShareLocation(next);
+    localStorage.setItem('aemang_share_location', String(next));
+    try {
+      await authFetch('/api/friends/location-sharing', {
+        method: 'POST',
+        body: JSON.stringify({ enabled: next })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 접속 시: 서버에 현재 위치 공유 설정을 동기화 (다른 기기에서도 일관)
+  useEffect(() => {
+    if (showOnboarding || !activeProfileId) return;
+    authFetch('/api/friends/location-sharing', {
+      method: 'POST',
+      body: JSON.stringify({ enabled: shareLocation })
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProfileId, showOnboarding]);
+
   // 접속 시: 이 전화번호 계정에 비밀번호가 설정돼 있으면 잠금화면 표시
   useEffect(() => {
     const phone = localStorage.getItem('aemang_phone');
@@ -1416,6 +1445,10 @@ export default function App() {
 
   const handleAppLogout = () => {
     if (!window.confirm('정말로 로그아웃하고 앱을 나가시겠습니까?')) return;
+    // 로그아웃 시 위치정보 숨김 처리(앱 미사용 오프라인과 구분 — 지도에서 사라짐)
+    try {
+      authFetch('/api/friends/logout', { method: 'POST', body: JSON.stringify({}) }).catch(() => {});
+    } catch {}
     localStorage.removeItem('aemang_token');
     localStorage.removeItem('apmt_v3_registered');
     localStorage.removeItem('aemang_phone');
@@ -2447,6 +2480,23 @@ export default function App() {
                 }
               })()}
               
+              {/* 내 위치 공유 ON/OFF */}
+              <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">📍 내 위치 공유</p>
+                  <p className="text-[11px] text-gray-400">
+                    {shareLocation ? '켜짐 — 그룹 멤버에게 내 위치가 보입니다' : '꺼짐 — 앱은 쓰되 내 위치는 공유 안 됨'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleLocationSharing}
+                  className={`w-12 h-6 rounded-full p-0.5 transition-colors duration-200 shrink-0 ${shareLocation ? 'bg-rose-500' : 'bg-gray-200'}`}
+                >
+                  <div className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${shareLocation ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
               {/* 앱 접속 비밀번호 (전화번호 계정) */}
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
                 <div>

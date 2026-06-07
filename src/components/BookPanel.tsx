@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Plus, Trash2, X, Heart } from 'lucide-react';
+import { BookOpen, Plus, Trash2, X, Heart, Pencil } from 'lucide-react';
 
 interface Book {
   id: string;
@@ -26,6 +26,7 @@ interface Props {
 export default function BookPanel({ authFetch, activeProfileId, myName }: Props) {
   const [list, setList] = useState<Book[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [desc, setDesc] = useState('');
@@ -33,13 +34,26 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
   const load = () => { authFetch('/api/books').then(r => r.json()).then(setList).catch(() => {}); };
   useEffect(() => { load(); }, []);
 
+  const resetForm = () => { setEditingId(null); setTitle(''); setAuthor(''); setDesc(''); };
+
+  const startEdit = (b: Book) => {
+    setEditingId(b.id); setTitle(b.title); setAuthor(b.author || ''); setDesc(b.description || ''); setShowAdd(true);
+  };
+
   const handleAdd = async () => {
     if (!title.trim()) { alert('책 제목을 입력해 주세요.'); return; }
-    await authFetch('/api/books', {
-      method: 'POST',
-      body: JSON.stringify({ title: title.trim(), author: author.trim(), description: desc.trim(), creatorName: myName })
-    });
-    setTitle(''); setAuthor(''); setDesc(''); setShowAdd(false);
+    if (editingId) {
+      await authFetch('/api/books/update', {
+        method: 'POST',
+        body: JSON.stringify({ id: editingId, title: title.trim(), author: author.trim(), description: desc.trim() })
+      });
+    } else {
+      await authFetch('/api/books', {
+        method: 'POST',
+        body: JSON.stringify({ title: title.trim(), author: author.trim(), description: desc.trim(), creatorName: myName })
+      });
+    }
+    resetForm(); setShowAdd(false);
     load();
   };
 
@@ -61,7 +75,7 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
           <BookOpen className="w-5 h-5 text-rose-500" />
           <span>추천 도서</span>
         </h2>
-        <button type="button" onClick={() => setShowAdd(s => !s)}
+        <button type="button" onClick={() => { if (showAdd) resetForm(); setShowAdd(s => !s); }}
           className={`w-8 h-8 rounded-full flex items-center justify-center transition ${showAdd ? 'bg-gray-200 text-gray-600' : 'bg-rose-500 text-white'}`}>
           {showAdd ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
         </button>
@@ -70,14 +84,14 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
       <div className="flex-1 p-4 space-y-3">
         {showAdd && (
           <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-2.5">
-            <p className="text-[13px] font-bold text-rose-700">책 추천하기</p>
+            <p className="text-[13px] font-bold text-rose-700">{editingId ? '책 추천 수정' : '책 추천하기'}</p>
             <input type="text" placeholder="책 제목 *" value={title} onChange={e => setTitle(e.target.value)}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400" />
             <input type="text" placeholder="저자" value={author} onChange={e => setAuthor(e.target.value)}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400" />
             <textarea placeholder="이 책을 추천하는 이유·설명" value={desc} onChange={e => setDesc(e.target.value)} rows={3}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400 resize-none" />
-            <button type="button" onClick={handleAdd} className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-2.5 rounded-xl text-sm transition">추천 등록</button>
+            <button type="button" onClick={handleAdd} className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-2.5 rounded-xl text-sm transition">{editingId ? '수정 완료' : '추천 등록'}</button>
           </div>
         )}
 
@@ -104,7 +118,10 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
                   <Heart className={`w-4 h-4 ${liked ? 'fill-rose-500' : ''}`} /> 좋아요 {(b.likes || []).length}
                 </button>
                 {b.creatorId === activeProfileId && (
-                  <button type="button" onClick={() => handleDelete(b.id)} className="ml-auto text-gray-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button type="button" onClick={() => startEdit(b)} className="text-gray-300 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => handleDelete(b.id)} className="text-gray-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
                 )}
               </div>
             </div>
