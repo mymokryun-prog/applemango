@@ -93,8 +93,12 @@ export default function App() {
   // 앱 접속 비밀번호 (전화번호 계정에 연동 — 서버 확인)
   const [accountHasPassword, setAccountHasPassword] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(true);
+  const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false); // 최초/미설정 시 강제 설정 화면
   const [lockInput, setLockInput] = useState('');
   const [lockError, setLockError] = useState('');
+  const [setupPw1, setSetupPw1] = useState('');
+  const [setupPw2, setSetupPw2] = useState('');
+  const [setupError, setSetupError] = useState('');
 
   const [isSoundEnabled, setIsSoundEnabled] = useState(() => {
     return localStorage.getItem('aemang_sound_enabled') !== 'false';
@@ -369,6 +373,7 @@ export default function App() {
     
     setActiveProfileId(newUserId);
     setShowOnboarding(false);
+    setNeedsPasswordSetup(true); // 최초 접속 — 비밀번호 설정을 강제
     fetchAllStates(activeRoomId);
   };
 
@@ -1151,6 +1156,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
+        localStorage.setItem('aemang_unlocked', 'true'); // 이후 그냥 닫았다 열면 기억
         setIsUnlocked(true);
         setLockInput('');
         setLockError('');
@@ -1160,6 +1166,37 @@ export default function App() {
     } catch {
       setLockError('확인 중 오류가 발생했습니다. 네트워크를 확인해 주세요.');
     }
+  };
+
+  // 최초/미설정 비밀번호 강제 설정
+  const handleCompletePasswordSetup = async () => {
+    const phone = localStorage.getItem('aemang_phone') || '';
+    if (setupPw1.length < 4) { setSetupError('비밀번호는 4자 이상이어야 합니다.'); return; }
+    if (setupPw1 !== setupPw2) { setSetupError('비밀번호가 일치하지 않습니다.'); return; }
+    try {
+      const res = await authFetch('/api/auth/set-password', {
+        method: 'POST',
+        body: JSON.stringify({ phone, password: setupPw1 })
+      });
+      if (res.ok) {
+        localStorage.setItem('aemang_unlocked', 'true');
+        setAccountHasPassword(true);
+        setIsUnlocked(true);
+        setNeedsPasswordSetup(false);
+        setSetupPw1(''); setSetupPw2(''); setSetupError('');
+      } else {
+        setSetupError('설정에 실패했습니다. 다시 시도해 주세요.');
+      }
+    } catch {
+      setSetupError('네트워크 오류로 설정에 실패했습니다.');
+    }
+  };
+
+  // 잠그고 나가기 — 프로필은 유지, 다음 접속 시 비번 요구
+  const handleLockAndExit = () => {
+    localStorage.removeItem('aemang_unlocked');
+    setIsUnlocked(false);
+    setShowSettingsModal(false);
   };
 
   const handleSetLockPassword = async () => {
@@ -1183,6 +1220,7 @@ export default function App() {
         body: JSON.stringify({ phone, password: pw, currentPassword })
       });
       if (res.ok) {
+        localStorage.setItem('aemang_unlocked', 'true');
         setAccountHasPassword(true);
         setIsUnlocked(true);
         alert('앱 접속 비밀번호가 설정되었습니다. 다음 접속부터 (다른 기기 포함) 비밀번호 입력이 필요합니다. 🔒');
@@ -1206,6 +1244,7 @@ export default function App() {
         body: JSON.stringify({ phone, currentPassword: cur })
       });
       if (res.ok) {
+        localStorage.removeItem('aemang_unlocked');
         setAccountHasPassword(false);
         setIsUnlocked(true);
         alert('앱 접속 비밀번호가 해제되었습니다.');
@@ -1232,6 +1271,40 @@ export default function App() {
     }
   };
 
+  // 실제 기기 배터리 보고 — navigator.getBattery() 지원 시 실제 잔량을 서버에 전송
+  useEffect(() => {
+    if (showOnboarding || !activeProfileId) return;
+    const nav = navigator as any;
+    if (!nav.getBattery) return; // 미지원 브라우저(iOS Safari 등)는 생략
+    let battery: any = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const report = () => {
+      if (!battery) return;
+      authFetch('/api/friends/battery', {
+        method: 'POST',
+        body: JSON.stringify({ battery: Math.round(battery.level * 100), charging: battery.charging })
+      }).catch(() => {});
+    };
+
+    nav.getBattery().then((b: any) => {
+      battery = b;
+      report();
+      b.addEventListener('levelchange', report);
+      b.addEventListener('chargingchange', report);
+      interval = setInterval(report, 5 * 60 * 1000); // 5분마다 갱신
+    }).catch(() => {});
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (battery) {
+        battery.removeEventListener('levelchange', report);
+        battery.removeEventListener('chargingchange', report);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProfileId, showOnboarding]);
+
   // 접속 시: 서버에 현재 위치 공유 설정을 동기화 (다른 기기에서도 일관)
   useEffect(() => {
     if (showOnboarding || !activeProfileId) return;
@@ -1242,14 +1315,25 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProfileId, showOnboarding]);
 
-  // 접속 시: 이 전화번호 계정에 비밀번호가 설정돼 있으면 잠금화면 표시
+  // 접속 시: 계정 비번 상태 확인
+  //  - 비번 있음 + '잠금해제 기억' 플래그 있음 → 그냥 통과(앱만 닫았다 연 경우)
+  //  - 비번 있음 + 플래그 없음 → 잠금화면(나가기 했거나 다른 기기)
+  //  - 비번 없음(기존 사용자) → 강제 설정 화면
   useEffect(() => {
     const phone = localStorage.getItem('aemang_phone');
     const registered = localStorage.getItem('apmt_v3_registered') === 'true';
     if (!registered || !phone) return;
     fetch(`/api/auth/has-password?phone=${encodeURIComponent(phone)}`)
       .then(r => r.json())
-      .then(d => { if (d.hasPassword) { setAccountHasPassword(true); setIsUnlocked(false); } })
+      .then(d => {
+        if (d.hasPassword) {
+          setAccountHasPassword(true);
+          const remembered = localStorage.getItem('aemang_unlocked') === 'true';
+          setIsUnlocked(remembered);
+        } else {
+          setNeedsPasswordSetup(true);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -1451,6 +1535,7 @@ export default function App() {
     try {
       authFetch('/api/friends/logout', { method: 'POST', body: JSON.stringify({}) }).catch(() => {});
     } catch {}
+    localStorage.removeItem('aemang_unlocked');
     localStorage.removeItem('aemang_token');
     localStorage.removeItem('apmt_v3_registered');
     localStorage.removeItem('aemang_phone');
@@ -1622,6 +1707,44 @@ export default function App() {
     return (
       <MobileFrame>
         <OnboardingScreen onComplete={handleOnboardingComplete} />
+      </MobileFrame>
+    );
+  }
+
+  // 비밀번호 강제 설정 화면 — 최초 접속(또는 미설정 기존 사용자)
+  if (needsPasswordSetup) {
+    return (
+      <MobileFrame>
+        <div className="flex flex-col items-center justify-center h-full bg-white p-8 gap-3 font-sans">
+          <ApmtLogo size={56} />
+          <h2 className="text-lg font-black text-gray-900">🔒 접속 비밀번호 설정</h2>
+          <p className="text-xs text-gray-500 text-center -mt-1 leading-relaxed">
+            내 전화번호로 다른 사람이 접속하지 못하도록<br />접속 비밀번호를 설정해 주세요. (4자 이상)
+          </p>
+          <input
+            type="password"
+            value={setupPw1}
+            onChange={(e) => { setSetupPw1(e.target.value); setSetupError(''); }}
+            placeholder="비밀번호 (4자 이상)"
+            className="w-full max-w-[260px] border-2 border-black rounded-xl px-4 py-3 text-center text-base focus:outline-none focus:border-rose-500"
+          />
+          <input
+            type="password"
+            value={setupPw2}
+            onChange={(e) => { setSetupPw2(e.target.value); setSetupError(''); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCompletePasswordSetup(); }}
+            placeholder="비밀번호 확인"
+            className="w-full max-w-[260px] border-2 border-black rounded-xl px-4 py-3 text-center text-base focus:outline-none focus:border-rose-500"
+          />
+          {setupError && <p className="text-xs text-red-500 font-semibold">{setupError}</p>}
+          <button
+            type="button"
+            onClick={handleCompletePasswordSetup}
+            className="w-full max-w-[260px] bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 rounded-xl transition border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
+          >
+            설정 완료하고 시작하기
+          </button>
+        </div>
       </MobileFrame>
     );
   }
@@ -2073,7 +2196,11 @@ export default function App() {
         )}
 
         {activeTab === 'music' && (
-          <MusicPanel />
+          <MusicPanel
+            authFetch={authFetch}
+            activeProfileId={activeProfileId}
+            myName={friends.find(f => f.id === activeProfileId)?.name || localStorage.getItem('aemang_nickname') || '나'}
+          />
         )}
 
         {activeTab === 'restaurant' && (
@@ -2539,11 +2666,28 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 앱 나가기 / 로그아웃 */}
+              {/* 잠그고 나가기 — 프로필 유지, 다음 접속 시 비번 */}
+              {accountHasPassword && (
+                <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">🔒 잠그고 나가기</p>
+                    <p className="text-[11px] text-gray-400">다음 접속 때 비밀번호를 입력해야 합니다 (프로필 유지)</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLockAndExit}
+                    className="bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                  >
+                    잠그기
+                  </button>
+                </div>
+              )}
+
+              {/* 앱 로그아웃 (완전 탈퇴) */}
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">
                 <div>
-                  <p className="text-sm font-semibold text-gray-800">앱 로그아웃 (나가기)</p>
-                  <p className="text-[11px] text-gray-400">앱 세션을 종료하고 안전하게 로그아웃합니다</p>
+                  <p className="text-sm font-semibold text-gray-800">앱 로그아웃 (계정 해제)</p>
+                  <p className="text-[11px] text-gray-400">프로필 정보를 지우고 처음(가입)부터 다시 시작합니다</p>
                 </div>
                 <button
                   type="button"

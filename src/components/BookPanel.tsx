@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Plus, Trash2, X, Heart, Pencil } from 'lucide-react';
+import { BookOpen, Plus, Trash2, X, Pencil } from 'lucide-react';
+import ItemSocial from './ItemSocial';
 
 interface Book {
   id: string;
@@ -57,11 +58,6 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
     load();
   };
 
-  const handleLike = async (id: string) => {
-    await authFetch('/api/books/like', { method: 'POST', body: JSON.stringify({ id }) });
-    load();
-  };
-
   const handleDelete = async (id: string) => {
     if (!window.confirm('이 추천 도서를 삭제하시겠습니까?')) return;
     await authFetch('/api/books/delete', { method: 'POST', body: JSON.stringify({ id }) });
@@ -101,7 +97,6 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
             <p className="text-sm">추천된 책이 없습니다</p>
           </div>
         ) : list.map(b => {
-          const liked = (b.likes || []).includes(activeProfileId);
           return (
             <div key={b.id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-1.5">
               <div className="flex items-start justify-between gap-2">
@@ -109,21 +104,18 @@ export default function BookPanel({ authFetch, activeProfileId, myName }: Props)
                   <p className="text-sm font-black text-gray-900">📖 {b.title}</p>
                   {b.author && <p className="text-[11px] text-gray-500">{b.author}</p>}
                 </div>
-                <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded-full font-semibold shrink-0">{(b.creatorName || '').split(' ')[0]}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded-full font-semibold">{(b.creatorName || '').split(' ')[0]}</span>
+                  {b.creatorId === activeProfileId && (
+                    <>
+                      <button type="button" onClick={() => startEdit(b)} className="text-gray-300 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
+                      <button type="button" onClick={() => handleDelete(b.id)} className="text-gray-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </>
+                  )}
+                </div>
               </div>
               {b.description && <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-line">{b.description}</p>}
-              <div className="flex items-center gap-3 pt-1">
-                <button type="button" onClick={() => handleLike(b.id)}
-                  className={`flex items-center gap-1 text-xs font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-rose-400'}`}>
-                  <Heart className={`w-4 h-4 ${liked ? 'fill-rose-500' : ''}`} /> 좋아요 {(b.likes || []).length}
-                </button>
-                {b.creatorId === activeProfileId && (
-                  <div className="ml-auto flex items-center gap-2">
-                    <button type="button" onClick={() => startEdit(b)} className="text-gray-300 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => handleDelete(b.id)} className="text-gray-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
-                  </div>
-                )}
-              </div>
+              <ItemSocial kind="books" item={b} authFetch={authFetch} activeProfileId={activeProfileId} myName={myName} onChange={load} />
             </div>
           );
         })}

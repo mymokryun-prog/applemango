@@ -388,9 +388,10 @@ const dbUserProfiles: Record<string, any> = {
   }
 };
 
-// 맛집·추천도서 (모든 사용자 공유, 영구 저장)
+// 맛집·추천도서·음악 (모든 사용자 공유, 영구 저장)
 const dbRestaurants: any[] = [];
 const dbBooks: any[] = [];
+const dbMusic: any[] = [];
 
 // ── 기본 빈 룸 (데모 데이터 없음) ──────────────────────────────────────────
 const dbRooms: Record<string, any> = {
@@ -477,7 +478,7 @@ async function loadImage(id: string): Promise<string | null> {
 }
 
 function saveDatabase() {
-  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks });
+  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic });
   // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
   if (useRedis) {
     redisSet(REDIS_DB_KEY, payload).catch(err =>
@@ -518,6 +519,10 @@ function applyLoadedData(data: any, source: string) {
   if (Array.isArray(data.dbBooks)) {
     dbBooks.length = 0;
     dbBooks.push(...data.dbBooks);
+  }
+  if (Array.isArray(data.dbMusic)) {
+    dbMusic.length = 0;
+    dbMusic.push(...data.dbMusic);
   }
   console.log(`Database loaded successfully from ${source}.`);
   return true;
@@ -1796,6 +1801,108 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // 맛집 좋아요(토글)
+  app.post('/api/restaurants/like', (req: AuthRequest, res: Response) => {
+    const { id } = req.body;
+    const userId = req.user?.userId || 'user-minsu';
+    const item = dbRestaurants.find(r => r.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (!Array.isArray(item.likes)) item.likes = [];
+    const i = item.likes.indexOf(userId);
+    if (i === -1) item.likes.push(userId); else item.likes.splice(i, 1);
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  // 책 후기 댓글
+  app.post('/api/books/review', (req: AuthRequest, res: Response) => {
+    const { id, text, authorName } = req.body;
+    const item = dbBooks.find(b => b.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+    if (!Array.isArray(item.reviews)) item.reviews = [];
+    item.reviews.push({
+      id: `rev-${Date.now()}`,
+      text: String(text).trim(),
+      authorId: req.user?.userId || 'user-minsu',
+      authorName: authorName || '익명',
+      timestamp: new Date().toISOString(),
+    });
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  // ===== 음악 (모든 사용자 공유) =====
+  app.get('/api/music', (_req, res) => { res.json(dbMusic); });
+
+  app.post('/api/music', (req: AuthRequest, res: Response) => {
+    const { title, url, creatorName } = req.body;
+    if (!url || !url.trim()) return res.status(400).json({ error: 'url required' });
+    const item = {
+      id: `music-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      title: (title && title.trim()) || '내 음악',
+      url: String(url).trim(),
+      creatorId: req.user?.userId || 'user-minsu',
+      creatorName: creatorName || '익명',
+      likes: [] as string[],
+      reviews: [] as any[],
+      timestamp: new Date().toISOString(),
+    };
+    dbMusic.unshift(item);
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/music/update', (req: AuthRequest, res: Response) => {
+    const { id, title, url } = req.body;
+    const item = dbMusic.find(m => m.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (item.creatorId !== (req.user?.userId || 'user-minsu')) return res.status(403).json({ error: 'not owner' });
+    if (title && title.trim()) item.title = String(title).trim();
+    if (url && url.trim()) item.url = String(url).trim();
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/music/delete', (req: AuthRequest, res: Response) => {
+    const { id } = req.body;
+    const idx = dbMusic.findIndex(m => m.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'not found' });
+    if (dbMusic[idx].creatorId !== (req.user?.userId || 'user-minsu')) return res.status(403).json({ error: 'not owner' });
+    dbMusic.splice(idx, 1);
+    saveDatabaseDebounced();
+    res.json({ success: true });
+  });
+
+  app.post('/api/music/like', (req: AuthRequest, res: Response) => {
+    const { id } = req.body;
+    const userId = req.user?.userId || 'user-minsu';
+    const item = dbMusic.find(m => m.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (!Array.isArray(item.likes)) item.likes = [];
+    const i = item.likes.indexOf(userId);
+    if (i === -1) item.likes.push(userId); else item.likes.splice(i, 1);
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
+  app.post('/api/music/review', (req: AuthRequest, res: Response) => {
+    const { id, text, authorName } = req.body;
+    const item = dbMusic.find(m => m.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+    if (!Array.isArray(item.reviews)) item.reviews = [];
+    item.reviews.push({
+      id: `rev-${Date.now()}`,
+      text: String(text).trim(),
+      authorId: req.user?.userId || 'user-minsu',
+      authorName: authorName || '익명',
+      timestamp: new Date().toISOString(),
+    });
+    saveDatabaseDebounced();
+    res.json(item);
+  });
+
   app.post('/api/chat', validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {
     const { senderId, senderName, senderAvatar, senderColor, text, locationShared, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
@@ -2300,6 +2407,41 @@ async function startServer() {
 
     saveDatabaseDebounced();
     res.json({ success: true, friend });
+  });
+
+  // 실제 기기 배터리 보고 — 모든 방에 반영하고, 20% 이하면 부족 알림 생성
+  app.post('/api/friends/battery', (req: AuthRequest, res: Response) => {
+    const { battery, charging } = req.body;
+    const userId = req.user?.userId;
+    const level = Math.round(Number(battery));
+    if (!userId || isNaN(level)) return res.status(400).json({ error: 'invalid' });
+
+    Object.keys(dbRooms).forEach(rId => {
+      const room = dbRooms[rId];
+      const friend = room.friends[userId];
+      if (!friend) return;
+      friend.battery = level;
+      friend.charging = !!charging;
+
+      if (level <= 20 && !charging && !friend.lowBatteryAlerted) {
+        friend.lowBatteryAlerted = true;
+        room.notifications.unshift({
+          id: `notif-bat-${Date.now()}-${userId}`,
+          type: 'system',
+          title: '🔋 배터리 부족 경고',
+          message: `${friend.name} 님의 배터리가 ${level}%입니다. 충전이 필요합니다!`,
+          timestamp: new Date().toISOString(),
+          read: false,
+        });
+        if (rId === 'room-friends') {
+          broadcastPushNotification('🔋 배터리 부족', `${friend.name} 님의 배터리가 ${level}%입니다.`, { type: 'battery_low', friendId: userId, battery: level }).catch(() => {});
+        }
+      } else if (level > 25 || charging) {
+        friend.lowBatteryAlerted = false;
+      }
+    });
+    saveDatabaseDebounced();
+    res.json({ success: true });
   });
 
   app.post('/api/friends/heartRate', validateRequest(HeartRateSchema), (req: AuthRequest, res: Response) => {

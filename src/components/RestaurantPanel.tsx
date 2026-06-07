@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Utensils, Plus, Trash2, X, MapPin, Search, Loader2, MessageCircle, Send, Pencil } from 'lucide-react';
+import { Utensils, Plus, Trash2, X, MapPin, Search, Loader2, Pencil } from 'lucide-react';
+import ItemSocial from './ItemSocial';
 
 interface Review {
   id: string;
@@ -44,8 +45,6 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [confirmed, setConfirmed] = useState<PlaceResult | null>(null);
   const [searching, setSearching] = useState(false);
-  const [openReviewId, setOpenReviewId] = useState<string | null>(null);
-  const [reviewText, setReviewText] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = () => {
@@ -117,13 +116,6 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
   const handleDelete = async (id: string) => {
     if (!window.confirm('이 맛집을 삭제하시겠습니까?')) return;
     await authFetch('/api/restaurants/delete', { method: 'POST', body: JSON.stringify({ id }) });
-    load();
-  };
-
-  const handleAddReview = async (id: string) => {
-    if (!reviewText.trim()) return;
-    await authFetch('/api/restaurants/review', { method: 'POST', body: JSON.stringify({ id, text: reviewText.trim(), authorName: myName }) });
-    setReviewText('');
     load();
   };
 
@@ -206,10 +198,6 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
                   <MapPin className="w-3.5 h-3.5" /> 위치 미등록
                 </span>
               )}
-              <button type="button" onClick={() => setOpenReviewId(openReviewId === r.id ? null : r.id)}
-                className="flex items-center gap-1 text-[11px] font-bold text-gray-500 hover:text-gray-700">
-                <MessageCircle className="w-3.5 h-3.5" /> 후기 {r.reviews?.length || 0}
-              </button>
               {r.creatorId === activeProfileId && (
                 <div className="ml-auto flex items-center gap-2">
                   <button type="button" onClick={() => startEdit(r)} className="text-gray-300 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
@@ -218,22 +206,7 @@ export default function RestaurantPanel({ authFetch, activeProfileId, myName, on
               )}
             </div>
 
-            {openReviewId === r.id && (
-              <div className="pt-2 border-t border-gray-50 space-y-2">
-                {(r.reviews || []).map(rv => (
-                  <div key={rv.id} className="text-[11px]">
-                    <span className="font-bold text-gray-700">{rv.authorName}</span>
-                    <span className="text-gray-600"> · {rv.text}</span>
-                  </div>
-                ))}
-                <div className="flex items-center gap-1.5">
-                  <input type="text" value={reviewText} onChange={e => setReviewText(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleAddReview(r.id)}
-                    placeholder="후기 댓글 달기..." className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-rose-400" />
-                  <button type="button" onClick={() => handleAddReview(r.id)} className="w-7 h-7 rounded-lg bg-rose-500 text-white flex items-center justify-center shrink-0"><Send className="w-3.5 h-3.5" /></button>
-                </div>
-              </div>
-            )}
+            <ItemSocial kind="restaurants" item={r} authFetch={authFetch} activeProfileId={activeProfileId} myName={myName} onChange={load} />
           </div>
         ))}
       </div>
