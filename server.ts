@@ -1989,9 +1989,10 @@ async function startServer() {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId] || dbRooms['room-friends'];
     // 위치를 숨겨야 하는 경우 좌표(lat/lng/route)를 제거 (멤버 목록에는 남음)
-    //  - 로그아웃 / 위치공유 OFF / 아직 실제 위치를 한 번도 공유 안 함(located 아님: 가짜 홍대좌표 방지)
+    //  - 위치공유 OFF(프라이버시) / 아직 실제 위치를 한 번도 공유 안 함(located 아님: 가짜 홍대좌표 방지)
+    //  ※ 로그아웃/앱종료(offline)는 숨기지 않음 → 마지막 위치를 검정 테두리로 계속 표시
     const list = Object.values(room.friends).map((f: any) => {
-      const locationHidden = f.loggedOut === true || f.shareLocation === false || !f.located;
+      const locationHidden = f.shareLocation === false || !f.located;
       if (locationHidden) {
         return { ...f, lat: null, lng: null, route: [], locationHidden: true };
       }

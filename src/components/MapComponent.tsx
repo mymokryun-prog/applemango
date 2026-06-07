@@ -52,10 +52,10 @@ const getFruitColor = (fruitEmoji: string): string => {
 // ─── 마커 HTML ───────────────────────────────────────────────────────────────
 function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
   const isOffline = friend.isOnline === false;
-  // 로그아웃(오프라인) 친구는 마지막 위치에 고정되고 이모티콘 배경을 검정색으로 표시
-  const markerBg = isOffline ? '#111827' : friend.color;
+  // 로그아웃/앱종료(오프라인) 친구는 마지막 위치에 고정 표시 — 어둡게 + 굵은 검정 테두리
+  const markerBg = isOffline ? '#4B5563' : friend.color;
   const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
-  const border = isMe ? 'border:2px dashed #EAB308' : 'border:2px solid #111';
+  const border = isMe ? 'border:2px dashed #EAB308' : (isOffline ? 'border:3px solid #000' : 'border:2px solid #111');
   const hrBadge = friend.heartRate
     ? `<div style="position:absolute;top:-4px;left:-10px;background:#EF4444;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">♥${friend.heartRate}</div>`
     : '';

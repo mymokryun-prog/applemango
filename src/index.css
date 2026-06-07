@@ -6,6 +6,13 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* 높이 잠금 — 모바일에서 body가 통째로 스크롤되지 않고 앱 내부 영역만 스크롤되게 */
+html, body { height: 100%; margin: 0; }
+#root { height: 100%; }
+@media (max-width: 767px) {
+  html, body { overflow: hidden; overscroll-behavior: none; }
+}
+
 /* 스크롤바 숨김 (가로 슬라이드 탭 등) */
 .scrollbar-none {
   -ms-overflow-style: none;

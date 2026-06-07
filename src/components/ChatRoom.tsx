@@ -46,7 +46,9 @@ export default function ChatRoom({
   ownerId = '',
   onCreateAppointment
 }: ChatRoomProps) {
-  const iAmOwner = !!ownerId && ownerId === activeProfileId;
+  const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
+  // 방장(커스텀방) 또는 기본 시스템방에서는 멤버를 내보낼 수 있음
+  const iAmOwner = isSystemRoom || (!!ownerId && ownerId === activeProfileId);
   const [inputText, setInputText] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
   
