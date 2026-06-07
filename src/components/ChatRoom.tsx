@@ -106,15 +106,6 @@ export default function ChatRoom({
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Find active profile
-  const activeProfile = friends.find(f => f.id === activeProfileId) || {
-    id: 'user-minsu',
-    name: '나 (민수)',
-    avatar: '🟢',
-    color: '#3B82F6',
-    lat: 37.5565,
-    lng: 126.9242
-  };
 
   // 실시간 장소 검색 디바운스
   useEffect(() => {
@@ -274,14 +265,6 @@ export default function ChatRoom({
     }
   };
 
-  const handleShareLocation = () => {
-    onSendMessage(`📍 내 실시간 안심 시그널 좌표를 전송합니다!`, {
-      lat: activeProfile.lat,
-      lng: activeProfile.lng,
-      placeName: `${activeProfile.name}의 현재 실시간 위치`
-    });
-  };
-
   const handleQuickMention = () => {
     setInputText(prev => prev + '@애망봇 ');
   };
@@ -339,10 +322,11 @@ export default function ChatRoom({
 
       {/* 초대된 멤버 가로 스크롤 리스트 (전체 초대된 사람 리스트) */}
       <div className="bg-[#FFFDF9] border-b-2 border-black px-3 py-2 flex items-center gap-2 select-none overflow-x-auto whitespace-nowrap shrink-0 scrollbar-none shadow-sm">
-        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+        <button type="button" onClick={() => setShowMembersModal(true)}
+          className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1 hover:text-rose-500">
           <Users className="w-3.5 h-3.5 text-rose-500" />
-          <span>초대 멤버 ({friends.length}):</span>
-        </span>
+          <span>멤버 관리 ({friends.length}) ▸</span>
+        </button>
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
           {friends.map((friend) => {
             const isOwner = friend.id === ownerId || (friend.id === 'user-minsu' && !ownerId);
@@ -357,9 +341,9 @@ export default function ChatRoom({
                 }`}
                 title={`${friend.name} - ${friend.statusMsg || ''}`}
               >
-                <div 
+                <div
                   style={{ backgroundColor: friend.color || '#3B82F6' }}
-                  className="w-5 h-5 rounded-full border border-black flex items-center justify-center text-xs shrink-0 font-black text-white"
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 font-black text-white"
                 >
                   {friend.avatar}
                 </div>
@@ -469,13 +453,19 @@ export default function ChatRoom({
               key={msg.id} 
               className={`flex gap-2.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}
             >
-              {/* Sender Avatar */}
+              {/* Sender Avatar — 클릭하면 그 사람의 위치를 지도에서 확인 */}
               {!isMe && (
-                <div 
-                  className="w-8.5 h-8.5 rounded-full flex items-center justify-center text-base border-2 border-black bg-white shrink-0 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] font-sans"
+                <button
+                  type="button"
+                  onClick={() => {
+                    const f = friends.find(fr => fr.id === msg.senderId);
+                    if (f && typeof f.lat === 'number' && typeof f.lng === 'number') onFocusLocation(f.lat, f.lng);
+                  }}
+                  title={`${msg.senderName} 위치 보기`}
+                  className="w-8.5 h-8.5 rounded-full flex items-center justify-center text-base bg-white shrink-0 font-sans cursor-pointer active:scale-95 transition"
                 >
                   {msg.senderAvatar}
-                </div>
+                </button>
               )}
 
               {/* Message Payload */}
@@ -487,12 +477,12 @@ export default function ChatRoom({
                   </span>
                 )}
 
-                {/* Message Bubble with Neo-brutalist borders and shadow */}
-                <div 
-                  className={`px-3.5 py-2.5 text-xs mt-1 leading-relaxed border-2 border-black font-sans ${
-                    isMe 
-                      ? 'bg-amber-300 text-slate-950 font-black rounded-2xl rounded-tr-none shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,1)]' 
-                      : 'bg-white text-slate-950 font-bold rounded-2xl rounded-tl-none shadow-[2.5px_2.5px_0px_0px_rgba(0,0,0,0.06)]'
+                {/* Message Bubble — 테두리 없이 부드러운 그림자만 */}
+                <div
+                  className={`px-3.5 py-2.5 text-xs mt-1 leading-relaxed font-sans shadow-sm ${
+                    isMe
+                      ? 'bg-amber-300 text-slate-950 font-bold rounded-2xl rounded-tr-none'
+                      : 'bg-white text-slate-950 font-medium rounded-2xl rounded-tl-none'
                   }`}
                 >
                   <p className="whitespace-pre-line">{msg.text}</p>
@@ -552,30 +542,6 @@ export default function ChatRoom({
         <div ref={chatBottomRef} />
       </div>
 
-      {/* Quick Option Rails */}
-      <div className="px-3 py-2 bg-[#FAF5FF] border-t-2 border-black flex items-center gap-2 select-none shrink-0 overflow-x-auto whitespace-nowrap">
-        {/* Mention AI */}
-        <button
-          type="button"
-          onClick={handleQuickMention}
-          className="flex items-center gap-1.5 bg-rose-500 text-white border border-black rounded-lg px-2.5 py-1 text-[9.5px] font-black hover:bg-rose-600 transition active:translate-y-0.5 shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]"
-        >
-          <span>🤖 @애망봇 소환</span>
-        </button>
-
-        {/* Share Location Shortcut */}
-        {!isDisbanded && (
-          <button
-            type="button"
-            onClick={handleShareLocation}
-            className="flex items-center gap-1 bg-white text-black border border-black rounded-lg px-2.5 py-1 text-[9.5px] font-black hover:bg-rose-50/50 transition active:translate-y-0.5 shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)]"
-          >
-            <MapPin className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
-            <span>내 위치 좌표 연동</span>
-          </button>
-        )}
-      </div>
-
       {/* Main Send Form */}
       <form onSubmit={handleSend} className="p-3 bg-white border-t-2 border-black flex items-center gap-2 shrink-0 font-sans">
         {/* 이미지 첨부 */}
@@ -598,6 +564,17 @@ export default function ChatRoom({
               {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin text-rose-500" /> : <ImageIcon className="w-4 h-4 text-rose-500" />}
             </button>
           </>
+        )}
+        {/* @애망봇 소환 — 사진 버튼 오른쪽 */}
+        {!isDisbanded && (
+          <button
+            type="button"
+            onClick={handleQuickMention}
+            title="@애망봇 소환"
+            className="w-8 h-8 rounded-lg bg-rose-500 text-white border-2 border-black flex items-center justify-center shrink-0 shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] hover:bg-rose-600 transition active:translate-y-0.5 text-sm"
+          >
+            🤖
+          </button>
         )}
         <input
           type="text"
@@ -717,16 +694,33 @@ export default function ChatRoom({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
-                      <span className="text-[9px] font-bold text-gray-500">
-                        {isOnline ? '온라인' : '오프라인'}
-                      </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
+                        <span className="text-[9px] font-bold text-gray-500">{isOnline ? '온라인' : '오프라인'}</span>
+                      </div>
+                      {iAmOwner && friend.id !== activeProfileId && onRemoveFriend && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`${friend.name.replace(' (대기)', '').replace(' (합류)', '')} 님을 이 그룹방에서 내보내시겠습니까?`)) {
+                              onRemoveFriend(friend.id, friend.name);
+                              setShowMembersModal(false);
+                            }
+                          }}
+                          className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition"
+                        >
+                          내보내기
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
+            {!iAmOwner && (
+              <div className="px-4 py-2 text-[10px] text-gray-400 text-center border-t border-gray-100 shrink-0">멤버 내보내기는 방장만 할 수 있습니다.</div>
+            )}
           </div>
         </div>
       )}

@@ -1271,40 +1271,6 @@ export default function App() {
     }
   };
 
-  // 실제 기기 배터리 보고 — navigator.getBattery() 지원 시 실제 잔량을 서버에 전송
-  useEffect(() => {
-    if (showOnboarding || !activeProfileId) return;
-    const nav = navigator as any;
-    if (!nav.getBattery) return; // 미지원 브라우저(iOS Safari 등)는 생략
-    let battery: any = null;
-    let interval: ReturnType<typeof setInterval> | null = null;
-
-    const report = () => {
-      if (!battery) return;
-      authFetch('/api/friends/battery', {
-        method: 'POST',
-        body: JSON.stringify({ battery: Math.round(battery.level * 100), charging: battery.charging })
-      }).catch(() => {});
-    };
-
-    nav.getBattery().then((b: any) => {
-      battery = b;
-      report();
-      b.addEventListener('levelchange', report);
-      b.addEventListener('chargingchange', report);
-      interval = setInterval(report, 5 * 60 * 1000); // 5분마다 갱신
-    }).catch(() => {});
-
-    return () => {
-      if (interval) clearInterval(interval);
-      if (battery) {
-        battery.removeEventListener('levelchange', report);
-        battery.removeEventListener('chargingchange', report);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProfileId, showOnboarding]);
-
   // 접속 시: 서버에 현재 위치 공유 설정을 동기화 (다른 기기에서도 일관)
   useEffect(() => {
     if (showOnboarding || !activeProfileId) return;
@@ -2046,7 +2012,7 @@ export default function App() {
       </div>
 
       {/* 2. Main Selected Dynamic Content Area */}
-      <div className="flex-1 relative overflow-hidden flex flex-col bg-amber-50/20">
+      <div className="flex-1 min-h-0 relative overflow-hidden flex flex-col bg-amber-50/20">
         {activeTab === 'rooms' && (
           <GroupRoomsPanel
             rooms={rooms}

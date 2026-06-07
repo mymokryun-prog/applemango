@@ -95,6 +95,33 @@ function viewMarkerHtml(): string {
   </div>`;
 }
 
+function realDotHtml(): string {
+  return `<div style="width:10px;height:10px;background:#111827;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #111"></div>`;
+}
+
+// 같은 위치(겹침) 마커를 옆으로 분산 배치 — 실제 위치는 dot, 이모티콘은 offset 위치
+function computeSpread<T extends { lat: number; lng: number }>(items: T[]) {
+  const groups: Record<string, T[]> = {};
+  items.forEach(it => {
+    const key = `${it.lat.toFixed(4)},${it.lng.toFixed(4)}`;
+    (groups[key] = groups[key] || []).push(it);
+  });
+  const out: Array<T & { dLat: number; dLng: number; grouped: boolean; gLat: number; gLng: number }> = [];
+  Object.values(groups).forEach(group => {
+    const n = group.length;
+    group.forEach((it, i) => {
+      if (n === 1) {
+        out.push({ ...it, dLat: it.lat, dLng: it.lng, grouped: false, gLat: it.lat, gLng: it.lng });
+      } else {
+        const step = 0.00020;
+        const dLng = it.lng + (i - (n - 1) / 2) * step;
+        out.push({ ...it, dLat: it.lat + 0.00014, dLng, grouped: true, gLat: it.lat, gLng: it.lng });
+      }
+    });
+  });
+  return out;
+}
+
 function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string }): string {
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
     <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1)">
@@ -429,15 +456,30 @@ export default function MapComponent({
       }
 
       // 3-5. 친구 마커 그리기
-      friends.forEach(f => {
-        if (f.id === activeProfileId && myGpsCoords) return; // 내 실시간 GPS 마커와 중복 방지
-        if (typeof f.lat !== 'number' || typeof f.lng !== 'number' || isNaN(f.lat) || isNaN(f.lng)) return;
-
+      const drawableFriends = friends.filter(f =>
+        !(f.id === activeProfileId && myGpsCoords) &&
+        typeof f.lat === 'number' && typeof f.lng === 'number' && !isNaN(f.lat) && !isNaN(f.lng)
+      );
+      const spread = computeSpread(drawableFriends);
+      const dotDrawn = new Set<string>();
+      spread.forEach(item => {
+        if (item.grouped) {
+          const key = `${item.gLat.toFixed(4)},${item.gLng.toFixed(4)}`;
+          if (!dotDrawn.has(key)) {
+            dotDrawn.add(key);
+            const dot = new window.kakao.maps.CustomOverlay({
+              position: new window.kakao.maps.LatLng(item.gLat, item.gLng),
+              content: realDotHtml(), yAnchor: 0.5, xAnchor: 0.5, zIndex: 5,
+            });
+            dot.setMap(map);
+            kakaoOverlaysRef.current.push(dot);
+          }
+        }
         const overlay = new window.kakao.maps.CustomOverlay({
-          position: new window.kakao.maps.LatLng(f.lat, f.lng),
-          content: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
+          position: new window.kakao.maps.LatLng(item.dLat, item.dLng),
+          content: friendMarkerHtml(item as Friend, selectedFriendId === item.id, item.id === activeProfileId),
           yAnchor: 1.0,
-          zIndex: selectedFriendId === f.id ? 100 : 10
+          zIndex: selectedFriendId === item.id ? 100 : 10
         });
         overlay.setMap(map);
         kakaoOverlaysRef.current.push(overlay);
@@ -559,19 +601,28 @@ export default function MapComponent({
         mg.addLayer(L.marker(viewCoordsL, { icon: L.divIcon({ className: '', html: viewMarkerHtml(), iconSize: [34, 44], iconAnchor: [17, 40] }) }));
       }
 
-      // 친구 마커
-      friends.forEach(f => {
-        if (f.id === activeProfileId && myGpsCoords) return;
-        if (typeof f.lat !== 'number' || typeof f.lng !== 'number' || isNaN(f.lat) || isNaN(f.lng)) return;
-
+      // 친구 마커 — 겹치면 옆으로 분산(실제 위치는 점)
+      const drawableFriendsL = friends.filter(f =>
+        !(f.id === activeProfileId && myGpsCoords) &&
+        typeof f.lat === 'number' && typeof f.lng === 'number' && !isNaN(f.lat) && !isNaN(f.lng)
+      );
+      const spreadL = computeSpread(drawableFriendsL);
+      const dotDrawnL = new Set<string>();
+      spreadL.forEach(item => {
+        if (item.grouped) {
+          const key = `${item.gLat.toFixed(4)},${item.gLng.toFixed(4)}`;
+          if (!dotDrawnL.has(key)) {
+            dotDrawnL.add(key);
+            mg.addLayer(L.marker([item.gLat, item.gLng], { icon: L.divIcon({ className: '', html: realDotHtml(), iconSize: [10, 10], iconAnchor: [5, 5] }) }));
+          }
+        }
         const icon = L.divIcon({
           className: '',
-          html: friendMarkerHtml(f, selectedFriendId === f.id, f.id === activeProfileId),
+          html: friendMarkerHtml(item as Friend, selectedFriendId === item.id, item.id === activeProfileId),
           iconSize: [36, 48],
           iconAnchor: [18, 42],
         });
-        const m = L.marker([f.lat, f.lng], { icon, zIndexOffset: selectedFriendId === f.id ? 1000 : 0 });
-        mg.addLayer(m);
+        mg.addLayer(L.marker([item.dLat, item.dLng], { icon, zIndexOffset: selectedFriendId === item.id ? 1000 : 0 }));
       });
     }
   }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, mapViewCoords, searchFocusCoords, myGpsCoords, isKakaoReady, useFallbackMap]);

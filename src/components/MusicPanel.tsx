@@ -82,7 +82,9 @@ export default function MusicPanel({ authFetch, activeProfileId, myName }: Props
             <input type="text" placeholder="음악 링크(URL) 붙여넣기" value={url} onChange={e => setUrl(e.target.value)}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-rose-400" />
             {error && <p className="text-[11px] text-red-500 font-semibold">{error}</p>}
-            <p className="text-[10px] text-gray-400 leading-relaxed">💡 ▶ 버튼을 누르면 링크가 열리며 음악이 재생됩니다.</p>
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              💡 구글 드라이브 mp3/mp4 파일의 공유 링크를 붙여넣으세요. (드라이브에서 <b>"링크가 있는 모든 사용자"</b>로 공유) ▶ 누르면 링크가 열려 누구나 들을 수 있습니다.
+            </p>
             <button type="button" onClick={handleSubmit} className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-2.5 rounded-xl text-sm transition">
               {editingId ? '수정 완료' : '추가하기'}
             </button>

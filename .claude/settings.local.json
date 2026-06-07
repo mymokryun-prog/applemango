@@ -26,7 +26,16 @@
       "Bash(git commit -m '데모 데이터 전체 제거 + 실제 유저 ID 시스템 *)",
       "Bash(git commit -m '서비스워커 캐시 v3으로 강제 갱신 + 네트워크 우선 전략 *)",
       "Bash(git commit -m '카카오맵 → Leaflet+VWorld/CartoDB 전환 \\(API 키 불필요\\) *)",
-      "Bash(git commit -m 'leaflet 패키지 dependencies 추가 \\(빌드 오류 수정\\) *)"
+      "Bash(git commit -m 'leaflet 패키지 dependencies 추가 \\(빌드 오류 수정\\) *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(npx jest *)",
+      "Bash(npx vite *)",
+      "Bash(echo \"BUILD EXIT: $?\")",
+      "Bash(npx esbuild *)",
+      "Bash(echo \"SERVER EXIT: $?\")",
+      "Bash(git commit *)",
+      "Bash(grep -i \"aemang_db\\\\|\\\\.json$\")",
+      "Bash(grep -n \"roomNavRef\\\\|flex-1 overflow\\\\|flex-1 relative\\\\|<main\\\\|activeTab === 'rooms' &&\\\\|{/\\\\* 콘텐츠\\\\|{/\\\\* Content\\\\|overflow-y-auto\\\\|flex-1 min-h\" src/App.tsx)"
     ]
   }
 }

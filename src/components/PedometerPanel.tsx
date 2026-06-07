@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Footprints, Calendar, TrendingUp, Trash2, Users } from 'lucide-react';
+import { Footprints, Calendar, TrendingUp, Users } from 'lucide-react';
 import { Friend } from '../types';
 
 interface PedometerPanelProps {
@@ -124,11 +124,6 @@ export default function PedometerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSteps]);
 
-  const handleReset = () => {
-    if (window.confirm('오늘의 걸음 기록을 초기화하시겠습니까?')) {
-      updateSteps(0);
-    }
-  };
 
   // 목표 변경
   const handleGoalChange = (newGoal: number) => {
@@ -236,15 +231,7 @@ export default function PedometerPanel({
             </div>
           </div>
 
-          {/* 실제 걸음수만 기록 — 수동 조작 버튼 제거. 오늘 기록 초기화만 제공 */}
-          <div className="w-full mt-5">
-            <button
-              onClick={handleReset}
-              className="w-full flex items-center justify-center gap-1 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-500 font-bold rounded-2xl text-xs transition border border-gray-100"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> 오늘 기록 초기화
-            </button>
-          </div>
+          {/* 실제 걸음수만 기록 — 수동 조작/초기화 버튼 없음 */}
 
           {/* 목표 설정 슬라이더 */}
           <div className="w-full mt-5 pt-4 border-t border-gray-50 space-y-2">

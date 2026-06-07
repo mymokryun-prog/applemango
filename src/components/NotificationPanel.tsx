@@ -106,7 +106,7 @@ export default function NotificationPanel({
                         {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                    <p className="text-[12px] text-gray-500 mt-0.5 leading-relaxed break-words">{notif.message}</p>
+                    <p className="text-[12px] text-gray-500 mt-0.5 leading-relaxed break-words line-clamp-2">{notif.message}</p>
                     
                     {/* 초대 수락 버튼 */}
                     {isRoomInvite && (

@@ -578,7 +578,9 @@ function cleanupOldData() {
       const before = room.notifications.length;
       room.notifications = room.notifications.filter((n: any) => {
         const t = new Date(n.timestamp).getTime();
-        return isNaN(t) || t >= cutoff;
+        if (!isNaN(t) && t < cutoff) return false;           // 30일 경과 제거
+        if ((n.title || '').includes('배터리')) return false; // 배터리 경고 알림 제거(기능 폐지)
+        return true;
       });
       if (room.notifications.length !== before) changed = true;
     }
@@ -732,6 +734,7 @@ function applyFriendLocationUpdate(
   friend.heading = heading;
   friend.isOnline = true;
   friend.loggedOut = false; // 다시 활동하면 로그아웃 숨김 해제
+  friend.located = true; // 실제 위치를 한 번이라도 공유함 → 지도에 표시
   friend.updatedAt = new Date().toISOString();
   if (statusMsg !== undefined) friend.statusMsg = statusMsg;
 
@@ -827,30 +830,7 @@ function simulateMovement() {
         }
       }
       
-      // Slightly drain battery
-      if (Math.random() > 0.7) {
-        friend.battery = Math.max(5, friend.battery - 1);
-      }
-
-      // 배터리 부족 경고 알림 (20% 이하 최초 1회)
-      if (friend.battery <= 20 && !friend.lowBatteryAlerted) {
-        friend.lowBatteryAlerted = true;
-        room.notifications.unshift({
-          id: `notif-bat-${Date.now()}-${id}`,
-          type: 'system',
-          title: '🔋 배터리 부족 경고',
-          message: `${friend.name} 님의 배터리가 ${friend.battery}%입니다. 충전이 필요합니다!`,
-          timestamp: new Date().toISOString(),
-          read: false,
-        });
-        broadcastPushNotification(
-          '🔋 배터리 부족',
-          `${friend.name} 님의 배터리가 ${friend.battery}%입니다.`,
-          { type: 'battery_low', friendId: id, battery: friend.battery }
-        ).catch(() => {});
-      } else if (friend.battery > 25) {
-        friend.lowBatteryAlerted = false;
-      }
+      // (배터리 부족 경고 알림 기능 제거됨 — 오작동으로 비활성화)
 
       // 안심 구역(지오펜스) 이탈 감지
       const fence = geofences[id];
@@ -2008,9 +1988,10 @@ async function startServer() {
   app.get('/api/friends', (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId] || dbRooms['room-friends'];
-    // 로그아웃했거나 위치 공유를 끈 사용자는 위치정보(lat/lng/route)를 숨김 (멤버 목록에는 남음)
+    // 위치를 숨겨야 하는 경우 좌표(lat/lng/route)를 제거 (멤버 목록에는 남음)
+    //  - 로그아웃 / 위치공유 OFF / 아직 실제 위치를 한 번도 공유 안 함(located 아님: 가짜 홍대좌표 방지)
     const list = Object.values(room.friends).map((f: any) => {
-      const locationHidden = f.loggedOut === true || f.shareLocation === false;
+      const locationHidden = f.loggedOut === true || f.shareLocation === false || !f.located;
       if (locationHidden) {
         return { ...f, lat: null, lng: null, route: [], locationHidden: true };
       }
@@ -2435,36 +2416,15 @@ async function startServer() {
     res.json({ success: true, friend });
   });
 
-  // 실제 기기 배터리 보고 — 모든 방에 반영하고, 20% 이하면 부족 알림 생성
+  // 실제 기기 배터리 보고 — 표시용으로만 반영(경고 알림 없음)
   app.post('/api/friends/battery', (req: AuthRequest, res: Response) => {
     const { battery, charging } = req.body;
     const userId = req.user?.userId;
     const level = Math.round(Number(battery));
     if (!userId || isNaN(level)) return res.status(400).json({ error: 'invalid' });
-
     Object.keys(dbRooms).forEach(rId => {
-      const room = dbRooms[rId];
-      const friend = room.friends[userId];
-      if (!friend) return;
-      friend.battery = level;
-      friend.charging = !!charging;
-
-      if (level <= 20 && !charging && !friend.lowBatteryAlerted) {
-        friend.lowBatteryAlerted = true;
-        room.notifications.unshift({
-          id: `notif-bat-${Date.now()}-${userId}`,
-          type: 'system',
-          title: '🔋 배터리 부족 경고',
-          message: `${friend.name} 님의 배터리가 ${level}%입니다. 충전이 필요합니다!`,
-          timestamp: new Date().toISOString(),
-          read: false,
-        });
-        if (rId === 'room-friends') {
-          broadcastPushNotification('🔋 배터리 부족', `${friend.name} 님의 배터리가 ${level}%입니다.`, { type: 'battery_low', friendId: userId, battery: level }).catch(() => {});
-        }
-      } else if (level > 25 || charging) {
-        friend.lowBatteryAlerted = false;
-      }
+      const friend = dbRooms[rId].friends[userId];
+      if (friend) { friend.battery = level; friend.charging = !!charging; }
     });
     saveDatabaseDebounced();
     res.json({ success: true });
