@@ -608,6 +608,48 @@ function migrateRemoveSinjeonggang() {
   saveDatabase();
 }
 
+// 사용자별 개인방 보장 (시작 방 + 이동경로 기록용)
+function ensurePersonalRoom(userId: string) {
+  if (!userId || !userId.startsWith('user-')) return;
+  const roomId = `room-personal-${userId}`;
+  const profile = dbUserProfiles[userId] || findUserProfile(userId);
+  if (!dbRooms[roomId]) {
+    dbRooms[roomId] = {
+      id: roomId,
+      name: '나의 개인방',
+      emoji: '🧍',
+      type: 'personal',
+      trackingStyle: 'continuous',
+      isDisbanded: false,
+      ownerId: userId,
+      messages: welcomeMsg('personal', '🧍 나만의 개인방입니다. 지도에서 내가 이동한 경로가 옅게 기록됩니다.'),
+      friends: {},
+      appointments: [],
+      notifications: [],
+    };
+  }
+  if (!dbRooms[roomId].friends[userId]) {
+    dbRooms[roomId].friends[userId] = {
+      ...(profile || { id: userId, name: '나', avatar: '🍎', color: '#EF4444' }),
+      id: userId,
+      route: [],
+      routeIndex: 0,
+    };
+  }
+}
+
+// 일회성: 모든 사용자 개인방 생성 + 공유 시스템방 멤버 비우기(더 이상 모두에게 노출 안 됨)
+function migratePersonalRooms() {
+  if (dbMeta.mig_personal_rooms_v1) return;
+  Object.keys(dbUserProfiles).forEach(uid => ensurePersonalRoom(uid));
+  ['room-friends', 'room-family', 'room-work', 'room-care'].forEach(rid => {
+    if (dbRooms[rid]) dbRooms[rid].friends = {};
+  });
+  dbMeta.mig_personal_rooms_v1 = true;
+  console.log('Migration: personal rooms ensured, shared system rooms emptied.');
+  saveDatabase();
+}
+
 loadDatabase();
 // 하루에 한 번 오래된 데이터 정리 (최초 정리는 Redis 로드 후 startServer에서 수행)
 setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
@@ -742,7 +784,9 @@ function applyFriendLocationUpdate(
   const lastCoord = friend.route[friend.route.length - 1];
   if (!lastCoord || lastCoord[0] !== lat || lastCoord[1] !== lng) {
     friend.route.push([lat, lng]);
-    if (friend.route.length > 60) friend.route.shift();
+    // 개인방은 전체 이동경로 기록(상한 1000), 일반 방은 최근 60
+    const cap = room.type === 'personal' ? 1000 : 60;
+    while (friend.route.length > cap) friend.route.shift();
   }
   friend.routeIndex = Math.max(0, friend.route.length - 1);
 
@@ -877,6 +921,7 @@ async function startServer() {
   await loadDatabaseFromRedis();
   cleanupOldData();
   migrateRemoveSinjeonggang();
+  migratePersonalRooms();
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -1043,11 +1088,11 @@ async function startServer() {
       };
     }
 
+    // member 또는 owner인 방만 보임 (기본 시스템방을 모두에게 노출하지 않음 → 방 공유 문제 해결)
     const filteredRooms = Object.values(dbRooms).filter(r => {
-      const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(r.id);
       const isMember = r.friends && r.friends[userId] && !r.friends[userId].isPendingInvite;
       const isOwner = r.ownerId === userId;
-      return isSystemRoom || isMember || isOwner;
+      return isMember || isOwner;
     });
 
     const summary = filteredRooms.map(r => ({
@@ -1576,14 +1621,9 @@ async function startServer() {
       linkPendingInvitations(phone, userId, realName || '', alias || '', userAvatar, color);
     }
 
-    // 어떤 방에도 속하지 않았고 초대도 없는 '신규 본인 사용자'만 기본 단짝방을 홈으로 자동 추가
-    if (!isMemberAnywhere && !hasPendingInvite && dbRooms['room-friends'] && !dbRooms['room-friends'].friends[userId]) {
-      dbRooms['room-friends'].friends[userId] = {
-        ...dbUserProfiles[userId],
-        route: [],
-        routeIndex: 0
-      };
-    }
+    // 모든 사용자에게 본인 전용 개인방을 보장 (시작 방 + 이동경로 기록용)
+    ensurePersonalRoom(userId);
+    void isMemberAnywhere; void hasPendingInvite; // (시스템방 자동가입 폐지)
 
     const token = generateToken(userId);
     saveDatabaseDebounced();
@@ -2395,26 +2435,26 @@ async function startServer() {
 
   app.post('/api/friends/pedometer', validateRequest(PedometerSchema), (req: AuthRequest, res: Response) => {
     const { id, pedometerEnabled, stepsToday, roomId } = req.body;
-    const activeRoomId = roomId || 'room-friends';
-    const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
-    const friend = room.friends[id];
-
-    if (!friend) {
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (오늘 기준)
+    // 사용자 걸음수는 본인이 속한 모든 방에 동기화(친구들이 어디서든 볼 수 있게) + 날짜 기록
+    let updatedAny = false;
+    Object.keys(dbRooms).forEach(rId => {
+      const friend = dbRooms[rId].friends[id];
+      if (!friend) return;
+      updatedAny = true;
+      if (typeof pedometerEnabled === 'boolean') friend.pedometerEnabled = pedometerEnabled;
+      if (typeof stepsToday === 'number') {
+        friend.stepsToday = stepsToday;
+        friend.stepsTodayDate = today;
+      }
+      if (friend.pedometerEnabled && friend.stepsToday === undefined) friend.stepsToday = 0;
+    });
+    void roomId;
+    if (!updatedAny) {
       return res.status(404).json({ error: 'Friend not found' });
     }
-
-    if (typeof pedometerEnabled === 'boolean') {
-      friend.pedometerEnabled = pedometerEnabled;
-    }
-    if (typeof stepsToday === 'number') {
-      friend.stepsToday = stepsToday;
-    }
-    if (friend.pedometerEnabled && friend.stepsToday === undefined) {
-      friend.stepsToday = 0;
-    }
-
     saveDatabaseDebounced();
-    res.json({ success: true, friend });
+    res.json({ success: true });
   });
 
   // 실제 기기 배터리 보고 — 표시용으로만 반영(경고 알림 없음)

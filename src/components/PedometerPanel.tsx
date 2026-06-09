@@ -29,8 +29,10 @@ export default function PedometerPanel({
   friends = [],
   onSyncSteps,
 }: PedometerPanelProps) {
-  const historyKey = `aemang_pedometer_history_${phone || 'guest'}`;
-  const goalKey = `aemang_pedometer_goal_${phone || 'guest'}`;
+  // 전화번호 포맷(하이픈 등)이 달라도 같은 키를 쓰도록 숫자만 사용 → 데이터 유실 방지
+  const phoneDigits = (phone || '').replace(/\D/g, '') || 'guest';
+  const historyKey = `aemang_pedometer_history_${phoneDigits}`;
+  const goalKey = `aemang_pedometer_goal_${phoneDigits}`;
 
   const [stepsToday, setStepsToday] = useState<number>(0);
   const [stepGoal, setStepGoal] = useState<number>(10000);
@@ -66,30 +68,16 @@ export default function PedometerPanel({
       }
     }
 
-    // 오늘 날짜 기록이 있는지 확인
+    // 오늘 걸음수는 실측 영속 키(aemang_steps_today)를 우선 사용 → 원/그래프 일치
+    let todaySteps = 0;
+    try {
+      const raw = localStorage.getItem('aemang_steps_today');
+      if (raw) { const d = JSON.parse(raw); if (d && d.date === todayStr) todaySteps = Number(d.steps) || 0; }
+    } catch {}
     const todayRecord = historyList.find(r => r.date === todayStr);
-    if (todayRecord) {
-      setStepsToday(todayRecord.steps);
-    } else {
-      // 오늘 기록이 없으면 생성
-      setStepsToday(0);
-      // 더미데이터 채워주기 (사용자가 처음 볼 때 그래프가 보이도록)
-      if (historyList.length === 0) {
-        const tempHistory: StepRecord[] = [];
-        for (let i = 6; i > 0; i--) {
-          const prevDate = new Date();
-          prevDate.setDate(prevDate.getDate() - i);
-          const yyyy = prevDate.getFullYear();
-          const mm = String(prevDate.getMonth() + 1).padStart(2, '0');
-          const dd = String(prevDate.getDate()).padStart(2, '0');
-          // 3000~12000 걸음 사이 무작위 생성
-          const randomSteps = Math.floor(Math.random() * 9000) + 3000;
-          tempHistory.push({ date: `${yyyy}-${mm}-${dd}`, steps: randomSteps });
-        }
-        historyList = tempHistory;
-        localStorage.setItem(historyKey, JSON.stringify(historyList));
-      }
-    }
+    if (todayRecord && todayRecord.steps > todaySteps) todaySteps = todayRecord.steps;
+    setStepsToday(todaySteps);
+    // (가짜 더미 과거 데이터 생성 제거 — 실제 기록만 표시)
     setHistory(historyList);
   }, [phone]);
 
@@ -294,14 +282,20 @@ export default function PedometerPanel({
             <span>친구 걸음수 (오늘)</span>
           </h3>
           {(() => {
+            const todayStr = getTodayString();
             const ranked = [...friends]
-              .map(f => ({
-                id: f.id,
-                name: (f.name || '').replace(' (대기)', '').replace(' (합류)', ''),
-                avatar: f.avatar,
-                steps: f.id === activeProfileId ? Math.max(stepsToday, (f as any).stepsToday || 0) : ((f as any).stepsToday || 0),
-                isMe: f.id === activeProfileId,
-              }))
+              .map(f => {
+                // 오늘 기록한 걸음만 인정(어제 잔상 제거). 내 값은 실시간 기록 우선.
+                const fAny = f as any;
+                const friendStepsToday = fAny.stepsTodayDate === todayStr ? (fAny.stepsToday || 0) : 0;
+                return {
+                  id: f.id,
+                  name: (f.name || '').replace(' (대기)', '').replace(' (합류)', ''),
+                  avatar: f.avatar,
+                  steps: f.id === activeProfileId ? Math.max(stepsToday, friendStepsToday) : friendStepsToday,
+                  isMe: f.id === activeProfileId,
+                };
+              })
               .sort((a, b) => b.steps - a.steps);
             if (ranked.length === 0) {
               return <p className="text-[11px] text-gray-400 text-center py-2">같은 방 친구가 없습니다.</p>;

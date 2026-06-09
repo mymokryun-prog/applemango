@@ -117,6 +117,7 @@ export default function App() {
   const [deleteRoomConfirmKey, setDeleteRoomConfirmKey] = useState('');
   const [isRoomEditMode, setIsRoomEditMode] = useState(false); // 방 편집 모드
   const roomNavRef = useRef<HTMLDivElement | null>(null);
+  const sheetTouchStartY = useRef<number | null>(null); // 바텀시트 아래로 밀어 닫기
 
   // Precision remote heart rate check simulator states ("할머니 심박수 체크")
   const [measuringTarget, setMeasuringTarget] = useState<Friend | null>(null);
@@ -313,8 +314,13 @@ export default function App() {
     return fetch(url, { ...options, headers });
   }, [activeProfileId]);
 
+  // 비핵심(실시간/빈번) 요청 — 오프라인 시 큐에 쌓지 않고 버림 (만보기/위치/배터리 등)
+  const NON_QUEUEABLE = ['/api/friends/pedometer', '/api/friends/move', '/api/friends/battery', '/api/friends/heartRate'];
+
   const queueOrSend = async (endpoint: string, body: any, showQueuedNotification = true) => {
+    const queueable = !NON_QUEUEABLE.includes(endpoint);
     if (!isOnline) {
+      if (!queueable) return; // 비핵심 요청은 오프라인이면 그냥 건너뜀
       await queueOfflineAction(endpoint, body);
       await registerBackgroundSync();
       setOutboxCount(await getOutboxCount());
@@ -336,6 +342,7 @@ export default function App() {
         throw new Error('Request failed');
       }
     } catch (err) {
+      if (!queueable) return; // 비핵심 요청 실패는 큐에 쌓지 않음
       console.warn('Direct send failed, queuing for later sync:', err);
       await queueOfflineAction(endpoint, body);
       await registerBackgroundSync();
@@ -520,6 +527,13 @@ export default function App() {
       if (roomsRes.ok) {
         const rData = await roomsRes.json();
         setRooms(rData);
+        // 현재 방이 내 방 목록에 없으면(시스템방 등) 개인방(없으면 첫 방)으로 전환
+        if (Array.isArray(rData) && rData.length > 0 && !rData.some((r: any) => r.id === targetRoomId)) {
+          const nextId = (rData.find((r: any) => r.type === 'personal') || rData[0]).id;
+          setActiveRoomId(nextId);
+          fetchAllStates(nextId);
+          return;
+        }
       }
       if (friendsRes.ok) {
         const data = await friendsRes.json();
@@ -2043,6 +2057,7 @@ export default function App() {
             onMapClick={handleMapTouchClick}
             tempPromiseCoords={tempPromiseCoords}
             mapViewCoords={mapViewCoords}
+            isPersonalRoom={rooms.find(r => r.id === activeRoomId)?.type === 'personal'}
             myGpsCoords={myCoords ? [myCoords.lat, myCoords.lng] : null}
             centerOnMyGpsOnce={!hasCenteredOnGpsRef.current}
             onMyGpsCentered={() => { hasCenteredOnGpsRef.current = true; }}
@@ -2429,8 +2444,22 @@ export default function App() {
 
       {/* B. 설정 모달 */}
       {showSettingsModal && (
-        <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
-          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl">
+        <div
+          className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans"
+          onClick={() => setShowSettingsModal(false)}
+        >
+          <div
+            className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl max-h-[88vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => { sheetTouchStartY.current = e.touches[0].clientY; }}
+            onTouchEnd={(e) => {
+              if (sheetTouchStartY.current != null) {
+                const dy = e.changedTouches[0].clientY - sheetTouchStartY.current;
+                if (dy > 70) setShowSettingsModal(false);
+                sheetTouchStartY.current = null;
+              }
+            }}
+          >
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
             <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
               <Settings className="w-5 h-5 text-rose-500 animate-spin-slow" />

@@ -65,7 +65,7 @@ export function ApmtLogo({ size = 80 }: { size?: number }) {
 
 export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState('010-');
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
   const [selectedFruit, setSelectedFruit] = useState('🍎');

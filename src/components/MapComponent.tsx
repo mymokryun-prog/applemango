@@ -23,6 +23,7 @@ interface MapComponentProps {
   onMapClick: (lat: number, lng: number) => void;
   tempPromiseCoords: [number, number] | null;
   mapViewCoords?: [number, number] | null;
+  isPersonalRoom?: boolean;
   myGpsCoords?: [number, number] | null;
   centerOnMyGpsOnce?: boolean;
   onMyGpsCentered?: () => void;
@@ -134,7 +135,7 @@ function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string
 export default function MapComponent({
   friends, appointments, activeProfileId,
   selectedFriendId, selectedPromiseId,
-  onMapClick, tempPromiseCoords, mapViewCoords = null,
+  onMapClick, tempPromiseCoords, mapViewCoords = null, isPersonalRoom = false,
   myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -339,9 +340,10 @@ export default function MapComponent({
         const path = validRoute.map(coord => new window.kakao.maps.LatLng(coord[0], coord[1]));
         const polyline = new window.kakao.maps.Polyline({
           path,
-          strokeWeight: selectedFriendId === f.id ? 4 : 2.5,
+          // 개인방: 내 전체 이동경로를 옅게 표시
+          strokeWeight: isPersonalRoom ? 3 : (selectedFriendId === f.id ? 4 : 2.5),
           strokeColor: f.color || '#3B82F6',
-          strokeOpacity: selectedFriendId === f.id ? 0.9 : 0.45,
+          strokeOpacity: isPersonalRoom ? 0.3 : (selectedFriendId === f.id ? 0.9 : 0.45),
           strokeStyle: 'solid',
         });
         polyline.setMap(map);
@@ -505,8 +507,8 @@ export default function MapComponent({
         
         const poly = L.polyline(validRoute as L.LatLngTuple[], {
           color: f.color,
-          weight: selectedFriendId === f.id ? 4 : 2,
-          opacity: selectedFriendId === f.id ? 0.85 : 0.4,
+          weight: isPersonalRoom ? 3 : (selectedFriendId === f.id ? 4 : 2),
+          opacity: isPersonalRoom ? 0.3 : (selectedFriendId === f.id ? 0.85 : 0.4),
         });
         pg.addLayer(poly);
       });
@@ -625,7 +627,7 @@ export default function MapComponent({
         mg.addLayer(L.marker([item.dLat, item.dLng], { icon, zIndexOffset: selectedFriendId === item.id ? 1000 : 0 }));
       });
     }
-  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, mapViewCoords, searchFocusCoords, myGpsCoords, isKakaoReady, useFallbackMap]);
+  }, [friends, appointments, activeProfileId, selectedFriendId, selectedPromiseId, tempPromiseCoords, mapViewCoords, searchFocusCoords, isPersonalRoom, myGpsCoords, isKakaoReady, useFallbackMap]);
 
   // ─── 4. 내 GPS 위치 마커 실시간 업데이트 ──────────────────────────────────
   useEffect(() => {

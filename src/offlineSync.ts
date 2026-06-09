@@ -99,12 +99,13 @@ export const syncOutbox = async (): Promise<void> => {
         headers,
         body: JSON.stringify(entry.payload),
       });
-      if (response.ok) {
+      // 성공(2xx) 또는 클라이언트 영구실패(4xx)는 큐에서 제거 (재시도해도 안 되는 항목이 무한 적체되지 않게)
+      if (response.ok || (response.status >= 400 && response.status < 500)) {
         await deleteOutboxEntry(entry.id);
       }
     } catch (err) {
       console.warn('Outbox sync failed, will retry later:', err);
-      // keep entry for future sync
+      // keep entry for future sync (네트워크 오류만 유지)
     }
   }
 };

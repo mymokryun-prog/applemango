@@ -55,7 +55,7 @@ export default function ChatRoom({
   // 친구초대 모달 상태
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteName, setInviteName] = useState('');
-  const [invitePhone, setInvitePhone] = useState('');
+  const [invitePhone, setInvitePhone] = useState('010-');
   const [inviteEmoji, setInviteEmoji] = useState('👵');
   const [inviteColor, setInviteColor] = useState('#EC4899');
 
@@ -97,7 +97,7 @@ export default function ChatRoom({
       onInviteFriend(cleanName, inviteEmoji, inviteColor, cleanPhone);
     }
     setInviteName('');
-    setInvitePhone('');
+    setInvitePhone('010-');
     setInviteEmoji('👵');
     setInviteColor('#EC4899');
     setShowInviteModal(false);
@@ -443,7 +443,7 @@ export default function ChatRoom({
           if (isSystem) {
             return (
               <div key={msg.id} className="flex justify-center select-none my-2">
-                <div className="bg-white text-slate-800 text-[10px] font-bold font-sans px-3.5 py-1.5 rounded-xl text-center max-w-[90%] border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                <div className="bg-gray-100 text-slate-600 text-[10px] font-semibold font-sans px-3.5 py-1.5 rounded-full text-center max-w-[90%]">
                   {msg.text}
                 </div>
               </div>
@@ -765,7 +765,7 @@ export default function ChatRoom({
                       value={appPlaceQuery}
                       onChange={e => setAppPlaceQuery(e.target.value)}
                       placeholder="예: 강남역, 홍대 스타벅스"
-                      className="w-full bg-white border-2 border-black rounded-xl py-2.5 pl-9 pr-9 text-xs focus:outline-none focus:border-amber-400 font-bold"
+                      className="w-full bg-white border-2 border-black rounded-xl py-3 pl-9 pr-9 text-sm focus:outline-none focus:border-amber-400 font-bold"
                     />
                     {appPlaceQuery.trim() && appPlaceResults.length > 0 && (
                       <div className="absolute left-0 right-0 mt-1 bg-white border-2 border-black rounded-xl shadow-lg z-10 max-h-40 overflow-y-auto divide-y divide-gray-100">
@@ -802,7 +802,7 @@ export default function ChatRoom({
                       value={appTitle}
                       onChange={e => setAppTitle(e.target.value)}
                       placeholder="예) 삼겹살 번개, 저녁 식사"
-                      className="w-full bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400 font-bold"
+                      className="w-full bg-white border-2 border-black rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-amber-400 font-bold"
                     />
                   </div>
 
@@ -814,14 +814,14 @@ export default function ChatRoom({
                         value={appDate}
                         onChange={e => setAppDate(e.target.value)}
                         onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
-                        className="bg-white border-2 border-black rounded-xl px-2 py-1.5 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+                        className="bg-white border-2 border-black rounded-xl px-2 py-3 text-sm focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
                       />
                       <input
                         type="time"
                         value={appTime}
                         onChange={e => setAppTime(e.target.value)}
                         onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
-                        className="bg-white border-2 border-black rounded-xl px-2 py-1.5 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+                        className="bg-white border-2 border-black rounded-xl px-2 py-3 text-sm focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
                       />
                     </div>
                     {appDate && (
@@ -834,7 +834,7 @@ export default function ChatRoom({
                   <button
                     onClick={handleCreateAppSubmit}
                     disabled={!appTitle.trim()}
-                    className="w-full bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-300 text-gray-950 font-black py-2.5 rounded-2xl text-xs transition border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none cursor-pointer"
+                    className="w-full bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-300 text-gray-950 font-black py-3.5 rounded-2xl text-sm transition border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none cursor-pointer"
                   >
                     약속 생성하기 📅
                   </button>
