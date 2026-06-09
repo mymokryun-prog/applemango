@@ -578,8 +578,7 @@ export default function ChatRoom({
             🤖
           </button>
         )}
-        <input
-          type="text"
+        <textarea
           name="aemang-chat-message"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
@@ -592,7 +591,17 @@ export default function ChatRoom({
           data-1p-ignore="true"
           data-lpignore="true"
           data-form-type="other"
-          className="flex-1 bg-slate-100 border-2 border-black focus:border-rose-500 rounded-xl px-4 py-2 text-xs focus:outline-none placeholder-slate-400 text-slate-900 font-bold transition-all shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] disabled:opacity-55"
+          rows={1}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              if (inputText.trim()) {
+                onSendMessage(inputText);
+                setInputText('');
+              }
+            }
+          }}
+          className="flex-1 bg-slate-100 border-2 border-black focus:border-rose-500 rounded-xl px-4 py-2 text-xs focus:outline-none placeholder-slate-400 text-slate-900 font-bold transition-all shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] disabled:opacity-55 resize-none h-[38px] leading-[22px] overflow-hidden"
         />
         <button
           type="submit"

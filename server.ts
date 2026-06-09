@@ -95,6 +95,25 @@ const broadcastPushNotification = async (title: string, body: string, data: any 
   return results;
 };
 
+const sendPushToUser = async (userId: string, title: string, body: string, data: any = {}) => {
+  const payload = JSON.stringify({ title, body, data });
+  const targets = pushSubscriptions.filter(sub => sub.userId === userId);
+  const results = await Promise.allSettled(
+    targets.map(async (subscription) => {
+      try {
+        await webpush.sendNotification(subscription, payload);
+      } catch (error: any) {
+        console.warn('Push send failed for user, removing subscription if invalid:', error?.statusCode || error?.message);
+        if (error?.statusCode === 410 || error?.statusCode === 404) {
+          const idx = pushSubscriptions.findIndex(s => s.endpoint === subscription.endpoint);
+          if (idx !== -1) pushSubscriptions.splice(idx, 1);
+        }
+      }
+    })
+  );
+  return results;
+};
+
 // ============= SECURITY & VALIDATION MIDDLEWARE =============
 
 // 1. Validation Schemas (Zod)
@@ -725,6 +744,8 @@ function findUserProfile(userId: string): any {
 const lastGpsPosition: Record<string, { lat: number; lng: number; time: number }> = {};
 
 let broadcastLocationToRoom: ((roomId: string, payload: Record<string, unknown>) => void) | null = null;
+let broadcastRoomUpdate: ((roomId: string, eventName: string, payload?: any) => void) | null = null;
+let broadcastToUser: ((userId: string, eventName: string, payload?: any) => void) | null = null;
 
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
@@ -1277,6 +1298,67 @@ async function startServer() {
     });
   }));
 
+  // Disband temporary rooms automatically
+  app.post('/api/rooms/disband', requireAuth, (req, res) => {
+    const { roomId } = req.body;
+    if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
+    const room = dbRooms[roomId];
+    if (room) {
+      room.isDisbanded = true;
+      delete dbRooms[roomId];
+      saveDatabaseDebounced();
+      if (broadcastRoomUpdate) {
+        broadcastRoomUpdate(roomId, 'rooms-updated');
+        broadcastRoomUpdate('room-friends', 'rooms-updated');
+      }
+      return res.json({ success: true, isDisbanded: true, deleted: true });
+    }
+    res.status(404).json({ error: 'Room not found' });
+  });
+
+  // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능 (시스템 방 포함)
+  app.post('/api/rooms/delete', requireAuth, (req, res) => {
+    const { roomId } = req.body;
+    if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
+
+    if (dbRooms[roomId]) {
+      delete dbRooms[roomId];
+      saveDatabaseDebounced();
+      if (broadcastRoomUpdate) {
+        broadcastRoomUpdate(roomId, 'rooms-updated');
+        broadcastRoomUpdate('room-friends', 'rooms-updated');
+      }
+      return res.json({ success: true, deletedRoomId: roomId });
+    }
+    res.status(404).json({ error: 'Room not found' });
+  });
+
+  // 대화방 기록 초기화 (안심방 초기화)
+  app.post('/api/rooms/reset', (req, res) => {
+    const { roomId } = req.body;
+    if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
+    const room = dbRooms[roomId];
+    if (room) {
+      let welcomeText = '';
+      if (roomId === 'room-friends') welcomeText = '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @망고봇 을 부르면 모임 장소도 추천해 드려요!';
+      else if (roomId === 'room-family') welcomeText = '🏠 가족 안심방이 활성화되었습니다. 가족을 초대하여 상시 위치 공유를 시작하세요!';
+      else if (roomId === 'room-work') welcomeText = '👔 직장 동료 방이 활성화되었습니다. 외근·미팅 위치를 공유해 보세요!';
+      else if (roomId === 'room-care') welcomeText = '👵 부모님 안심 효도방이 활성화되었습니다. 부모님을 초대하여 실시간 위치와 건강 정보를 확인하세요!';
+      else welcomeText = '방이 초기화되었습니다.';
+
+      room.messages = welcomeMsg(room.type || 'system', welcomeText);
+      room.friends = {};
+      room.appointments = [];
+      room.notifications = [];
+      saveDatabaseDebounced();
+      if (broadcastRoomUpdate) {
+        broadcastRoomUpdate(roomId, 'rooms-updated');
+      }
+      return res.json({ success: true, resetRoomId: roomId });
+    }
+    res.status(404).json({ error: 'Room not found' });
+  });
+
   // 현재 온라인 유저 목록
   app.get('/api/users/online', (req, res) => {
     const onlineIds = new Set(Object.values(socketUsers).map(u => u.userId));
@@ -1371,53 +1453,6 @@ async function startServer() {
     res.json(geofences[friendId] || null);
   });
 
-  // Disband temporary rooms automatically
-  app.post('/api/rooms/disband', requireAuth, (req, res) => {
-    const { roomId } = req.body;
-    if (dbRooms[roomId]) {
-      delete dbRooms[roomId];
-      saveDatabaseDebounced();
-      return res.json({ success: true, isDisbanded: true, deleted: true });
-    }
-    res.status(404).json({ error: 'Room not found' });
-  });
-
-  // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능 (시스템 방 포함)
-  app.post('/api/rooms/delete', requireAuth, (req, res) => {
-    const { roomId } = req.body;
-    if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
-
-    if (dbRooms[roomId]) {
-      delete dbRooms[roomId];
-      saveDatabaseDebounced();
-      return res.json({ success: true, deletedRoomId: roomId });
-    }
-    res.status(404).json({ error: 'Room not found' });
-  });
-
-  // 대화방 기록 초기화 (안심방 초기화)
-  app.post('/api/rooms/reset', (req, res) => {
-    const { roomId } = req.body;
-    if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
-    const room = dbRooms[roomId];
-    if (room) {
-      let welcomeText = '';
-      if (roomId === 'room-friends') welcomeText = '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @망고봇 을 부르면 모임 장소도 추천해 드려요!';
-      else if (roomId === 'room-family') welcomeText = '🏠 가족 안심방이 활성화되었습니다. 가족을 초대하여 상시 위치 공유를 시작하세요!';
-      else if (roomId === 'room-work') welcomeText = '👔 직장 동료 방이 활성화되었습니다. 외근·미팅 위치를 공유해 보세요!';
-      else if (roomId === 'room-care') welcomeText = '👵 부모님 안심 효도방이 활성화되었습니다. 부모님을 초대하여 실시간 위치와 건강 정보를 확인하세요!';
-      else welcomeText = '방이 초기화되었습니다.';
-
-      room.messages = welcomeMsg(room.type || 'system', welcomeText);
-      room.friends = {};
-      room.appointments = [];
-      room.notifications = [];
-      saveDatabaseDebounced();
-      return res.json({ success: true, resetRoomId: roomId });
-    }
-    res.status(404).json({ error: 'Room not found' });
-  });
-
   // Invite member by Phone Number endpoint
   app.post('/api/friends/invite', validateRequest(FriendInviteSchema), (req: AuthRequest, res: Response) => {
     const { name, avatar, color, phone, roomId, creatorName } = req.body;
@@ -1498,6 +1533,22 @@ async function startServer() {
       isInviteCard: true
     });
 
+    if (broadcastRoomUpdate) {
+      broadcastRoomUpdate(activeRoomId, 'rooms-updated');
+      broadcastRoomUpdate('room-friends', 'rooms-updated');
+    }
+    if (broadcastToUser) {
+      broadcastToUser(targetFriendId, 'rooms-updated');
+    }
+
+    // Web Push 알림 즉시 발송
+    void sendPushToUser(
+      targetFriendId,
+      '✉️ 그룹 초대장이 도착했습니다!',
+      `[${creatorName || '호스트'}] 님이 회원님을 [${room.name}] 그룹방에 초대했습니다.`,
+      { roomId: room.id, type: 'invite' }
+    ).catch(() => {});
+
     res.json(newFriend);
   });
 
@@ -1536,6 +1587,21 @@ async function startServer() {
         timestamp: new Date().toISOString(),
         isSystem: true
       });
+
+      if (broadcastRoomUpdate) {
+        broadcastRoomUpdate(activeRoomId, 'rooms-updated');
+        broadcastRoomUpdate('room-friends', 'rooms-updated');
+      }
+
+      // 방장에게 푸시 알림 전송
+      if (room.ownerId) {
+        void sendPushToUser(
+          room.ownerId,
+          '초대 수락 완료 💖',
+          `${friend.realName || friend.name} 님이 초대를 수락하고 안심 그룹방에 입장했습니다.`,
+          { roomId: room.id, type: 'arrival' }
+        ).catch(() => {});
+      }
 
       return res.json({ success: true, friend });
     }
@@ -2478,7 +2544,7 @@ async function startServer() {
     const room = dbRooms[roomId] || dbRooms['room-friends'];
     const userId = (req.headers['x-user-id'] as string) || 'user-minsu';
 
-    const filtered = room.notifications.filter(n => {
+    const roomNotifications = room.notifications.filter(n => {
       // 1. If it's a room invite: only return if inviteId matches requesting userId
       if (n.type === 'invite' && n.inviteId && !n.game) {
         return n.inviteId === userId;
@@ -2489,7 +2555,32 @@ async function startServer() {
       }
       return true;
     });
-    res.json(filtered);
+
+    // 타 방에서 수신한 미수락 초대장 목록(room invite, game invite)을 함께 전달
+    const otherInvitations: any[] = [];
+    Object.keys(dbRooms).forEach(rId => {
+      if (rId === roomId) return;
+      const r = dbRooms[rId];
+      if (r && r.notifications) {
+        r.notifications.forEach(n => {
+          if (n.type === 'invite') {
+            if (n.game && n.to === userId) {
+              if (!otherInvitations.some(x => x.id === n.id)) {
+                otherInvitations.push(n);
+              }
+            } else if (!n.game && n.inviteId === userId) {
+              if (!otherInvitations.some(x => x.id === n.id)) {
+                otherInvitations.push(n);
+              }
+            }
+          }
+        });
+      }
+    });
+
+    const allNotifs = [...roomNotifications, ...otherInvitations];
+    allNotifs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    res.json(allNotifs);
   });
 
   app.post('/api/notifications/read', (req, res) => {
@@ -2740,6 +2831,14 @@ async function startServer() {
     broadcastToRoom(roomId, 'location-updated', payload);
   };
 
+  broadcastRoomUpdate = (roomId, eventName, payload) => {
+    broadcastToRoom(roomId, eventName, payload);
+  };
+
+  broadcastToUser = (userId, eventName, payload) => {
+    io.to(`user-${userId}`).emit(eventName, payload);
+  };
+
   // Socket.IO event handlers
   io.on('connection', (socket) => {
     console.log(`🔌 Socket connected: ${socket.id}`);
@@ -2761,6 +2860,7 @@ async function startServer() {
 
         // Store connection info
         socket.join(`room-${roomId}`);
+        socket.join(`user-${userId}`); // Join user-specific channel
         if (!roomSockets[roomId]) roomSockets[roomId] = new Set();
         roomSockets[roomId].add(socket.id);
         socketUsers[socket.id] = { userId, roomId };

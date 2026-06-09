@@ -400,11 +400,13 @@ export default function MapComponent({
 
       // 3-2.5. 임시 핀 연결선 그리기 (내 위치에서 임시 핀까지 과일색 실선)
       // 내 위치는 myGpsCoords로 이미 알고 있으므로, friends 목록에 내가 없어도 항상 그린다.
-      if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
-        const me = friends.find(f => f.id === activeProfileId);
+      const me = friends.find(f => f.id === activeProfileId);
+      const myLat = myGpsCoords ? myGpsCoords[0] : (me ? me.lat : null);
+      const myLng = myGpsCoords ? myGpsCoords[1] : (me ? me.lng : null);
+      if (tempPromiseCoords && myLat && myLng && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
         const fruitColor = getFruitColor(me?.avatar || localStorage.getItem('aemang_fruit') || '🍎');
         const tempPolyline = new window.kakao.maps.Polyline({
-          path: [new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]), new window.kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1])],
+          path: [new window.kakao.maps.LatLng(myLat, myLng), new window.kakao.maps.LatLng(tempPromiseCoords[0], tempPromiseCoords[1])],
           strokeWeight: 4.5,
           strokeColor: fruitColor,
           strokeOpacity: 0.95,
@@ -441,10 +443,11 @@ export default function MapComponent({
       // 3-4.5. 보기용 좌표(맛집/검색) 마커+실선 — 지도 나가면 사라짐
       const viewCoords = searchFocusCoords || mapViewCoords;
       if (viewCoords && typeof viewCoords[0] === 'number' && !isNaN(viewCoords[0])) {
-        if (myGpsCoords) {
+        if (myLat && myLng) {
+          const fruitColor = getFruitColor(me?.avatar || localStorage.getItem('aemang_fruit') || '🍎');
           const line = new window.kakao.maps.Polyline({
-            path: [new window.kakao.maps.LatLng(myGpsCoords[0], myGpsCoords[1]), new window.kakao.maps.LatLng(viewCoords[0], viewCoords[1])],
-            strokeWeight: 4, strokeColor: '#2563EB', strokeOpacity: 0.9, strokeStyle: 'solid',
+            path: [new window.kakao.maps.LatLng(myLat, myLng), new window.kakao.maps.LatLng(viewCoords[0], viewCoords[1])],
+            strokeWeight: 4, strokeColor: fruitColor, strokeOpacity: 0.9, strokeStyle: 'solid',
           });
           line.setMap(map);
           kakaoPolylinesRef.current.push(line);
@@ -496,6 +499,8 @@ export default function MapComponent({
 
       mg.clearLayers();
       pg.clearLayers();
+
+      const me = friends.find(f => f.id === activeProfileId);
 
       // 경로 선
       friends.forEach(f => {
@@ -558,10 +563,11 @@ export default function MapComponent({
 
       // 임시 핀 연결선 (내 위치에서 임시 핀까지 과일색 실선)
       // 내 위치는 myGpsCoords로 이미 알고 있으므로, friends 목록에 내가 없어도 항상 그린다.
-      if (tempPromiseCoords && myGpsCoords && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
-        const me = friends.find(f => f.id === activeProfileId);
+      const myLatL = myGpsCoords ? myGpsCoords[0] : (me ? me.lat : null);
+      const myLngL = myGpsCoords ? myGpsCoords[1] : (me ? me.lng : null);
+      if (tempPromiseCoords && myLatL && myLngL && typeof tempPromiseCoords[0] === 'number' && typeof tempPromiseCoords[1] === 'number' && !isNaN(tempPromiseCoords[0]) && !isNaN(tempPromiseCoords[1])) {
         const fruitColor = getFruitColor(me?.avatar || localStorage.getItem('aemang_fruit') || '🍎');
-        const tempLine = L.polyline([myGpsCoords, tempPromiseCoords] as L.LatLngTuple[], {
+        const tempLine = L.polyline([[myLatL, myLngL], tempPromiseCoords] as L.LatLngTuple[], {
           color: fruitColor,
           weight: 4,
           opacity: 0.9,
@@ -597,8 +603,9 @@ export default function MapComponent({
       // 보기용 좌표(맛집/검색) 마커+실선 — 지도 나가면 사라짐
       const viewCoordsL = searchFocusCoords || mapViewCoords;
       if (viewCoordsL && typeof viewCoordsL[0] === 'number' && !isNaN(viewCoordsL[0])) {
-        if (myGpsCoords) {
-          pg.addLayer(L.polyline([myGpsCoords, viewCoordsL] as L.LatLngTuple[], { color: '#2563EB', weight: 4, opacity: 0.9 }));
+        if (myLatL && myLngL) {
+          const fruitColor = getFruitColor(me?.avatar || localStorage.getItem('aemang_fruit') || '🍎');
+          pg.addLayer(L.polyline([[myLatL, myLngL], viewCoordsL] as L.LatLngTuple[], { color: fruitColor, weight: 4, opacity: 0.9 }));
         }
         mg.addLayer(L.marker(viewCoordsL, { icon: L.divIcon({ className: '', html: viewMarkerHtml(), iconSize: [34, 44], iconAnchor: [17, 40] }) }));
       }

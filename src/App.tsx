@@ -808,11 +808,18 @@ export default function App() {
       }
     };
 
+    const handleRoomsUpdated = () => {
+      console.log('Realtime rooms/notifications update triggered from socket!');
+      fetchAllStates(activeRoomId);
+    };
+
+    socket.on('rooms-updated', handleRoomsUpdated);
     socket.on('game-relayed', handleGameRelayed);
     return () => {
+      socket.off('rooms-updated', handleRoomsUpdated);
       socket.off('game-relayed', handleGameRelayed);
     };
-  }, [showOnboarding, activeProfileId, friends]);
+  }, [showOnboarding, activeProfileId, friends, activeRoomId]);
 
   // Handle dial timing simulation
   useEffect(() => {
