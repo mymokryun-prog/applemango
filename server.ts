@@ -2217,9 +2217,19 @@ async function startServer() {
     }));
 
   // 2. Friends/Locations Endpoints
-  app.get('/api/friends', (req, res) => {
+  app.get('/api/friends', (req: AuthRequest, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
-    const room = dbRooms[roomId] || dbRooms['room-friends'];
+    const room = dbRooms[roomId];
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    
+    const userId = (req.headers['x-user-id'] as string) || req.user?.userId;
+    // 보안 검증: 해당 방의 멤버가 아니라면 친구 및 만보기 정보 반환을 거부
+    if (userId && !room.friends[userId]) {
+      return res.status(403).json({ error: 'Access denied: You are not a member of this room' });
+    }
+
     // 위치를 숨겨야 하는 경우 좌표(lat/lng/route)를 제거 (멤버 목록에는 남음)
     //  - 위치공유 OFF(프라이버시) / 아직 실제 위치를 한 번도 공유 안 함(located 아님: 가짜 홍대좌표 방지)
     //  ※ 로그아웃/앱종료(offline)는 숨기지 않음 → 마지막 위치를 검정 테두리로 계속 표시
@@ -2622,27 +2632,37 @@ async function startServer() {
   });
 
   // 4. Notifications Endpoints
-  app.get('/api/notifications', (req, res) => {
+  app.get('/api/notifications', (req: AuthRequest, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
-    const room = dbRooms[roomId] || dbRooms['room-friends'];
-    const userId = (req.headers['x-user-id'] as string) || 'user-minsu';
+    const room = dbRooms[roomId];
+    const userId = (req.headers['x-user-id'] as string) || req.user?.userId || 'user-minsu';
 
-    const roomNotifications = room.notifications.filter(n => {
-      // 1. If it's a room invite: only return if inviteId matches requesting userId
-      if (n.type === 'invite' && n.inviteId && !n.game) {
-        return n.inviteId === userId;
-      }
-      // 2. If it's a game invite: only return if recipient 'to' matches requesting userId
-      if (n.type === 'invite' && n.game) {
-        return n.to === userId;
-      }
-      return true;
-    });
+    if (!room) {
+      return res.json([]);
+    }
+
+    // 보안 검증: 현재 방의 가입 멤버일 때만 해당 방의 일반 알림을 가져옴
+    const isMember = room.friends && !!room.friends[userId];
+    let roomNotifications: any[] = [];
+
+    if (isMember) {
+      roomNotifications = room.notifications.filter(n => {
+        // 1. If it's a room invite: only return if inviteId matches requesting userId
+        if (n.type === 'invite' && n.inviteId && !n.game) {
+          return n.inviteId === userId;
+        }
+        // 2. If it's a game invite: only return if recipient 'to' matches requesting userId
+        if (n.type === 'invite' && n.game) {
+          return n.to === userId;
+        }
+        return true;
+      });
+    }
 
     // 타 방에서 수신한 미수락 초대장 목록(room invite, game invite)을 함께 전달
     const otherInvitations: any[] = [];
     Object.keys(dbRooms).forEach(rId => {
-      if (rId === roomId) return;
+      if (rId === roomId && isMember) return;
       const r = dbRooms[rId];
       if (r && r.notifications) {
         r.notifications.forEach(n => {
@@ -2661,22 +2681,37 @@ async function startServer() {
       }
     });
 
-    const allNotifs = [...roomNotifications, ...otherInvitations];
+    const allNotifs = [...roomNotifications, ...otherInvitations].map(n => ({
+      ...n,
+      read: n.readBy ? n.readBy.includes(userId) : !!n.read
+    }));
     allNotifs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     res.json(allNotifs);
   });
 
-  app.post('/api/notifications/read', (req, res) => {
+  app.post('/api/notifications/read', (req: AuthRequest, res) => {
     const { id, roomId } = req.body;
+    const userId = (req.headers['x-user-id'] as string) || req.user?.userId || 'user-minsu';
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
     
     if (id) {
       const notif = room.notifications.find(n => n.id === id);
-      if (notif) notif.read = true;
+      if (notif) {
+        notif.readBy = notif.readBy || [];
+        if (!notif.readBy.includes(userId)) {
+          notif.readBy.push(userId);
+        }
+      }
     } else {
-      room.notifications.forEach(n => n.read = true);
+      room.notifications.forEach(n => {
+        n.readBy = n.readBy || [];
+        if (!n.readBy.includes(userId)) {
+          n.readBy.push(userId);
+        }
+      });
     }
+    saveDatabaseDebounced();
     res.json({ success: true });
   });
 

@@ -374,11 +374,42 @@ export function useRealtimeLocation({
           now - stepLastTimeRef.current > STEP_COOLDOWN_MS) {
         stepLastTimeRef.current = now;
         setStepsToday(prev => {
-          const next = prev + 1;
-          // 날짜별로 localStorage에 영속화 (앱 재진입 시 누적 유지)
+          const todayStr = pedometerTodayStr();
+          let currentSteps = prev;
+
+          // 자정 날짜 변경(롤오버) 감지 및 이전 기록 아카이빙
+          try {
+            const raw = localStorage.getItem('aemang_steps_today');
+            if (raw) {
+              const d = JSON.parse(raw);
+              if (d && d.date && d.date !== todayStr) {
+                const phoneDigits = (userId || '').replace(/\D/g, '') || 'guest';
+                const hKey = `aemang_pedometer_history_${phoneDigits}`;
+                const storedHistory = localStorage.getItem(hKey);
+                let historyList: any[] = [];
+                if (storedHistory) {
+                  try { historyList = JSON.parse(storedHistory); } catch {}
+                }
+                const found = historyList.find(r => r.date === d.date);
+                if (!found) {
+                  historyList.push({ date: d.date, steps: Number(d.steps) || 0 });
+                  historyList.sort((a, b) => b.date.localeCompare(a.date));
+                  if (historyList.length > 365) {
+                    historyList = historyList.slice(0, 365);
+                  }
+                  localStorage.setItem(hKey, JSON.stringify(historyList));
+                }
+                currentSteps = 0;
+              }
+            }
+          } catch (e) {
+            console.error('Pedometer rollover error:', e);
+          }
+
+          const next = currentSteps + 1;
           saveStepsToday(next);
-          // 50걸음마다 서버에 동기화
-          if (next % 50 === 0) {
+          // 50걸음마다 혹은 자정 리셋 후 첫 걸음 시점에 서버 동기화
+          if (next % 50 === 0 || next === 1) {
             fetch('/api/friends/pedometer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },

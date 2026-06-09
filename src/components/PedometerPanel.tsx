@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Footprints, Calendar, TrendingUp, Users } from 'lucide-react';
 import { Friend } from '../types';
 
@@ -37,6 +37,7 @@ export default function PedometerPanel({
   const [stepsToday, setStepsToday] = useState<number>(0);
   const [stepGoal, setStepGoal] = useState<number>(10000);
   const [history, setHistory] = useState<StepRecord[]>([]);
+  const graphScrollRef = useRef<HTMLDivElement>(null);
 
   // 오늘 날짜 가져오기 (YYYY-MM-DD)
   const getTodayString = () => {
@@ -70,14 +71,42 @@ export default function PedometerPanel({
 
     // 오늘 걸음수는 실측 영속 키(aemang_steps_today)를 우선 사용 → 원/그래프 일치
     let todaySteps = 0;
+    let archivedSomething = false;
     try {
       const raw = localStorage.getItem('aemang_steps_today');
-      if (raw) { const d = JSON.parse(raw); if (d && d.date === todayStr) todaySteps = Number(d.steps) || 0; }
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && d.date) {
+          if (d.date === todayStr) {
+            todaySteps = Number(d.steps) || 0;
+          } else {
+            // 과거 날짜 데이터임 → 히스토리로 아카이빙
+            const found = historyList.find(r => r.date === d.date);
+            if (!found) {
+              historyList.push({ date: d.date, steps: Number(d.steps) || 0 });
+              archivedSomething = true;
+            }
+            // 오늘 날짜로 0걸음 초기화
+            localStorage.setItem('aemang_steps_today', JSON.stringify({ date: todayStr, steps: 0 }));
+          }
+        }
+      }
     } catch {}
+
     const todayRecord = historyList.find(r => r.date === todayStr);
     if (todayRecord && todayRecord.steps > todaySteps) todaySteps = todayRecord.steps;
     setStepsToday(todaySteps);
-    // (가짜 더미 과거 데이터 생성 제거 — 실제 기록만 표시)
+
+    // 날짜 역순 정렬 후 최대 365개 아카이빙 제한
+    historyList.sort((a, b) => b.date.localeCompare(a.date));
+    if (historyList.length > 365) {
+      historyList = historyList.slice(0, 365);
+      archivedSomething = true;
+    }
+    
+    if (archivedSomething) {
+      localStorage.setItem(historyKey, JSON.stringify(historyList));
+    }
     setHistory(historyList);
   }, [phone]);
 
@@ -95,8 +124,11 @@ export default function PedometerPanel({
       updatedHistory.push({ date: todayStr, steps: newSteps });
     }
 
-    // 날짜 역순 정렬
+    // 날짜 역순 정렬 후 365일 크기 제한
     updatedHistory.sort((a, b) => b.date.localeCompare(a.date));
+    if (updatedHistory.length > 365) {
+      updatedHistory.length = 365;
+    }
     setHistory(updatedHistory);
     localStorage.setItem(historyKey, JSON.stringify(updatedHistory));
 
@@ -112,6 +144,12 @@ export default function PedometerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSteps]);
 
+  // 데이터 변경 시 그래프 맨 우측(오늘)으로 자동 스크롤
+  useEffect(() => {
+    if (graphScrollRef.current) {
+      graphScrollRef.current.scrollLeft = graphScrollRef.current.scrollWidth;
+    }
+  }, [history, stepsToday]);
 
   // 목표 변경
   const handleGoalChange = (newGoal: number) => {
@@ -119,35 +157,45 @@ export default function PedometerPanel({
     localStorage.setItem(goalKey, String(newGoal));
   };
 
-  // 그래프 렌더링을 위한 최근 7일 필터링 (오늘 포함)
+  // 그래프 렌더링을 위한 전체 누적 히스토리 반환 (시간순 정렬: 오래된 것부터 최신 순)
   const getGraphData = () => {
     const todayStr = getTodayString();
-    const last7Days: { label: string; steps: number; percent: number }[] = [];
     
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const dateStr = `${yyyy}-${mm}-${dd}`;
-
-      // 요일 구하기
-      const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-      const dayLabel = i === 0 ? '오늘' : dayNames[d.getDay()];
-
-      let steps = 0;
-      if (i === 0) {
-        steps = stepsToday;
-      } else {
-        const found = history.find(h => h.date === dateStr);
-        if (found) steps = found.steps;
-      }
-
-      const percent = Math.min(100, Math.floor((steps / stepGoal) * 100));
-      last7Days.push({ label: dayLabel, steps, percent });
+    // 오래된 날짜 순 정렬
+    const sortedHistory = [...history].sort((a, b) => a.date.localeCompare(b.date));
+    
+    // 오늘 날짜 데이터 보완
+    const todayExists = sortedHistory.some(h => h.date === todayStr);
+    if (!todayExists) {
+      sortedHistory.push({ date: todayStr, steps: stepsToday });
+    } else {
+      const idx = sortedHistory.findIndex(h => h.date === todayStr);
+      if (idx >= 0) sortedHistory[idx].steps = stepsToday;
     }
-    return last7Days;
+    
+    return sortedHistory.map(item => {
+      const isToday = item.date === todayStr;
+      
+      let label = '';
+      if (isToday) {
+        label = '오늘';
+      } else {
+        const parts = item.date.split('-');
+        if (parts.length === 3) {
+          label = `${parts[1]}.${parts[2]}`; // MM.DD 형식
+        } else {
+          label = item.date;
+        }
+      }
+      
+      const percent = Math.min(100, Math.floor((item.steps / stepGoal) * 100));
+      return {
+        label,
+        steps: item.steps,
+        percent,
+        isToday
+      };
+    });
   };
 
   const graphData = getGraphData();
@@ -239,35 +287,42 @@ export default function PedometerPanel({
           </div>
         </div>
 
-        {/* 7일 주간 그래프 카드 */}
+        {/* 전체 누적 걸음수 그래프 카드 */}
         <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
               <TrendingUp className="w-4 h-4 text-rose-500" />
-              <span>최근 7일 걸음수 그래프</span>
+              <span>일별 걸음수 히스토리 그래프</span>
             </h3>
-            <span className="text-[10px] text-gray-400 font-medium">단위: 걸음</span>
+            <span className="text-[9px] bg-slate-50 text-slate-400 font-bold px-2 py-0.5 rounded-md">
+              👈 손터치(밀기)로 과거 기록 탐색
+            </span>
           </div>
 
-          {/* 그래프 캔버스 (Pure CSS Bar Chart) */}
-          <div className="flex justify-between items-end h-32 pt-2 px-1">
+          {/* 그래프 캔버스 (Pure CSS Bar Chart - Horizontally Scrollable) */}
+          <div 
+            ref={graphScrollRef}
+            className="flex gap-4 items-end h-36 overflow-x-auto py-2 px-1 scrollbar-none select-none scroll-smooth"
+          >
             {graphData.map((day, idx) => (
-              <div key={idx} className="flex flex-col items-center flex-1 gap-1">
-                {/* 툴팁 */}
-                <span className="text-[8px] font-bold text-gray-400 font-mono scale-90 mb-0.5">
-                  {day.steps >= 1000 ? `${(day.steps / 1000).toFixed(1)}k` : day.steps}
+              <div key={idx} className="flex flex-col items-center shrink-0 w-12 gap-1.5">
+                {/* 걸음 수 수치 */}
+                <span className="text-[9px] font-black text-slate-700 font-mono scale-95">
+                  {day.steps.toLocaleString()}
                 </span>
-                {/* 막대 */}
-                <div className="w-4 bg-gray-100 rounded-full h-20 flex items-end">
+                {/* 막대 (Thicker w-8) */}
+                <div className="w-8 bg-slate-50 rounded-t-lg h-24 flex items-end shadow-inner border border-slate-100/50">
                   <div
-                    className={`w-full rounded-full transition-all duration-500 ${
-                      day.percent >= 100 ? 'bg-gradient-to-t from-rose-600 to-rose-400' : 'bg-gradient-to-t from-rose-400 to-rose-300'
+                    className={`w-full rounded-t-lg transition-all duration-500 ${
+                      day.percent >= 100 
+                        ? 'bg-gradient-to-t from-emerald-500 to-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                        : 'bg-gradient-to-t from-rose-500 to-rose-400'
                     }`}
-                    style={{ height: `${Math.max(8, day.percent)}%` }}
+                    style={{ height: `${Math.max(6, day.percent)}%` }}
                   />
                 </div>
-                {/* 라벨 */}
-                <span className={`text-[10px] mt-1 font-semibold ${idx === 6 ? 'text-rose-600 font-bold' : 'text-gray-500'}`}>
+                {/* 날짜 라벨 */}
+                <span className={`text-[9.5px] mt-0.5 font-bold ${day.isToday ? 'text-rose-600 font-black' : 'text-slate-400'}`}>
                   {day.label}
                 </span>
               </div>
