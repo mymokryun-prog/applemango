@@ -729,19 +729,19 @@ export default function ChatRoom({
 
       {/* 위치검색 우선 약속 만들기 모달 */}
       {showAppModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fadeIn font-sans">
-          <div className="bg-white border-2 border-black rounded-3xl w-full max-w-sm overflow-hidden shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col max-h-[85vh]">
-            <div className="bg-amber-100 px-4 py-3 border-b-2 border-black flex justify-between items-center shrink-0">
-              <span className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-amber-600" />
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-3 z-50 animate-fadeIn font-sans">
+          <div className="bg-white border-2 border-black rounded-3xl w-full max-w-md h-[90vh] overflow-hidden shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col">
+            <div className="bg-amber-100 px-4 py-4 border-b-2 border-black flex justify-between items-center shrink-0">
+              <span className="text-base font-black text-gray-800 flex items-center gap-1.5">
+                <Calendar className="w-5 h-5 text-amber-600" />
                 <span>새 약속 만들기</span>
               </span>
               <button onClick={() => { setShowAppModal(false); resetAppForm(); }} className="text-gray-650 hover:text-black cursor-pointer">
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+            <div className="p-4 overflow-y-auto space-y-5 flex-1">
               {/* Step 1: 위치 검색 */}
               <div className="space-y-1 relative">
                 <label className="text-xs font-bold text-gray-700">1. 모임 장소 검색 *</label>
