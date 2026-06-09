@@ -380,7 +380,18 @@ export default function App() {
     
     setActiveProfileId(newUserId);
     setShowOnboarding(false);
-    setNeedsPasswordSetup(true); // 최초 접속 — 비밀번호 설정을 강제
+    // 이 계정에 이미 비밀번호가 있으면 잠금(입력) 화면, 없으면 설정 화면
+    try {
+      const hp = await fetch(`/api/auth/has-password?phone=${encodeURIComponent(phone)}`).then(r => r.json());
+      if (hp && hp.hasPassword) {
+        setAccountHasPassword(true);
+        setIsUnlocked(false);
+      } else {
+        setNeedsPasswordSetup(true);
+      }
+    } catch {
+      setNeedsPasswordSetup(true);
+    }
     fetchAllStates(activeRoomId);
   };
 
@@ -1198,6 +1209,13 @@ export default function App() {
         setIsUnlocked(true);
         setNeedsPasswordSetup(false);
         setSetupPw1(''); setSetupPw2(''); setSetupError('');
+      } else if (res.status === 403) {
+        // 이미 비밀번호가 설정된 계정 → 설정이 아니라 '입력(잠금)' 화면으로 전환
+        setNeedsPasswordSetup(false);
+        setAccountHasPassword(true);
+        setIsUnlocked(false);
+        setSetupPw1(''); setSetupPw2(''); setSetupError('');
+        alert('이미 비밀번호가 설정된 계정입니다. 기존 비밀번호를 입력해 주세요.');
       } else {
         setSetupError('설정에 실패했습니다. 다시 시도해 주세요.');
       }
