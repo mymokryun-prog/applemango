@@ -568,6 +568,34 @@ function applyLoadedData(data: any, source: string) {
     Object.keys(dbMeta).forEach(k => delete dbMeta[k]);
     Object.assign(dbMeta, data.dbMeta);
   }
+
+  // 기존에 '이름 미등록'으로 저장되어 표시되던 가입 멤버들의 이름 복원 마이그레이션
+  let repairedCount = 0;
+  Object.keys(dbRooms).forEach(rId => {
+    const room = dbRooms[rId];
+    if (room && room.friends) {
+      Object.keys(room.friends).forEach(fId => {
+        const friend = room.friends[fId];
+        if (friend && ((friend.name && friend.name.includes('이름 미등록')) || friend.realName === '이름 미등록')) {
+          const profile = dbUserProfiles[fId];
+          if (profile) {
+            const actualName = profile.alias || profile.realName || profile.name || friend.phone || '친구';
+            friend.realName = profile.realName || friend.realName;
+            friend.alias = profile.alias || friend.alias;
+            friend.avatar = profile.avatar || friend.avatar;
+            friend.color = profile.color || friend.color;
+            friend.name = friend.isPendingInvite ? `${actualName} (대기)` : `${actualName} (합류)`;
+            repairedCount++;
+          }
+        }
+      });
+    }
+  });
+  if (repairedCount > 0) {
+    console.log(`🛠️ Repaired ${repairedCount} '이름 미등록' friend records to their registered profile details.`);
+    saveDatabaseDebounced();
+  }
+
   console.log(`Database loaded successfully from ${source}.`);
   return true;
 }
