@@ -169,41 +169,60 @@ const RoomSchema = z.object({
 
 // 2. Authentication Middleware
 export interface AuthRequest extends Request {
-  user?: { userId: string };
+  user?: { userId: string; authed?: boolean };
 }
 
-const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
-  // 클라이언트의 활성 프로필 ID(x-user-id)가 있으면 우선적으로 세션 사용 (테스트 및 멀티 프로필 지원 최적화)
-  const xUserId = req.headers['x-user-id'] as string;
-  if (xUserId) {
-    req.user = { userId: xUserId };
-    return next();
-  }
+// 실효 JWT 시크릿 — env가 강한 값이면 그것, 아니면 영속 랜덤(아래 ensureJwtSecret에서 설정)
+const JWT_DEFAULT_SECRET = 'aemang-secret-key-change-this-in-production';
+let effectiveJwtSecret = JWT_SECRET;
 
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-
-  if (!token) {
-    const userId = 'guest-' + Date.now();
-    req.user = { userId };
-    return next();
-  }
-
-  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
-    if (err) {
-      console.warn('Token verification failed, falling back gracefully:', err.message);
-      const userId = 'guest-' + Date.now();
-      req.user = { userId };
-      return next();
-    }
-    req.user = decoded;
-    next();
-  });
+const generateToken = (userId: string): string => {
+  return jwt.sign({ userId }, effectiveJwtSecret, { expiresIn: '30d' });
 };
 
-// Generate token for user (used for login/registration)
-const generateToken = (userId: string): string => {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '24h' });
+const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+  // 1순위: 유효한 JWT → 그 사용자로 인증(authed). x-user-id가 달라도 토큰을 신뢰(사칭 차단).
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token) {
+    try {
+      const decoded: any = jwt.verify(token, effectiveJwtSecret);
+      req.user = { userId: decoded.userId, authed: true } as any;
+      // 슬라이딩 갱신 — 활동 중이면 토큰을 새로 발급해 세션 유지
+      try { res.setHeader('x-refresh-token', generateToken(decoded.userId)); } catch {}
+      return next();
+    } catch (err: any) {
+      // 토큰 만료/위조 → 아래 호환 경로로
+    }
+  }
+  // 2순위(호환): x-user-id (인증 안 됨 — 읽기/등록 등 비민감 용도만). 민감 API는 requireAuth로 차단됨.
+  const xUserId = req.headers['x-user-id'] as string;
+  if (xUserId) {
+    req.user = { userId: xUserId, authed: false } as any;
+    return next();
+  }
+  req.user = { userId: 'guest-' + Date.now(), authed: false } as any;
+  next();
+};
+
+// 민감 엔드포인트: 유효한 JWT가 있어야만 통과
+const requireAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user || !(req.user as any).authed) {
+    return res.status(401).json({ error: 'authentication required' });
+  }
+  next();
+};
+
+// 간단 인메모리 속도 제한 (무차별 대입/남용 방지)
+const rateBuckets: Record<string, { count: number; reset: number }> = {};
+const rateLimit = (maxPerMin: number) => (req: Request, res: Response, next: NextFunction) => {
+  const key = `${(req.ip || req.socket.remoteAddress || '')}:${req.path}`;
+  const now = Date.now();
+  const b = rateBuckets[key];
+  if (!b || now > b.reset) { rateBuckets[key] = { count: 1, reset: now + 60000 }; return next(); }
+  if (b.count >= maxPerMin) return res.status(429).json({ error: 'too many requests' });
+  b.count++;
+  next();
 };
 
 // 3. Validation Middleware Factory — safeParse 사용 (Zod v4 호환)
@@ -650,6 +669,26 @@ function migratePersonalRooms() {
   saveDatabase();
 }
 
+// JWT 시크릿 보장 — env가 강한 값이 아니면 영속 랜덤 시크릿을 생성/사용(토큰 위조 방지)
+function ensureJwtSecret() {
+  const envSecret = process.env.JWT_SECRET;
+  if (envSecret && envSecret !== JWT_DEFAULT_SECRET) {
+    effectiveJwtSecret = envSecret;
+    return;
+  }
+  if (dbMeta.jwtSecret) {
+    effectiveJwtSecret = dbMeta.jwtSecret;
+  } else {
+    effectiveJwtSecret = CryptoJS.lib.WordArray.random(48).toString();
+    dbMeta.jwtSecret = effectiveJwtSecret;
+    saveDatabase();
+    console.warn('⚠️ JWT_SECRET 환경변수가 없어 영속 랜덤 시크릿을 생성했습니다. (운영에서는 JWT_SECRET 설정 권장)');
+  }
+  if (process.env.NODE_ENV === 'production' && (!envSecret || envSecret === JWT_DEFAULT_SECRET)) {
+    console.warn('⚠️ 운영 환경인데 JWT_SECRET이 미설정/기본값입니다. Render 환경변수에 강한 JWT_SECRET 설정을 권장합니다.');
+  }
+}
+
 loadDatabase();
 // 하루에 한 번 오래된 데이터 정리 (최초 정리는 Redis 로드 후 startServer에서 수행)
 setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
@@ -919,11 +958,13 @@ setInterval(simulateMovement, 6000);
 async function startServer() {
   // 영구 저장소(Upstash Redis)에서 데이터 로드 후 최초 정리 (파일 데이터를 덮어씀)
   await loadDatabaseFromRedis();
+  ensureJwtSecret();
   cleanupOldData();
   migrateRemoveSinjeonggang();
   migratePersonalRooms();
 
   const app = express();
+  app.set('trust proxy', true); // Render 등 프록시 뒤에서 실제 클라이언트 IP 사용(rate limit 정확화)
   app.use(express.json({ limit: '10mb' }));
 
   // Auto-save database on any state-changing request
@@ -1276,7 +1317,7 @@ async function startServer() {
   });
 
   // 장소 검색 — OpenStreetMap Nominatim (API 키 불필요)
-  app.get('/api/places/search', async (req, res) => {
+  app.get('/api/places/search', rateLimit(40), async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (!q) return res.json([]);
 
@@ -1331,7 +1372,7 @@ async function startServer() {
   });
 
   // Disband temporary rooms automatically
-  app.post('/api/rooms/disband', (req, res) => {
+  app.post('/api/rooms/disband', requireAuth, (req, res) => {
     const { roomId } = req.body;
     if (dbRooms[roomId]) {
       delete dbRooms[roomId];
@@ -1342,7 +1383,7 @@ async function startServer() {
   });
 
   // 방 폭파 / 완전히 삭제 — 모든 방 삭제 가능 (시스템 방 포함)
-  app.post('/api/rooms/delete', (req, res) => {
+  app.post('/api/rooms/delete', requireAuth, (req, res) => {
     const { roomId } = req.body;
     if (!roomId) return res.status(400).json({ error: 'Room ID is required' });
 
@@ -1631,21 +1672,37 @@ async function startServer() {
   });
 
   // ===== 앱 접속 비밀번호 (전화번호 계정 연동 — 다른 기기에서 같은 번호로 접속해도 비번 필요) =====
-  app.get('/api/auth/has-password', (req, res) => {
+  app.get('/api/auth/has-password', rateLimit(60), (req, res) => {
     const digits = String(req.query.phone || '').replace(/\D/g, '');
     const profile = dbUserProfiles[`user-${digits}`];
     res.json({ hasPassword: !!(profile && profile.passwordHash) });
   });
 
-  app.post('/api/auth/verify-password', (req, res) => {
+  app.post('/api/auth/verify-password', rateLimit(15), (req, res) => {
     const { phone, password } = req.body;
     const digits = String(phone || '').replace(/\D/g, '');
-    const profile = dbUserProfiles[`user-${digits}`];
-    if (!profile || !profile.passwordHash) return res.json({ success: true });
-    res.json({ success: hashAppPassword(String(password || '')) === profile.passwordHash });
+    const userId = `user-${digits}`;
+    const profile = dbUserProfiles[userId];
+    if (!profile || !profile.passwordHash) return res.json({ success: true, token: generateToken(userId) });
+    const ok = hashAppPassword(String(password || '')) === profile.passwordHash;
+    // 비번 확인 성공 시 새 토큰 발급(세션 인증 갱신)
+    res.json({ success: ok, token: ok ? generateToken(userId) : undefined });
   });
 
-  app.post('/api/auth/set-password', (req: AuthRequest, res: Response) => {
+  // 토큰 재발급 — 유효 토큰이면 갱신, 토큰 없으면 비번 없는 계정만 x-user-id로 발급(비번 계정은 잠금화면 필요)
+  app.post('/api/auth/refresh', rateLimit(60), (req: AuthRequest, res: Response) => {
+    if (req.user?.authed) {
+      return res.json({ token: generateToken(req.user.userId) });
+    }
+    const userId = String(req.headers['x-user-id'] || '');
+    const profile = dbUserProfiles[userId];
+    if (profile && !profile.passwordHash) {
+      return res.json({ token: generateToken(userId) });
+    }
+    return res.status(401).json({ error: 'auth required' });
+  });
+
+  app.post('/api/auth/set-password', rateLimit(15), (req: AuthRequest, res: Response) => {
     const { phone, password, currentPassword } = req.body;
     const digits = String(phone || '').replace(/\D/g, '');
     const userId = digits ? `user-${digits}` : req.user?.userId;
@@ -1659,14 +1716,13 @@ async function startServer() {
     if (!password || String(password).length < 4) return res.status(400).json({ error: 'too short' });
     profile.passwordHash = hashAppPassword(String(password));
     saveDatabaseDebounced();
-    res.json({ success: true });
+    res.json({ success: true, token: userId ? generateToken(userId) : undefined });
   });
 
-  app.post('/api/auth/remove-password', (req: AuthRequest, res: Response) => {
-    const { phone, currentPassword } = req.body;
-    const digits = String(phone || '').replace(/\D/g, '');
-    const userId = digits ? `user-${digits}` : req.user?.userId;
-    const profile = userId ? dbUserProfiles[userId] : null;
+  app.post('/api/auth/remove-password', rateLimit(15), requireAuth, (req: AuthRequest, res: Response) => {
+    const userId = req.user!.userId; // 인증된 본인만
+    const profile = dbUserProfiles[userId];
+    const { currentPassword } = req.body;
     if (!profile) return res.status(404).json({ error: 'profile not found' });
     if (profile.passwordHash && (!currentPassword || hashAppPassword(String(currentPassword)) !== profile.passwordHash)) {
       return res.status(403).json({ error: 'wrong current password' });
@@ -1674,6 +1730,23 @@ async function startServer() {
     delete profile.passwordHash;
     saveDatabaseDebounced();
     res.json({ success: true });
+  });
+
+  // 비밀번호 재설정 — 등록된 실명(realName) 확인으로 본인 인증 후 새 비번 설정
+  app.post('/api/auth/reset-password', rateLimit(10), (req, res) => {
+    const { phone, realName, password } = req.body;
+    const digits = String(phone || '').replace(/\D/g, '');
+    const userId = `user-${digits}`;
+    const profile = dbUserProfiles[userId];
+    if (!profile) return res.status(404).json({ error: 'profile not found' });
+    const norm = (s: string) => String(s || '').replace(/\s/g, '').toLowerCase();
+    if (!realName || norm(realName) !== norm(profile.realName)) {
+      return res.status(403).json({ error: 'name mismatch' });
+    }
+    if (!password || String(password).length < 4) return res.status(400).json({ error: 'too short' });
+    profile.passwordHash = hashAppPassword(String(password));
+    saveDatabaseDebounced();
+    res.json({ success: true, token: generateToken(userId) });
   });
 
   // 1. Chat Endpoints
@@ -2128,7 +2201,7 @@ async function startServer() {
   });
 
   // Delete friend/member endpoint
-  app.post('/api/friends/delete', (req, res) => {
+  app.post('/api/friends/delete', requireAuth, (req, res) => {
     const { id, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
@@ -2524,7 +2597,7 @@ async function startServer() {
   }));
 
   // 6. Emergency 119 API Endpoint
-  app.post('/api/emergency/dispatch', tryCatch(async (req: AuthRequest, res: Response) => {
+  app.post('/api/emergency/dispatch', requireAuth, tryCatch(async (req: AuthRequest, res: Response) => {
     const { friendId, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
@@ -2595,7 +2668,7 @@ async function startServer() {
   }));
 
   // 5. Google GenAI Coordinates Advisor Endpoint (@api/gemini/coordinate)
-  app.post('/api/gemini/advisor', async (req, res) => {
+  app.post('/api/gemini/advisor', rateLimit(20), requireAuth, async (req, res) => {
     const { message, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];

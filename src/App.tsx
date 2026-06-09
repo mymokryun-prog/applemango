@@ -13,12 +13,13 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact } from 'lucide-react';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
 import MusicPanel from './components/MusicPanel';
 import RestaurantPanel from './components/RestaurantPanel';
 import BookPanel from './components/BookPanel';
+import ContactsPanel from './components/ContactsPanel';
 
 import {
   queueOfflineAction,
@@ -50,7 +51,7 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts'>('rooms');
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -310,8 +311,12 @@ export default function App() {
     if (activeProfileId) {
       headers.set('x-user-id', activeProfileId);
     }
-    
-    return fetch(url, { ...options, headers });
+
+    const res = await fetch(url, { ...options, headers });
+    // 슬라이딩 세션 — 서버가 갱신 토큰을 주면 저장(세션 유지)
+    const refreshed = res.headers.get('x-refresh-token');
+    if (refreshed) localStorage.setItem('aemang_token', refreshed);
+    return res;
   }, [activeProfileId]);
 
   // 비핵심(실시간/빈번) 요청 — 오프라인 시 큐에 쌓지 않고 버림 (만보기/위치/배터리 등)
@@ -1181,6 +1186,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
+        if (data.token) localStorage.setItem('aemang_token', data.token); // 인증 세션 갱신
         localStorage.setItem('aemang_unlocked', 'true'); // 이후 그냥 닫았다 열면 기억
         setIsUnlocked(true);
         setLockInput('');
@@ -1190,6 +1196,37 @@ export default function App() {
       }
     } catch {
       setLockError('확인 중 오류가 발생했습니다. 네트워크를 확인해 주세요.');
+    }
+  };
+
+  const handleResetPassword = async () => {
+    const phone = localStorage.getItem('aemang_phone') || '';
+    const nm = window.prompt('본인 확인 — 가입 시 등록한 실명(이름)을 입력하세요:');
+    if (nm === null) return;
+    const pw = window.prompt('새 비밀번호를 입력하세요 (4자 이상):');
+    if (pw === null) return;
+    if (pw.length < 4) { alert('비밀번호는 4자 이상이어야 합니다.'); return; }
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, realName: nm, password: pw })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.token) localStorage.setItem('aemang_token', data.token);
+        localStorage.setItem('aemang_unlocked', 'true');
+        setIsUnlocked(true);
+        setLockInput('');
+        setLockError('');
+        alert('비밀번호가 재설정되었습니다.');
+      } else if (res.status === 403) {
+        setLockError('실명이 일치하지 않습니다. 다시 시도해 주세요.');
+      } else {
+        setLockError('재설정에 실패했습니다.');
+      }
+    } catch {
+      setLockError('네트워크 오류로 재설정에 실패했습니다.');
     }
   };
 
@@ -1204,6 +1241,7 @@ export default function App() {
         body: JSON.stringify({ phone, password: setupPw1 })
       });
       if (res.ok) {
+        try { const d = await res.json(); if (d.token) localStorage.setItem('aemang_token', d.token); } catch {}
         localStorage.setItem('aemang_unlocked', 'true');
         setAccountHasPassword(true);
         setIsUnlocked(true);
@@ -1321,18 +1359,34 @@ export default function App() {
     const phone = localStorage.getItem('aemang_phone');
     const registered = localStorage.getItem('apmt_v3_registered') === 'true';
     if (!registered || !phone) return;
-    fetch(`/api/auth/has-password?phone=${encodeURIComponent(phone)}`)
-      .then(r => r.json())
-      .then(d => {
+    (async () => {
+      // 인증 토큰 재발급 시도(시크릿 교체/만료 대비). 비번 없는 계정/유효토큰이면 새 토큰 발급됨.
+      let refreshOk = false;
+      try {
+        const token = localStorage.getItem('aemang_token');
+        const rr = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'x-user-id': 'user-' + phone.replace(/\D/g, ''),
+          },
+        });
+        if (rr.ok) { const d = await rr.json(); if (d.token) { localStorage.setItem('aemang_token', d.token); refreshOk = true; } }
+      } catch {}
+
+      try {
+        const d = await fetch(`/api/auth/has-password?phone=${encodeURIComponent(phone)}`).then(r => r.json());
         if (d.hasPassword) {
           setAccountHasPassword(true);
           const remembered = localStorage.getItem('aemang_unlocked') === 'true';
-          setIsUnlocked(remembered);
+          // 비번 계정인데 토큰 재발급이 안 됐으면(시크릿 교체 등) 한 번 잠금해제로 토큰을 새로 받음
+          setIsUnlocked(remembered && refreshOk);
         } else {
           setNeedsPasswordSetup(true);
         }
-      })
-      .catch(() => {});
+      } catch {}
+    })();
   }, []);
 
   const handleMarkNotificationRead = async (id: string) => {
@@ -1771,6 +1825,13 @@ export default function App() {
             className="w-full max-w-[240px] bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 rounded-xl transition border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
           >
             잠금 해제
+          </button>
+          <button
+            type="button"
+            onClick={handleResetPassword}
+            className="text-xs text-gray-400 hover:text-rose-500 underline mt-1"
+          >
+            비밀번호를 잊으셨나요? (재설정)
           </button>
         </div>
       </MobileFrame>
@@ -2219,6 +2280,13 @@ export default function App() {
             myName={friends.find(f => f.id === activeProfileId)?.name || localStorage.getItem('aemang_nickname') || '나'}
           />
         )}
+
+        {activeTab === 'contacts' && (
+          <ContactsPanel
+            currentRoomName={rooms.find(r => r.id === activeRoomId)?.name}
+            onInvite={(name, phone) => handleInviteFriend(name, '👤', '#EC4899', phone)}
+          />
+        )}
       </div>
 
       {/* 119 Emergency Calling Simulation Overlay */}
@@ -2357,6 +2425,7 @@ export default function App() {
           { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
           { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
           { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
+          { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
           { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
