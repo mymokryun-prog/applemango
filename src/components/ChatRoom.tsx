@@ -356,6 +356,7 @@ export default function ChatRoom({
                   </div>
                   <span className="text-[6px] text-slate-400 font-bold">
                     {isPending ? '수락대기' : isOnline ? '온라인' : '오프라인'}
+                    {friend.phone && ` · ${friend.phone}`}
                   </span>
                 </div>
                 <span className={`w-1.5 h-1.5 rounded-full border border-black shrink-0 ${

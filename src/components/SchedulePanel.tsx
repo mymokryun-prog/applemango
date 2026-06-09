@@ -33,6 +33,7 @@ interface SchedulePanelProps {
   onSelectPromise?: (id: string, lat: number, lng: number) => void;
   onCreateAppointment: (title: string, placeName: string, datetime: string, customLat?: number, customLng?: number) => void;
   onUpdateAppointment?: (id: string, title: string, placeName: string, lat: number, lng: number, datetime: string) => void;
+  onDeleteAppointment: (id: string) => void;
   onVote: (id: string, vote: 'yes' | 'no' | 'maybe') => void;
   onClearTempCoords: () => void;
   onFocusLocation: (lat: number, lng: number) => void;
@@ -54,7 +55,7 @@ export default function SchedulePanel({
   appointments, friends, activeProfileId,
   tempPromiseCoords, selectedPromiseId, onSelectPromise,
   onCreateAppointment,
-  onUpdateAppointment, onVote, onClearTempCoords, onFocusLocation,
+  onUpdateAppointment, onDeleteAppointment, onVote, onClearTempCoords, onFocusLocation,
   title, setTitle, searchQuery, setSearchQuery,
   confirmedPlace, setConfirmedPlace, dateValue, setDateValue,
   timeValue, setTimeValue
@@ -676,7 +677,18 @@ export default function SchedulePanel({
                   })}
                 </div>
 
-                <div className="px-4 pb-3 pt-1 flex justify-end">
+                <div className="px-4 pb-3 pt-1 flex justify-between items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`[${app.title}] 약속을 정말 취소/삭제하시겠습니까?`)) {
+                        onDeleteAppointment(app.id);
+                      }
+                    }}
+                    className="flex items-center gap-1 text-[11px] text-rose-500 hover:text-rose-700 font-extrabold cursor-pointer"
+                  >
+                    🗑️ 약속 취소
+                  </button>
                   <button onClick={() => {
                     if (isEditing) { setEditingAppId(null); } else {
                       setEditingAppId(app.id);
@@ -689,7 +701,7 @@ export default function SchedulePanel({
                       setEditSearchQuery('');
                       setEditResults([]);
                     }
-                  }} className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600">
+                  }} className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 cursor-pointer">
                     <Edit3 className="w-3 h-3" />
                     {isEditing ? '편집 닫기' : '장소/시간 변경'}
                   </button>

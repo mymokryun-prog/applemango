@@ -945,6 +945,23 @@ export default function App() {
     }
   };
 
+  const handleDeleteAppointment = async (id: string) => {
+    try {
+      const res = await authFetch('/api/appointments/delete', {
+        method: 'POST',
+        body: JSON.stringify({
+          id,
+          roomId: activeRoomId
+        })
+      });
+      if (res.ok) {
+        fetchAllStates(activeRoomId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleDeleteFriend = async (id: string) => {
     try {
       await authFetch('/api/friends/delete', {
@@ -2192,6 +2209,7 @@ export default function App() {
             }}
             onCreateAppointment={handleCreateAppointment}
             onUpdateAppointment={handleUpdateAppointment}
+            onDeleteAppointment={handleDeleteAppointment}
             onVote={handleVote}
             onClearTempCoords={() => setTempPromiseCoords(null)}
             onFocusLocation={handleFocusLocation}

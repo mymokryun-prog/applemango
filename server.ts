@@ -1461,21 +1461,34 @@ async function startServer() {
 
     const cleanPhone = (phone || '').trim() || '번호 미등록';
     const cleanName = (name || '').trim() || '이름 미등록';
-    const displayName = cleanName === '이름 미등록' ? cleanPhone : cleanName;
 
     const digits = cleanPhone.replace(/\D/g, '');
     const registeredUserId = digits ? `user-${digits}` : '';
     // Look up if she's already registered in ANY room in dbRooms
     const isAlreadyRegistered = registeredUserId && findUserProfile(registeredUserId);
+    const userProfile = isAlreadyRegistered ? findUserProfile(registeredUserId) : null;
+
+    let finalName = '';
+    if (cleanName && cleanName !== '이름 미등록') {
+      finalName = cleanName;
+    } else if (userProfile) {
+      finalName = userProfile.alias || userProfile.realName || userProfile.name || cleanPhone;
+    } else {
+      finalName = cleanPhone;
+    }
+
+    const finalRealName = userProfile ? (userProfile.realName || cleanName) : cleanName;
+    const finalAvatar = userProfile ? (userProfile.avatar || avatar || '👵') : (avatar || '👵');
+    const finalColor = userProfile ? (userProfile.color || color || '#EC4899') : (color || '#EC4899');
 
     const targetFriendId = isAlreadyRegistered ? registeredUserId : `friend-invited-${Date.now()}`;
 
     const newFriend = {
       id: targetFriendId,
-      name: isAlreadyRegistered ? displayName : `${displayName} (대기)`,
-      realName: cleanName,
-      avatar: avatar || '👵',
-      color: color || '#EC4899',
+      name: isAlreadyRegistered ? finalName : `${finalName} (대기)`,
+      realName: finalRealName,
+      avatar: finalAvatar,
+      color: finalColor,
       lat: HONGDAE_LAT + (Math.random() - 0.5) * 0.008,
       lng: HONGDAE_LNG + (Math.random() - 0.5) * 0.008,
       statusMsg: `초대 메시지 수락 대기 중... 📨`,
@@ -1497,7 +1510,7 @@ async function startServer() {
       id: `notif-invite-pending-${Date.now()}`,
       type: 'invite',
       title: '초대장 발송됨 📨',
-      message: `[${creatorName || '호스트'}] 님이 ${displayName} 님에게 그룹 가입 초대를 발송했습니다. 수락 시 활성화됩니다.`,
+      message: `[${creatorName || '호스트'}] 님이 ${finalName} 님에게 그룹 가입 초대를 발송했습니다. 수락 시 활성화됩니다.`,
       timestamp: new Date().toISOString(),
       read: false,
       roomId: room.id,
@@ -1526,7 +1539,7 @@ async function startServer() {
       senderName: '초대 안심봇',
       senderAvatar: '✉️',
       senderColor: '#3B82F6',
-      text: `✉️ [초대장 도착]\n- 초청자: ${creatorName || '그룹장'}\n- 대상: ${name}\n- 연락처: ${cleanPhone}\n👉 아래의 [초대 수락] 버튼을 터치하시면 이 그룹 약속방에 안전하게 입장 완료됩니다!`,
+      text: `✉️ [초대장 도착]\n- 초청자: ${creatorName || '그룹장'}\n- 대상: ${finalName}\n- 연락처: ${cleanPhone}\n👉 아래의 [초대 수락] 버튼을 터치하시면 이 그룹 약속방에 안전하게 입장 완료됩니다!`,
       timestamp: new Date().toISOString(),
       isSystem: true,
       inviteId: targetFriendId,
@@ -1560,9 +1573,21 @@ async function startServer() {
 
     const friend = room.friends[id];
     if (friend && friend.isPendingInvite) {
+      const userProfile = dbUserProfiles[id];
+      let actualName = '';
+      if (userProfile) {
+        actualName = userProfile.alias || userProfile.realName || userProfile.name || friend.name.replace(' (대기)', '');
+        friend.realName = userProfile.realName || friend.realName;
+        friend.alias = userProfile.alias || friend.alias;
+        friend.avatar = userProfile.avatar || friend.avatar;
+        friend.color = userProfile.color || friend.color;
+      } else {
+        actualName = (friend.realName && friend.realName !== '이름 미등록') ? friend.realName : friend.name.replace(' (대기)', '');
+      }
+
       friend.isPendingInvite = false;
       friend.isOnline = true;
-      friend.name = `${friend.realName || friend.name} (합류)`;
+      friend.name = `${actualName} (합류)`;
       friend.statusMsg = `안심 애플망고톡 가입완료! 실시간 이동 감지 중 🧭`;
       friend.updatedAt = new Date().toISOString();
 
@@ -1571,7 +1596,7 @@ async function startServer() {
         id: `notif-invite-accepted-${Date.now()}`,
         type: 'arrival',
         title: '초대 수락 완료 💖',
-        message: `${friend.realName || friend.name} 님이 초대를 수락하고 안심 그룹방에 입장했습니다.`,
+        message: `${actualName} 님이 초대를 수락하고 안심 그룹방에 입장했습니다.`,
         timestamp: new Date().toISOString(),
         read: false
       });
@@ -1583,7 +1608,7 @@ async function startServer() {
         senderName: '시스템',
         senderAvatar: '🎉',
         senderColor: '#10B981',
-        text: `🎉 [가입 완료] ${friend.realName || friend.name} 님이 초대를 수락하고 이 그룹 모임에 합류했습니다! 실시간 전송 센서가 연동되었습니다.`,
+        text: `🎉 [가입 완료] ${actualName} 님이 초대를 수락하고 이 그룹 모임에 합류했습니다! 실시간 전송 센서가 연동되었습니다.`,
         timestamp: new Date().toISOString(),
         isSystem: true
       });
@@ -2395,6 +2420,36 @@ async function startServer() {
     });
 
     res.json(app);
+  });
+
+  app.post('/api/appointments/delete', (req, res) => {
+    const { id, roomId } = req.body;
+    const activeRoomId = roomId || 'room-friends';
+    const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
+
+    const index = room.appointments.findIndex((a: any) => a.id === id);
+    if (index !== -1) {
+      const deletedApp = room.appointments[index];
+      room.appointments.splice(index, 1);
+      saveDatabaseDebounced();
+
+      room.messages.push({
+        id: `msg-app-deleted-${Date.now()}`,
+        senderId: 'system',
+        senderName: '시스템',
+        senderAvatar: '📅',
+        senderColor: '#3B82F6',
+        text: `📅 [약속 취소] [${deletedApp.title}] 약속 일정이 취소/삭제되었습니다.`,
+        timestamp: new Date().toISOString(),
+        isSystem: true
+      });
+
+      if (broadcastRoomUpdate) {
+        broadcastRoomUpdate(activeRoomId, 'rooms-updated');
+      }
+      return res.json({ success: true });
+    }
+    res.status(404).json({ error: 'Appointment not found' });
   });
 
   app.post('/api/appointments/vote', (req, res) => {
