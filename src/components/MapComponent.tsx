@@ -101,22 +101,48 @@ function realDotHtml(): string {
 }
 
 // 같은 위치(겹침) 마커를 옆으로 분산 배치 — 실제 위치는 dot, 이모티콘은 offset 위치
-function computeSpread<T extends { lat: number; lng: number }>(items: T[]) {
-  const groups: Record<string, T[]> = {};
+function computeSpread<T extends { lat: number; lng: number; color?: string }>(items: T[]) {
+  const groups: Array<{ centerLat: number; centerLng: number; members: T[] }> = [];
+  const threshold = 0.00045; // 약 50미터 반경 내의 친구들을 그룹화
+
   items.forEach(it => {
-    const key = `${it.lat.toFixed(4)},${it.lng.toFixed(4)}`;
-    (groups[key] = groups[key] || []).push(it);
+    const foundGroup = groups.find(g => {
+      const dLat = Math.abs(g.centerLat - it.lat);
+      const dLng = Math.abs(g.centerLng - it.lng);
+      return dLat < threshold && dLng < threshold;
+    });
+
+    if (foundGroup) {
+      foundGroup.members.push(it);
+      // 그룹 중심 갱신
+      foundGroup.centerLat = foundGroup.members.reduce((sum, m) => sum + m.lat, 0) / foundGroup.members.length;
+      foundGroup.centerLng = foundGroup.members.reduce((sum, m) => sum + m.lng, 0) / foundGroup.members.length;
+    } else {
+      groups.push({ centerLat: it.lat, centerLng: it.lng, members: [it] });
+    }
   });
+
   const out: Array<T & { dLat: number; dLng: number; grouped: boolean; gLat: number; gLng: number }> = [];
-  Object.values(groups).forEach(group => {
-    const n = group.length;
-    group.forEach((it, i) => {
+  groups.forEach(group => {
+    const n = group.members.length;
+    const anchorLat = group.centerLat;
+    const anchorLng = group.centerLng;
+
+    group.members.forEach((it, i) => {
       if (n === 1) {
         out.push({ ...it, dLat: it.lat, dLng: it.lng, grouped: false, gLat: it.lat, gLng: it.lng });
       } else {
-        const step = 0.00020;
-        const dLng = it.lng + (i - (n - 1) / 2) * step;
-        out.push({ ...it, dLat: it.lat + 0.00014, dLng, grouped: true, gLat: it.lat, gLng: it.lng });
+        // 부채꼴 형태로 반사하여 고르게 펼쳐 배치
+        const radius = 0.00030; // 약 33미터 꼬리 길이
+        let angle = Math.PI / 2; // 기본 90도 (위)
+        if (n > 1) {
+          const minAngle = Math.PI / 6; // 30도
+          const maxAngle = 5 * Math.PI / 6; // 150도
+          angle = minAngle + (i / (n - 1)) * (maxAngle - minAngle);
+        }
+        const dLat = anchorLat + radius * Math.sin(angle);
+        const dLng = anchorLng + radius * Math.cos(angle) * 1.25; // 위도 차이 보정을 위한 1.25 배율
+        out.push({ ...it, dLat, dLng, grouped: true, gLat: anchorLat, gLng: anchorLng });
       }
     });
   });
@@ -479,6 +505,20 @@ export default function MapComponent({
             dot.setMap(map);
             kakaoOverlaysRef.current.push(dot);
           }
+
+          // 실제 위치(점)와 오프셋 마커(말풍선) 간의 실선(꼬리) 연결
+          const stemLine = new window.kakao.maps.Polyline({
+            path: [
+              new window.kakao.maps.LatLng(item.gLat, item.gLng),
+              new window.kakao.maps.LatLng(item.dLat, item.dLng)
+            ],
+            strokeWeight: 1.5,
+            strokeColor: item.color || '#4B5563',
+            strokeOpacity: 0.85,
+            strokeStyle: 'solid',
+          });
+          stemLine.setMap(map);
+          kakaoPolylinesRef.current.push(stemLine);
         }
         const overlay = new window.kakao.maps.CustomOverlay({
           position: new window.kakao.maps.LatLng(item.dLat, item.dLng),
@@ -624,6 +664,14 @@ export default function MapComponent({
             dotDrawnL.add(key);
             mg.addLayer(L.marker([item.gLat, item.gLng], { icon: L.divIcon({ className: '', html: realDotHtml(), iconSize: [10, 10], iconAnchor: [5, 5] }) }));
           }
+
+          // 실제 위치(점)와 오프셋 마커(말풍선) 간의 실선(꼬리) 연결
+          const stem = L.polyline([[item.gLat, item.gLng], [item.dLat, item.dLng]] as L.LatLngTuple[], {
+            color: item.color || '#4B5563',
+            weight: 1.5,
+            opacity: 0.85,
+          });
+          pg.addLayer(stem);
         }
         const icon = L.divIcon({
           className: '',

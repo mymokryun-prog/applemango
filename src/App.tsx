@@ -78,6 +78,42 @@ export default function App() {
   const [regAlias, setRegAlias] = useState(() => localStorage.getItem('aemang_nickname') || '');
   const [regFruit, setRegFruit] = useState(() => localStorage.getItem('aemang_fruit') || '🍎');
 
+  // 내 프로필 설정 모달 드래그다운(Swipe-down) 닫기 제스처 상태
+  const [profileDragY, setProfileDragY] = useState(0);
+  const profileDragStartRef = useRef<number | null>(null);
+
+  const handleProfileTouchStart = (e: React.TouchEvent) => {
+    profileDragStartRef.current = e.touches[0].clientY;
+  };
+
+  const handleProfileTouchMove = (e: React.TouchEvent) => {
+    if (profileDragStartRef.current === null) return;
+    
+    // 모달 내부가 아래로 스크롤되어 있다면 드래그다운으로 모달을 닫지 않고 정상 스크롤되도록 함
+    if (e.currentTarget.scrollTop > 0) {
+      return;
+    }
+    
+    const currentY = e.touches[0].clientY;
+    const deltaY = currentY - profileDragStartRef.current;
+    if (deltaY > 0) {
+      setProfileDragY(deltaY);
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    }
+  };
+
+  const handleProfileTouchEnd = () => {
+    if (profileDragStartRef.current === null) return;
+    profileDragStartRef.current = null;
+    
+    if (profileDragY > 100) {
+      setShowProfileModal(false);
+    }
+    setProfileDragY(0);
+  };
+
   const [activeGameInvite, setActiveGameInvite] = useState<{
     from: string;
     fromName: string;
@@ -2443,6 +2479,7 @@ export default function App() {
       <div className="bg-white border-t border-gray-100 px-1 flex items-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
         {([
           { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
+          { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
           { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); } },
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
@@ -2450,7 +2487,6 @@ export default function App() {
           { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
           { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
           { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
-          { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
           { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
@@ -2836,7 +2872,18 @@ export default function App() {
       {/* A. 프로필 등록 모달 */}
       {showProfileModal && (
         <div className="absolute inset-0 bg-black/40 z-50 flex items-end justify-center font-sans">
-          <div className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+          <div
+            className="bg-white rounded-t-3xl w-full p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto"
+            style={{
+              transform: `translateY(${profileDragY}px)`,
+              transition: profileDragY === 0 ? 'transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1)' : 'none',
+              touchAction: profileDragY > 0 ? 'none' : 'auto',
+              willChange: 'transform'
+            }}
+            onTouchStart={handleProfileTouchStart}
+            onTouchMove={handleProfileTouchMove}
+            onTouchEnd={handleProfileTouchEnd}
+          >
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto" />
             <h3 className="text-base font-bold text-gray-900">내 프로필 설정</h3>
 
