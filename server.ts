@@ -3274,6 +3274,203 @@ async function startServer() {
     }
   });
 
+  // 개인정보처리방침 (Privacy Policy) Route
+  app.get(['/privacy', '/privacy-policy'], (req, res) => {
+    try {
+      const filePath = path.join(process.cwd(), 'PRIVACY_POLICY.md');
+      if (fs.existsSync(filePath)) {
+        const markdown = fs.readFileSync(filePath, 'utf8');
+        // Simple Markdown-to-HTML parser for basic rendering
+        let htmlContent = markdown
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          // Headings
+          .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+          .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+          .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+          // Bold
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          // Horizontal Rule
+          .replace(/^---$/gim, '<hr />')
+          // List items
+          .replace(/^\s*-\s+(.*$)/gim, '<li>$1</li>')
+          .replace(/^\s*\d+\.\s+(.*$)/gim, '<li>$1</li>');
+
+        const lines = htmlContent.split('\n');
+        let inList = false;
+        const processedLines = lines.map(line => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('<li>')) {
+            if (!inList) {
+              inList = true;
+              return '<ul>' + line;
+            }
+            return line;
+          } else {
+            if (inList) {
+              inList = false;
+              return '</ul>' + (trimmed && !trimmed.startsWith('<h') && !trimmed.startsWith('<hr') ? `<p>${line}</p>` : line);
+            }
+            if (trimmed && !trimmed.startsWith('<h') && !trimmed.startsWith('<hr') && !trimmed.startsWith('<p') && !trimmed.startsWith('<ul') && !trimmed.startsWith('</ul')) {
+              return `<p>${line}</p>`;
+            }
+            return line;
+          }
+        });
+        if (inList) {
+          processedLines.push('</ul>');
+        }
+        const parsedHtml = processedLines.join('\n');
+
+        res.send(`
+          <!DOCTYPE html>
+          <html lang="ko">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>애플망고톡 개인정보처리방침</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+              :root {
+                --primary: #F97316;
+                --primary-hover: #EA580C;
+                --mango-grad: linear-gradient(135deg, #F97316 0%, #EC4899 100%);
+                --bg-light: #FAFAFA;
+                --card-bg: #FFFFFF;
+                --text-main: #1F2937;
+                --text-muted: #4B5563;
+                --border-color: #E5E7EB;
+              }
+              @media (prefers-color-scheme: dark) {
+                :root {
+                  --bg-light: #111827;
+                  --card-bg: #1F2937;
+                  --text-main: #F9FAFB;
+                  --text-muted: #9CA3AF;
+                  --border-color: #374151;
+                }
+              }
+              body {
+                font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background-color: var(--bg-light);
+                color: var(--text-main);
+                line-height: 1.625;
+                margin: 0;
+                padding: 0;
+              }
+              .container {
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 40px 20px;
+              }
+              .card {
+                background-color: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-radius: 16px;
+                padding: 40px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+              }
+              .header {
+                margin-bottom: 20px;
+              }
+              h1 {
+                font-size: 2.25rem;
+                font-weight: 700;
+                margin-top: 0;
+                margin-bottom: 15px;
+                background: var(--mango-grad);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                display: inline-block;
+              }
+              h2 {
+                font-size: 1.5rem;
+                font-weight: 600;
+                margin-top: 40px;
+                margin-bottom: 16px;
+                color: var(--primary);
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 8px;
+              }
+              h3 {
+                font-size: 1.15rem;
+                font-weight: 600;
+                margin-top: 24px;
+                margin-bottom: 12px;
+              }
+              p {
+                margin-top: 0;
+                margin-bottom: 16px;
+                color: var(--text-main);
+              }
+              ul, ol {
+                margin-top: 0;
+                margin-bottom: 24px;
+                padding-left: 24px;
+              }
+              li {
+                margin-bottom: 8px;
+              }
+              strong {
+                font-weight: 600;
+                color: var(--text-main);
+              }
+              hr {
+                border: 0;
+                border-top: 1px solid var(--border-color);
+                margin: 30px 0;
+              }
+              .footer {
+                text-align: center;
+                margin-top: 40px;
+                color: var(--text-muted);
+                font-size: 0.875rem;
+              }
+              .back-btn {
+                display: inline-block;
+                padding: 10px 20px;
+                background: var(--mango-grad);
+                color: white;
+                text-decoration: none;
+                border-radius: 9999px;
+                font-weight: 500;
+                font-size: 0.875rem;
+                box-shadow: 0 4px 10px rgba(249, 115, 22, 0.2);
+                transition: transform 0.2s, box-shadow 0.2s;
+              }
+              .back-btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 6px 15px rgba(249, 115, 22, 0.3);
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="card">
+                <div class="header">
+                  ${parsedHtml}
+                </div>
+                <div style="text-align: center; margin-top: 40px;">
+                  <a href="/" class="back-btn">애플망고톡으로 돌아가기</a>
+                </div>
+              </div>
+              <div class="footer">
+                &copy; 2026 주식회사 애플망고. All rights reserved.
+              </div>
+            </div>
+          </body>
+          </html>
+        `);
+      } else {
+        res.status(404).send('개인정보처리방침을 찾을 수 없습니다.');
+      }
+    } catch (error) {
+      console.error(error);
+      res.status(500).send('서버 오류가 발생했습니다.');
+    }
+  });
+
   // Vite Integration for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
