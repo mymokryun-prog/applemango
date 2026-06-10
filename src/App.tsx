@@ -91,6 +91,8 @@ export default function App() {
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const ringAudioCtxRef = useRef<AudioContext | null>(null);
+  const ringIntervalRef = useRef<any>(null);
 
   // 내 프로필 설정 모달 드래그다운(Swipe-down) 닫기 제스처 상태
   const [profileDragY, setProfileDragY] = useState(0);
@@ -1800,6 +1802,94 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  const startRingbackTone = () => {
+    try {
+      stopRingbackTone();
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      ringAudioCtxRef.current = ctx;
+      
+      const playRing = () => {
+        if (!ctx || ctx.state === 'closed') return;
+        
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        
+        osc1.frequency.value = 440;
+        osc2.frequency.value = 480;
+        
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        gainNode.gain.setValueAtTime(0, ctx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.08, ctx.currentTime + 1.2);
+        gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.4);
+        
+        osc1.start();
+        osc2.start();
+        
+        setTimeout(() => {
+          try {
+            osc1.stop();
+            osc2.stop();
+          } catch (e) {}
+        }, 1500);
+      };
+      
+      playRing();
+      ringIntervalRef.current = setInterval(playRing, 2500);
+    } catch (err) {
+      console.error("Failed to start ringback tone:", err);
+    }
+  };
+
+  const stopRingbackTone = () => {
+    if (ringIntervalRef.current) {
+      clearInterval(ringIntervalRef.current);
+      ringIntervalRef.current = null;
+    }
+    if (ringAudioCtxRef.current) {
+      ringAudioCtxRef.current.close().catch(() => {});
+      ringAudioCtxRef.current = null;
+    }
+  };
+
+  const playCallEndTone = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.frequency.value = 350;
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      gainNode.gain.setValueAtTime(0, ctx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.05);
+      gainNode.gain.setValueAtTime(0.08, ctx.currentTime + 0.15);
+      gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.2);
+      
+      gainNode.gain.setValueAtTime(0, ctx.currentTime + 0.25);
+      gainNode.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.3);
+      gainNode.gain.setValueAtTime(0.08, ctx.currentTime + 0.4);
+      gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.45);
+
+      osc.start();
+      setTimeout(() => {
+        try {
+          osc.stop();
+          ctx.close();
+        } catch (e) {}
+      }, 600);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleStartCall = (friend: any, type: 'voice' | 'video') => {
     setCallingState({
       type,
@@ -1814,6 +1904,7 @@ export default function App() {
 
   const handleEndCall = () => {
     setCallingState(prev => prev ? { ...prev, status: 'ended' } : null);
+    playCallEndTone();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
@@ -1823,15 +1914,21 @@ export default function App() {
     }, 1200);
   };
 
-  // Ringing to Connected auto-transition
+  // Ringing effect (Ringtone control & auto-transition)
   useEffect(() => {
     let ringTimer: any;
     if (callingState && callingState.status === 'ringing') {
+      startRingbackTone();
       ringTimer = setTimeout(() => {
         setCallingState(prev => prev ? { ...prev, status: 'connected' } : null);
-      }, 3000);
+      }, 5000);
+    } else {
+      stopRingbackTone();
     }
-    return () => clearTimeout(ringTimer);
+    return () => {
+      clearTimeout(ringTimer);
+      stopRingbackTone();
+    };
   }, [callingState?.status]);
 
   // Duration timer
