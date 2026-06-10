@@ -877,7 +877,7 @@ function checkChallengeProgress() {
       room.notifications.unshift({
         id: `notif-challenge-${Date.now()}`,
         type: 'system',
-        title: '🏆 가족 걸음 챌린지 달성!',
+        title: `🏆 [${room.name}] 걸음 챌린지 달성!`,
         message: `[${room.name}] 오늘 합산 ${total.toLocaleString()}걸음으로 목표 ${ch.goalSteps.toLocaleString()}걸음을 달성했습니다! 🎉`,
         timestamp: new Date().toISOString(),
         read: false,
@@ -885,10 +885,10 @@ function checkChallengeProgress() {
       room.messages.push({
         id: `msg-challenge-${Date.now()}`,
         senderId: 'system', senderName: '걸음 챌린지', senderAvatar: '🏆', senderColor: '#F59E0B',
-        text: `🏆 오늘의 가족 걸음 챌린지 달성! 모두 합쳐 ${total.toLocaleString()}걸음을 걸었어요. 내일도 함께 걸어요! 🥭`,
+        text: `🏆 오늘의 [${room.name}] 걸음 챌린지 달성! 모두 합쳐 ${total.toLocaleString()}걸음을 걸었어요. 내일도 함께 걸어요! 🥭`,
         timestamp: new Date().toISOString(), isSystem: true,
       });
-      broadcastPushNotification('🏆 가족 걸음 챌린지 달성!',
+      broadcastPushNotification(`🏆 [${room.name}] 걸음 챌린지 달성!`,
         `${room.name}: 오늘 목표 ${ch.goalSteps.toLocaleString()}걸음 달성!`,
         { type: 'challenge_achieved', roomId: room.id }).catch(() => {});
       saveDatabaseDebounced();
@@ -1087,8 +1087,26 @@ function simulateMovement() {
       friend.speed = heading === '정지' ? 0 : Math.round((2.5 + Math.random() * 8) * 10) / 10;
 
       if (friend.pedometerEnabled) {
-        const stepIncrement = friend.speed > 1 ? Math.floor(8 + Math.random() * 14) : Math.floor(1 + Math.random() * 4);
-        friend.stepsToday = (friend.stepsToday || 0) + stepIncrement;
+        const today = new Date().toISOString().slice(0, 10);
+        const hour = new Date().getHours();
+        const isActiveTime = hour >= 8 && hour < 22;
+        const walkProbability = isActiveTime ? 0.08 : 0.005; // 8% during active hours, 0.5% during night
+        
+        if (Math.random() < walkProbability) {
+          const stepIncrement = friend.speed > 1 ? Math.floor(8 + Math.random() * 14) : Math.floor(1 + Math.random() * 4);
+          
+          // 날짜가 변경되었으면 오늘 걸음 0으로 초기화
+          if (friend.stepsTodayDate !== today) {
+            friend.stepsToday = 0;
+            friend.stepsTodayDate = today;
+          }
+          
+          friend.stepsToday = (friend.stepsToday || 0) + stepIncrement;
+          friend.stepsTodayDate = today;
+          
+          if (!friend.stepsHistory || typeof friend.stepsHistory !== 'object') friend.stepsHistory = {};
+          friend.stepsHistory[today] = Math.max(friend.stepsHistory[today] || 0, friend.stepsToday);
+        }
       }
 
       if (friend.heartRateEnabled) {
@@ -2871,11 +2889,11 @@ async function startServer() {
       if (typeof stepsToday === 'number') {
         friend.stepsToday = stepsToday;
         friend.stepsTodayDate = today;
-        // BIZ-CORE-8 ⑧: 서버측 일별 걸음 히스토리(효도 리포트·챌린지 데이터원), 최근 90일 보관
+        // BIZ-CORE-8 ⑧: 서버측 일별 걸음 히스토리(효도 리포트·챌린지 데이터원), 최근 365일 보관
         if (!friend.stepsHistory || typeof friend.stepsHistory !== 'object') friend.stepsHistory = {};
         friend.stepsHistory[today] = Math.max(friend.stepsHistory[today] || 0, stepsToday);
         const dates = Object.keys(friend.stepsHistory).sort();
-        while (dates.length > 90) { delete friend.stepsHistory[dates.shift() as string]; }
+        while (dates.length > 365) { delete friend.stepsHistory[dates.shift() as string]; }
         // 활동 감지 시각 갱신(무활동 감지 오탐 방지)
         if (stepsToday > (friend.lastStepCount || 0)) friend.lastActivityAt = new Date().toISOString();
         friend.lastStepCount = stepsToday;
@@ -3026,7 +3044,7 @@ async function startServer() {
       room.messages.push({
         id: `msg-ch-set-${Date.now()}`,
         senderId: 'system', senderName: '걸음 챌린지', senderAvatar: '🏆', senderColor: '#F59E0B',
-        text: `🏆 가족 걸음 챌린지가 설정되었습니다! 오늘 다 함께 ${goal.toLocaleString()}걸음을 걸어봐요. 진행 상황은 만보기 탭에서 확인! 🥾`,
+        text: `🏆 [${room.name}] 걸음 챌린지가 설정되었습니다! 오늘 다 함께 ${goal.toLocaleString()}걸음을 걸어봐요. 진행 상황은 만보기 탭에서 확인! 🥾`,
         timestamp: new Date().toISOString(), isSystem: true,
       });
     }

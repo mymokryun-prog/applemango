@@ -59,11 +59,26 @@ function renderAvatar(avatarString: string): string {
 }
 
 function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
+  if (isMe) {
+    const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
+    const statusSnippet = friend.statusMsg
+      ? `<div style="background:#fff;color:#374151;font-size:7px;font-weight:600;border:1px solid #E5E7EB;border-radius:5px;padding:1px 4px;margin-bottom:2px;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${friend.statusMsg.slice(0, 9)}${friend.statusMsg.length > 9 ? '…' : ''}</div>`
+      : '';
+    return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+      ${statusSnippet}
+      <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:22px;filter:drop-shadow(0 0 5px #39FF14) drop-shadow(0 0 9px #39FF14);${ring};z-index:5">
+        ${renderAvatar(friend.avatar)}
+        <div style="position:absolute;bottom:-8px;right:-10px;background:#3B82F6;color:#fff;font-size:7px;font-weight:900;padding:1.5px 3.5px;border-radius:6px;line-height:1;border:1px solid #111;z-index:10;filter:none">나</div>
+      </div>
+      <div style="background:#fff;border:1px solid #D1D5DB;color:#111;font-size:7px;font-weight:600;padding:1px 5px;border-radius:4px;margin-top:5px;white-space:nowrap;font-family:sans-serif">${friend.name.replace(' (합류)', '').replace(' (대기)', '').split(' ')[0]}${friend.speed > 0 ? ` ·${Math.round(friend.speed)}k` : ''}</div>
+    </div>`;
+  }
+
   const isOffline = friend.isOnline === false;
   // 로그아웃/앱종료(오프라인) 친구는 마지막 위치에 고정 표시 — 어둡게 + 굵은 검정 테두리
   const markerBg = isOffline ? '#4B5563' : friend.color;
   const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
-  const border = isMe ? 'border:2px dashed #EAB308' : (isOffline ? 'border:3px solid #000' : 'border:2px solid #111');
+  const border = isOffline ? 'border:3px solid #000' : 'border:2px solid #111';
   const hrBadge = friend.heartRate
     ? `<div style="position:absolute;top:-4px;left:-10px;background:#EF4444;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">♥${friend.heartRate}</div>`
     : '';
@@ -159,9 +174,9 @@ function computeSpread<T extends { lat: number; lng: number; color?: string }>(i
 
 function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string }): string {
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
-    <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1);overflow:hidden">
+    <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:22px;filter:drop-shadow(0 0 5px #39FF14) drop-shadow(0 0 9px #39FF14);z-index:5">
       ${renderAvatar(myProfile.avatar)}
-      <div style="position:absolute;bottom:-4px;right:-7px;background:#3B82F6;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;border:1px solid #111;z-index:2">내 위치</div>
+      <div style="position:absolute;bottom:-8px;right:-10px;background:#3B82F6;color:#fff;font-size:7px;font-weight:900;padding:1.5px 3.5px;border-radius:6px;line-height:1;border:1px solid #111;z-index:10;filter:none">나</div>
     </div>
   </div>`;
 }

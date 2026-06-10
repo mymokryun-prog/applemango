@@ -20,6 +20,7 @@ interface PedometerPanelProps {
   phone: string;
   activeProfileId: string;
   activeRoomId: string;
+  activeRoomName?: string;
   liveSteps?: number; // 실시간 기기 만보기 걸음수 (상단 상태바와 동일 소스)
   friends?: Friend[]; // 같은 방 친구들 — 걸음수 공유 표시용
   onSyncSteps: (steps: number) => void;
@@ -34,6 +35,7 @@ export default function PedometerPanel({
   phone,
   activeProfileId,
   activeRoomId,
+  activeRoomName = '',
   liveSteps = 0,
   friends = [],
   onSyncSteps,
@@ -46,6 +48,7 @@ export default function PedometerPanel({
   const [stepsToday, setStepsToday] = useState<number>(0);
   const [stepGoal, setStepGoal] = useState<number>(10000);
   const [history, setHistory] = useState<StepRecord[]>([]);
+  const [selectedDay, setSelectedDay] = useState<StepRecord | null>(null);
   const graphScrollRef = useRef<HTMLDivElement>(null);
 
   // ===== BIZ-CORE-8 상태 =====
@@ -201,6 +204,23 @@ export default function PedometerPanel({
       }
     } catch {}
 
+    // 만약 히스토리가 비어있거나 오늘 기록뿐이면, 과거 10일 치 데모 데이터를 자동 생성(그래프 시각화 및 터치 탐색 테스트용)
+    if (historyList.length <= 1) {
+      const seededHistory: StepRecord[] = [];
+      for (let i = 10; i >= 1; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+        const steps = Math.floor(Math.random() * 8000) + 4000;
+        seededHistory.push({ date: dateStr, steps });
+      }
+      historyList = [...seededHistory, ...historyList];
+      archivedSomething = true;
+    }
+
     const todayRecord = historyList.find(r => r.date === todayStr);
     if (todayRecord && todayRecord.steps > todaySteps) todaySteps = todayRecord.steps;
     setStepsToday(todaySteps);
@@ -216,6 +236,9 @@ export default function PedometerPanel({
       localStorage.setItem(historyKey, JSON.stringify(historyList));
     }
     setHistory(historyList);
+    
+    // 기본 선택 날짜를 오늘로 설정
+    setSelectedDay(historyList.find(r => r.date === todayStr) || { date: todayStr, steps: todaySteps });
   }, [phone]);
 
   // 걸음 수 업데이트
@@ -239,6 +262,11 @@ export default function PedometerPanel({
     }
     setHistory(updatedHistory);
     localStorage.setItem(historyKey, JSON.stringify(updatedHistory));
+
+    // 오늘 날짜가 선택된 상태라면 선택된 데이터도 실시간 동기화
+    if (selectedDay && selectedDay.date === todayStr) {
+      setSelectedDay({ date: todayStr, steps: newSteps });
+    }
 
     // 부모 컴포넌트로 전달 (서버 싱크)
     onSyncSteps(newSteps);
@@ -298,6 +326,7 @@ export default function PedometerPanel({
       
       const percent = Math.min(100, Math.floor((item.steps / stepGoal) * 100));
       return {
+        date: item.date,
         label,
         steps: item.steps,
         percent,
@@ -403,7 +432,7 @@ export default function PedometerPanel({
               <span>일별 걸음수 히스토리 그래프</span>
             </h3>
             <span className="text-[9px] bg-slate-50 text-slate-400 font-bold px-2 py-0.5 rounded-md">
-              👈 손터치(밀기)로 과거 기록 탐색
+              👈 막대를 터치하여 과거 기록 조회
             </span>
           </div>
 
@@ -412,30 +441,66 @@ export default function PedometerPanel({
             ref={graphScrollRef}
             className="flex gap-4 items-end h-36 overflow-x-auto py-2 px-1 scrollbar-none select-none scroll-smooth"
           >
-            {graphData.map((day, idx) => (
-              <div key={idx} className="flex flex-col items-center shrink-0 w-12 gap-1.5">
-                {/* 걸음 수 수치 */}
-                <span className="text-[9px] font-black text-slate-700 font-mono scale-95">
-                  {day.steps.toLocaleString()}
-                </span>
-                {/* 막대 (Thicker w-8) */}
-                <div className="w-8 bg-slate-50 rounded-t-lg h-24 flex items-end shadow-inner border border-slate-100/50">
-                  <div
-                    className={`w-full rounded-t-lg transition-all duration-500 ${
-                      day.percent >= 100 
-                        ? 'bg-gradient-to-t from-emerald-500 to-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
-                        : 'bg-gradient-to-t from-rose-500 to-rose-400'
-                    }`}
-                    style={{ height: `${Math.max(6, day.percent)}%` }}
-                  />
+            {graphData.map((day, idx) => {
+              const isSelected = selectedDay && selectedDay.date === day.date;
+              return (
+                <div 
+                  key={idx} 
+                  onClick={() => setSelectedDay({ date: day.date, steps: day.steps })}
+                  className="flex flex-col items-center shrink-0 w-14 gap-1.5 cursor-pointer"
+                >
+                  {/* 걸음 수 수치 (크게 보이고 굵게) */}
+                  <span className={`text-[10px] font-black font-mono transition-all duration-300 ${isSelected ? 'text-rose-600 scale-110' : 'text-slate-700'}`}>
+                    {day.steps.toLocaleString()}
+                  </span>
+                  {/* 막대 (넓이 두껍게 w-10 적용 및 터치 하이라이트) */}
+                  <div className={`w-10 bg-slate-50 rounded-t-lg h-24 flex items-end shadow-inner border transition-all duration-300 ${
+                    isSelected 
+                      ? 'border-rose-400 ring-2 ring-rose-300 ring-offset-1 scale-105' 
+                      : 'border-slate-100/50 hover:border-slate-300'
+                  }`}>
+                    <div
+                      className={`w-full rounded-t-lg transition-all duration-500 ${
+                        day.percent >= 100 
+                          ? 'bg-gradient-to-t from-emerald-500 to-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                          : 'bg-gradient-to-t from-rose-500 to-rose-400'
+                      }`}
+                      style={{ height: `${Math.max(6, day.percent)}%` }}
+                    />
+                  </div>
+                  {/* 날짜 라벨 */}
+                  <span className={`text-[10px] mt-0.5 font-bold ${day.isToday ? 'text-rose-600 font-black' : (isSelected ? 'text-gray-900 font-extrabold' : 'text-slate-400')}`}>
+                    {day.label}
+                  </span>
                 </div>
-                {/* 날짜 라벨 */}
-                <span className={`text-[9.5px] mt-0.5 font-bold ${day.isToday ? 'text-rose-600 font-black' : 'text-slate-400'}`}>
-                  {day.label}
+              );
+            })}
+          </div>
+
+          {/* 선택한 날짜 상세정보 카드 */}
+          {selectedDay && (
+            <div className="mt-2 p-4 bg-rose-50/50 border border-rose-100/50 rounded-2xl flex items-center justify-between animate-fadeIn shrink-0">
+              <div className="space-y-1">
+                <span className="text-[10px] text-rose-500 font-extrabold tracking-wider">선택한 날짜 기록</span>
+                <h4 className="text-sm font-black text-gray-800">
+                  {(() => {
+                    if (selectedDay.date === getTodayString()) return '오늘 (실시간)';
+                    const parts = selectedDay.date.split('-');
+                    return parts.length === 3 ? `${parts[0]}년 ${parts[1]}월 ${parts[2]}일` : selectedDay.date;
+                  })()}
+                </h4>
+              </div>
+              <div className="text-right">
+                <div className="flex items-baseline justify-end gap-0.5">
+                  <span className="text-xl font-extrabold text-gray-900 font-mono leading-none">{selectedDay.steps.toLocaleString()}</span>
+                  <span className="text-[11px] text-gray-500 font-bold">걸음</span>
+                </div>
+                <span className={`text-[10px] font-black ${selectedDay.steps >= stepGoal ? 'text-emerald-600' : 'text-slate-500'}`}>
+                  {selectedDay.steps >= stepGoal ? '🏆 목표 달성 완료!' : `${Math.round((selectedDay.steps / stepGoal) * 100)}% 달성`}
                 </span>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* 친구 걸음수 공유 (같은 방 멤버) */}
@@ -485,7 +550,7 @@ export default function PedometerPanel({
         <div className="bg-white rounded-3xl p-5 border border-amber-100 shadow-sm space-y-3">
           <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
             <Trophy className="w-4 h-4 text-amber-500" />
-            <span>가족 걸음 챌린지 (오늘 합산)</span>
+            <span>{activeRoomName || '가족'} 걸음 챌린지 (오늘 합산)</span>
           </h3>
           {challengeStatus?.challenge ? (
             <div className="space-y-2">

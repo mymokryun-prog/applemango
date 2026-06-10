@@ -2487,6 +2487,7 @@ export default function App() {
             phone={regPhone}
             activeProfileId={activeProfileId}
             activeRoomId={activeRoomId}
+            activeRoomName={rooms.find(r => r.id === activeRoomId)?.name || '애플망고 단짝방'}
             liveSteps={stepsToday}
             friends={friends}
             onSyncSteps={handleSyncSteps}
