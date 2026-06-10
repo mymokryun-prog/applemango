@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getLocationSocket } from '../realtime/socketClient';
 import type { GpsStatus, LocationUpdatedPayload } from '../realtime/types';
+import { isNativeApp, startNativeBackgroundWatch } from '../native/backgroundLocation';
 
 const MIN_SEND_INTERVAL_MS = 3500;
 const MIN_MOVE_METERS = 12;
@@ -127,6 +128,7 @@ export function useRealtimeLocation({
   const onLocationUpdatedRef = useRef(onLocationUpdated);
   const lastEmitRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const nativeWatchCleanupRef = useRef<(() => void) | null>(null); // 네이티브(Capacitor) 워처
   const joinedRoomRef = useRef<string | null>(null);
   const hasCoordsRef = useRef(false);
   const geoAttemptRef = useRef(0);
@@ -139,7 +141,9 @@ export function useRealtimeLocation({
   const emitLocation = useCallback(
     (lat: number, lng: number, accuracy?: number) => {
       const socket = getLocationSocket();
-      if (!socket.connected || !roomId || !userId) return;
+      if (!roomId || !userId) return;
+      // 웹: 소켓 필수 / 네이티브: 소켓 끊김 시 HTTP 폴백 허용
+      if (!socket.connected && !isNativeApp()) return;
 
       const now = Date.now();
       const prev = lastEmitRef.current;
@@ -152,6 +156,16 @@ export function useRealtimeLocation({
       }
 
       lastEmitRef.current = { lat, lng, time: now };
+
+      // 네이티브 백그라운드 모드에서 소켓이 끊겨 있으면 HTTP로 폴백 전송
+      if (!socket.connected && isNativeApp()) {
+        fetch('/api/friends/move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: userId, lat, lng, roomId }),
+        }).then(() => setLastSentAt(new Date().toISOString())).catch(() => {});
+        return;
+      }
 
       socket.emit(
         'update-location',
@@ -215,6 +229,10 @@ export function useRealtimeLocation({
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    if (nativeWatchCleanupRef.current) {
+      nativeWatchCleanupRef.current();
+      nativeWatchCleanupRef.current = null;
+    }
   }, []);
 
   const startWatch = useCallback(
@@ -230,6 +248,40 @@ export function useRealtimeLocation({
   );
 
   const startGpsWatch = useCallback(() => {
+    // 네이티브 앱(Capacitor): 화면이 꺼져도 동작하는 백그라운드 워처 우선 사용
+    if (isNativeApp() && !nativeWatchCleanupRef.current) {
+      setGpsStatus('requesting');
+      setGpsError('네이티브 위치 권한을 확인하는 중…');
+      startNativeBackgroundWatch(
+        (lat, lng, accuracy) => {
+          hasCoordsRef.current = true;
+          watchErrorCountRef.current = 0;
+          setMyCoords({ lat, lng, accuracy });
+          setGpsError(null);
+          setGpsStatus(typeof accuracy === 'number' && accuracy > 150 ? 'degraded' : 'watching');
+          emitLocation(lat, lng, accuracy);
+        },
+        (message) => {
+          setGpsStatus('error');
+          setGpsError(message);
+        }
+      ).then((cleanup) => {
+        if (cleanup) {
+          nativeWatchCleanupRef.current = cleanup;
+        } else {
+          // 네이티브 워처 시작 실패 → 웹 geolocation 경로로 폴백
+          startWebGpsWatchRef.current?.();
+        }
+      });
+      return;
+    }
+
+    startWebGpsWatchRef.current?.();
+  }, [emitLocation]);
+
+  // 기존 웹(PWA) geolocation 경로 — 네이티브 폴백을 위해 ref로 분리
+  const startWebGpsWatchRef = useRef<(() => void) | null>(null);
+  const startWebGpsWatch = useCallback(() => {
     if (!navigator.geolocation) {
       setGpsStatus('unavailable');
       setGpsError('이 브라우저는 위치 기능을 지원하지 않습니다.');
@@ -285,6 +337,11 @@ export function useRealtimeLocation({
       primaryOptions
     );
   }, [clearWatch, handlePosition, handleGeoError, startWatch]);
+
+  // 네이티브 경로에서 폴백할 수 있도록 웹 watch 함수를 ref에 연결
+  useEffect(() => {
+    startWebGpsWatchRef.current = startWebGpsWatch;
+  }, [startWebGpsWatch]);
 
   const requestGpsPermission = useCallback(() => {
     hasCoordsRef.current = false;

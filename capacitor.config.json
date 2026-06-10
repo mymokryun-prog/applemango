@@ -1,0 +1,15 @@
+{
+  "appId": "com.aemang.applemangotalk",
+  "appName": "애플망고톡",
+  "webDir": "dist",
+  "server": {
+    "url": "https://REPLACE-WITH-YOUR-RAILWAY-DOMAIN.up.railway.app",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "automatic"
+  }
+}
