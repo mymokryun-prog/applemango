@@ -226,31 +226,23 @@ export default function App() {
   const [dialingStatus, setDialingStatus] = useState<'calling' | 'connected' | 'completed'>('calling');
   const [dialingTimeCounter, setDialingTimeCounter] = useState(0);
 
+  // BIZ-CORE-8 ④: 119 자동신고 시뮬레이션 → 보호자 SOS 알림으로 변경
+  // 가족·친구 전원에게 위치 포함 긴급 푸시를 보내고, 119 연결은 사용자가 직접 전화(tel:119)
   const handleEmergency119 = async (friend: Friend) => {
-    // 실수 방지 — 119 연결 전 3번 확인
-    if (!window.confirm(`🚨 119에 긴급 연결하시겠습니까? (1/3)\n대상: ${friend.name}`)) return;
-    if (!window.confirm('정말로 119에 연결합니다. 실수가 아닌가요? (2/3)')) return;
-    if (!window.confirm('⚠️ 마지막 확인입니다. 지금 119로 연결됩니다. 진행하시겠습니까? (3/3)')) return;
+    if (!window.confirm(`🆘 SOS를 발신하시겠습니까?\n대상: ${friend.name}\n\n같은 방 가족·친구 전원에게 긴급 알림과 현재 위치가 전송됩니다.\n(119 신고가 필요하면 SOS 화면에서 직접 전화할 수 있습니다)`)) return;
 
     setEmergencyTarget(friend);
     setIsDialing119(true);
     setDialingStatus('calling');
     setDialingTimeCounter(0);
-    
-    // Auto post message to the active chat room notifying that 119 has been dispatched
+
     try {
-      await fetch('/api/chat', {
+      const res = await fetch('/api/emergency/sos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderId: 'system',
-          senderName: '시스템',
-          senderAvatar: '🚨',
-          senderColor: '#DC2626',
-          text: `🚨 [위급 상황 발생] 119 긴급 연동 기능이 활성화되었습니다!\n- 성함: ${friend.name}\n- 현재 실시간 좌표: (위도 ${friend.lat.toFixed(4)}, 경도 ${friend.lng.toFixed(4)})\n- 현재 상태 지표: 심박수 ${friend.heartRate || 74}bpm, 배터리 ${friend.battery}%\n- 소방구급대 및 기동 차량이 복지관/가옥 근방으로 긴급 기동 중입니다!`,
-          roomId: activeRoomId
-        })
+        body: JSON.stringify({ friendId: friend.id, roomId: activeRoomId })
       });
+      if (res.ok) setDialingStatus('connected'); // 'connected' = SOS 발송 완료 상태로 재사용
       fetchAllStates(activeRoomId);
     } catch (err) {
       console.error(err);
@@ -2437,28 +2429,27 @@ export default function App() {
         )}
       </div>
 
-      {/* 119 Emergency Calling Simulation Overlay */}
+      {/* BIZ-CORE-8 ④: 보호자 SOS 알림 오버레이 (구 119 시뮬레이션 대체) */}
       {isDialing119 && emergencyTarget && (
         <div className="absolute inset-0 z-50 bg-slate-950 text-white flex flex-col justify-between p-5 animate-fadeIn font-sans">
-          {/* Glowing Red Emergency Header */}
+          {/* SOS Header */}
           <div className="flex flex-col items-center gap-1.5 text-center mt-3 shrink-0">
             <div className="flex gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
               <span className="text-[9.5px] font-black bg-red-700 px-2 py-0.5 rounded-full uppercase tracking-wider select-none">
-                SIMULATED 119 EMERGENCY
+                SOS GUARDIAN ALERT
               </span>
             </div>
-            <h2 className="text-sm font-black text-rose-500">🚑 119 소방재난본부 안심 연동</h2>
+            <h2 className="text-sm font-black text-rose-500">🆘 보호자 SOS 긴급 알림</h2>
             <p className="text-[10px] text-zinc-400 font-bold">
-              GPS 정밀 탐색 좌표 및 보호자 안부 긴급 데이터가 상시 119 시스템에 표출 중입니다.
+              같은 방 가족·친구 전원에게 긴급 알림과 실시간 위치가 전송됩니다.
             </p>
           </div>
 
-          {/* Core Caller Target Indicator Card */}
+          {/* SOS Target Card */}
           <div className="flex flex-col items-center justify-center gap-4 py-4 my-auto">
-            {/* Spinning phone circle indicator */}
             <div className="w-20 h-20 rounded-full bg-red-900/35 border-4 border-red-500 flex items-center justify-center animate-pulse shadow-2xl">
-              <span className="text-4xl animate-bounce">🚨</span>
+              <span className="text-4xl">🆘</span>
             </div>
 
             <div className="text-center space-y-1">
@@ -2467,59 +2458,49 @@ export default function App() {
                 <span>{emergencyTarget.name}</span>
               </div>
               <p className="text-[11px] text-yellow-400 font-mono font-bold">
-                “{emergencyTarget.statusMsg || '실내 안정 상태'}”
+                “{emergencyTarget.statusMsg || '상태 메시지 없음'}”
               </p>
             </div>
 
-            {/* Simulated Live Connection Stats */}
+            {/* SOS Status */}
             <div className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-3 space-y-2 text-[10px] text-zinc-300 font-mono">
               <div className="flex justify-between border-b border-zinc-800/80 pb-1.5 font-bold">
-                <span className="text-zinc-500">📞 전화통화 상태:</span>
-                <span className={`${dialingStatus === 'connected' ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`}>
-                  {dialingStatus === 'calling' ? '소방본부 연결대기 중...' : '📞 구조상황실 통화 중'}
+                <span className="text-zinc-500">🆘 SOS 발송 상태:</span>
+                <span className={`${dialingStatus === 'connected' ? 'text-emerald-400' : 'text-amber-400 animate-pulse'}`}>
+                  {dialingStatus === 'connected' ? '✅ 보호자 전원 발송 완료' : '발송 중...'}
                 </span>
               </div>
               <div className="flex justify-between border-b border-zinc-800/80 pb-1.5">
-                <span className="text-zinc-500">⌚ 경과 시간:</span>
-                <span className="font-extrabold text-[#FACC15]">
-                  {dialingStatus === 'connected' 
-                    ? `00:${dialingTimeCounter < 10 ? '0' + dialingTimeCounter : dialingTimeCounter}` 
-                    : '--:--'}
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-zinc-800/80 pb-1.5">
-                <span className="text-zinc-500">📍 실시간 기기 GPS:</span>
+                <span className="text-zinc-500">📍 공유된 위치:</span>
                 <span>위도 {emergencyTarget.lat.toFixed(5)}, 경도 {emergencyTarget.lng.toFixed(5)}</span>
               </div>
               <div className="flex justify-between border-b border-zinc-800/80 pb-1.5">
-                <span className="text-zinc-500">💓 보호자 활력 징후:</span>
-                <span className="text-rose-500 font-black flex items-center gap-1 animate-pulse">
-                  Normal ({emergencyTarget.heartRate || 74} bpm)
-                </span>
+                <span className="text-zinc-500">💓 심박수:</span>
+                <span>{emergencyTarget.heartRate ? `${emergencyTarget.heartRate} bpm` : '미공유'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">🔋 고정 배터리 잔량물:</span>
+                <span className="text-zinc-500">🔋 배터리 잔량:</span>
                 <span>{emergencyTarget.battery}%</span>
               </div>
             </div>
 
-            {/* Simulating dispatcher auto-transcripts */}
-            <div className="w-full bg-red-950/20 border border-red-900/30 rounded-xl p-2.5 text-[9px] text-zinc-400 leading-normal italic text-slate-300/80">
-              {dialingStatus === 'calling' ? (
-                <div className="flex items-center gap-1">
-                  <span className="inline-block w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce"></span>
-                  <span>119소방상황실 주 전산 연계 수집 확인 대기 중...</span>
-                </div>
-              ) : (
-                <span>
-                  "119 상황실 요원: '네, 119 응급상황실입니다. 대리신고인 민수 님 자택 연동으로 {emergencyTarget.name} 님의 GPS 실시간 신호가 수집 확인되었습니다. 서교동/망원동 물리관 근처 구급 구난 구조대를 비상 비접촉 발령하여 출발시켰사오니 안심하십시오.'"
-                </span>
-              )}
+            {/* 안내 문구 */}
+            <div className="w-full bg-red-950/20 border border-red-900/30 rounded-xl p-2.5 text-[10px] text-zinc-300 leading-relaxed">
+              💡 응급 상황(의식 없음, 호흡 곤란, 부상 등)이라면 아래의 <b className="text-rose-400">119 전화 걸기</b> 버튼으로 직접 신고해 주세요.
+              전화가 어려운 상황이면 채팅방에서 가족들이 위치를 보고 대응할 수 있습니다.
             </div>
+
+            {/* 119 직접 전화 — 자동신고가 아닌 사용자 본인의 직접 통화 */}
+            <a
+              href="tel:119"
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-3.5 rounded-2xl text-sm text-center border border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition hover:shadow-none active:translate-y-0.5 cursor-pointer"
+            >
+              📞 119 직접 전화 걸기
+            </a>
           </div>
 
-          {/* Standard Cancel Actions */}
-          <div className="grid grid-cols-2 gap-2.5 pb-4 shrink-0 font-sans">
+          {/* Close Actions */}
+          <div className="grid grid-cols-1 gap-2.5 pb-4 shrink-0 font-sans">
             <button
               type="button"
               onClick={() => {
@@ -2527,36 +2508,11 @@ export default function App() {
                 setEmergencyTarget(null);
                 setDialingStatus('calling');
                 setDialingTimeCounter(0);
+                setActiveTab('chat');
               }}
               className="bg-zinc-800 hover:bg-zinc-700 text-white font-extrabold py-2.5 rounded-xl text-xs border border-zinc-650 transition cursor-pointer"
             >
-              상황 해제 (통화 종료)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsDialing119(false);
-                setEmergencyTarget(null);
-                setDialingStatus('calling');
-                setDialingTimeCounter(0);
-                // Trigger notification of rescue successful completion
-                const notifId = `notif-rescue-${Date.now()}`;
-                setNotifications(prev => [
-                  {
-                    id: notifId,
-                    type: 'system',
-                    title: '🚨 119 구급출동 완료 통보',
-                    message: `${emergencyTarget.name} 님의 구조를 위해 상황실에서 요원을 현장 지대에 신속 조치하였습니다. 대화방에 정보가 영속 유지됩니다.`,
-                    timestamp: new Date().toISOString(),
-                    read: false
-                  },
-                  ...prev
-                ]);
-                setActiveTab('chat');
-              }}
-              className="bg-red-600 hover:bg-red-700 text-white font-extrabold py-2.5 rounded-xl text-xs border border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition hover:shadow-none active:translate-y-0.5 cursor-pointer"
-            >
-              출동 상황 수락 등록
+              닫기 (채팅방에서 상황 보기)
             </button>
           </div>
         </div>

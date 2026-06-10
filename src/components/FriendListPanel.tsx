@@ -163,6 +163,54 @@ export default function FriendListPanel({
     } catch { /* 무시 */ }
   };
 
+  // ===== BIZ-CORE-8 ②: 안심 장소 (집·학교·학원 등 이름 있는 도착/출발 알림 장소) =====
+  const [safePlaces, setSafePlaces] = useState<Record<string, Array<{ id: string; name: string; radiusM: number }>>>({});
+  const [placeNameInput, setPlaceNameInput] = useState<Record<string, string>>({});
+  const [savingPlace, setSavingPlace] = useState<string | null>(null);
+
+  const loadSafePlaces = async (friendId: string) => {
+    try {
+      const res = await fetch(`/api/friends/places/${friendId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSafePlaces(prev => ({ ...prev, [friendId]: Array.isArray(data) ? data : [] }));
+      }
+    } catch { /* 무시 */ }
+  };
+
+  const addSafePlace = async (friend: Friend) => {
+    const name = (placeNameInput[friend.id] || '').trim();
+    if (!name) { alert('장소 이름을 입력해 주세요. (예: 집, 학교, 학원)'); return; }
+    if (!friend.lat || !friend.lng) { alert('친구의 현재 위치가 없어 등록할 수 없습니다.'); return; }
+    setSavingPlace(friend.id);
+    try {
+      const res = await fetch('/api/friends/places', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ friendId: friend.id, name, lat: friend.lat, lng: friend.lng, radiusM: 300 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSafePlaces(prev => ({ ...prev, [friend.id]: data.places || [] }));
+        setPlaceNameInput(prev => ({ ...prev, [friend.id]: '' }));
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || '안심 장소 등록에 실패했습니다.');
+      }
+    } catch { /* 무시 */ }
+    setSavingPlace(null);
+  };
+
+  const removeSafePlace = async (friendId: string, placeId: string) => {
+    try {
+      const res = await fetch(`/api/friends/places/${friendId}/${placeId}`, { method: 'DELETE' });
+      if (res.ok) {
+        const data = await res.json();
+        setSafePlaces(prev => ({ ...prev, [friendId]: data.places || [] }));
+      }
+    } catch { /* 무시 */ }
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* 통합 검색 + 초대 헤더 */}
@@ -288,7 +336,7 @@ export default function FriendListPanel({
                     onClick={() => {
                       const next = isExpanded ? null : friend.id;
                       setExpandedId(next);
-                      if (next && isCare) loadGeofence(friend.id);
+                      if (next && isCare) { loadGeofence(friend.id); loadSafePlaces(friend.id); }
                     }}
                     className={`flex items-center px-4 py-3 gap-3 cursor-pointer transition-colors ${isExpanded ? 'bg-rose-50' : 'hover:bg-gray-50'}`}
                   >
@@ -439,7 +487,7 @@ export default function FriendListPanel({
                               <button onClick={() => onEmergency119(friend)}
                                 className="flex items-center justify-center gap-1.5 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-2xl text-sm transition">
                                 <AlertTriangle className="w-4 h-4" />
-                                119 긴급 연결
+                                🆘 SOS 보내기 (가족 전체 알림)
                               </button>
                             )}
                           </div>
@@ -492,6 +540,51 @@ export default function FriendListPanel({
                                     <ShieldOff className="w-3.5 h-3.5" />
                                   </button>
                                 )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* BIZ-CORE-8 ②: 안심 장소 — 집·학교·학원 도착/출발 자동 알림 */}
+                          {!isMe && (
+                            <div className="bg-violet-50 border border-violet-100 rounded-2xl p-3 space-y-2">
+                              <div className="flex items-center gap-1.5">
+                                <Shield className="w-4 h-4 text-violet-600" />
+                                <span className="text-xs font-bold text-violet-700">안심 장소 (도착·출발 알림)</span>
+                              </div>
+                              <p className="text-[11px] text-violet-600">
+                                친구의 현재 위치를 [집], [학교] 같은 장소로 등록하면 도착·출발 시 자동 알림! (반경 300m)
+                              </p>
+                              {(safePlaces[friend.id] || []).length > 0 && (
+                                <div className="space-y-1">
+                                  {(safePlaces[friend.id] || []).map(place => (
+                                    <div key={place.id} className="flex items-center justify-between bg-white rounded-xl px-2.5 py-1.5">
+                                      <span className="text-[11px] font-bold text-gray-700">📍 {place.name}</span>
+                                      <button
+                                        onClick={() => removeSafePlace(friend.id, place.id)}
+                                        className="text-[10px] text-gray-400 hover:text-rose-500 font-semibold px-1.5 transition"
+                                      >
+                                        삭제
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  maxLength={30}
+                                  placeholder="장소 이름 (예: 집, 학교)"
+                                  value={placeNameInput[friend.id] || ''}
+                                  onChange={e => setPlaceNameInput(prev => ({ ...prev, [friend.id]: e.target.value }))}
+                                  className="flex-1 bg-white border border-violet-200 text-xs rounded-xl px-2 py-2 focus:outline-none focus:border-violet-400"
+                                />
+                                <button
+                                  onClick={() => addSafePlace(friend)}
+                                  disabled={savingPlace === friend.id}
+                                  className="bg-violet-500 hover:bg-violet-600 text-white text-xs font-semibold px-3 py-2 rounded-xl transition shrink-0 disabled:opacity-50"
+                                >
+                                  {savingPlace === friend.id ? '...' : '현 위치 등록'}
+                                </button>
                               </div>
                             </div>
                           )}

@@ -26,13 +26,10 @@ const HONGDAE_LAT = 37.5565;
 const HONGDAE_LNG = 126.9242;
 const JWT_SECRET = process.env.JWT_SECRET || 'aemang-secret-key-change-this-in-production';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'aemang-location-encryption-key-2026';
-const EMERGENCY_API_KEY = process.env.EMERGENCY_API_KEY || 'fake-119-api-key'; // For production: real 119 API key
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@applemangotalk.app';
-
-// Emergency service config (simulation)
-const EMERGENCY_API_ENDPOINT = process.env.EMERGENCY_API_ENDPOINT || 'https://api.119emergency.go.kr/v1/dispatch';
+// (BIZ-CORE-8 ④) 119 자동신고 관련 설정 제거 — SOS 보호자 알림으로 대체
 
 // Initialize Google GenAI if API key exists
 let ai: GoogleGenAI | null = null;
@@ -77,6 +74,43 @@ const pushSubscriptions: any[] = [];
 
 // 지오펜스 안심 구역: friendId → { lat, lng, radiusM }
 const geofences: Record<string, { lat: number; lng: number; radiusM: number }> = {};
+
+// ============= BIZ-CORE-8: 안심 장소(이름 있는 다중 지오펜스) =============
+// friendId → [{ id, name, lat, lng, radiusM, notifyArrive, notifyLeave }]
+interface SafePlace {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  radiusM: number;
+  notifyArrive: boolean;
+  notifyLeave: boolean;
+}
+const dbSafePlaces: Record<string, SafePlace[]> = {};
+
+// BIZ-CORE-8: 오늘의 가족 질문(대화 스타터) — 가족·효도방 DAU 확보용
+const FAMILY_QUESTIONS: string[] = [
+  '아버지/어머니의 첫 직장 이야기, 들어본 적 있나요?',
+  '우리 가족이 함께 갔던 여행 중 가장 기억에 남는 곳은 어디인가요?',
+  '어릴 적 부모님께 들었던 말 중 아직도 기억나는 한마디는?',
+  '요즘 가장 자주 듣는 노래는 무엇인가요? 🎵',
+  '오늘 점심에 뭐 드셨어요? 사진 한 장 올려주세요! 🍚',
+  '부모님의 18번(애창곡)은 무슨 노래인가요?',
+  '이번 주말에 가족이 함께 걷고 싶은 산책 코스가 있다면?',
+  '어릴 때 제일 좋아했던 간식은 무엇이었나요?',
+  '가족에게 고맙다고 말하고 싶었지만 못 했던 일이 있나요?',
+  '우리 가족만의 별명이나 암호가 있었나요?',
+  '최근에 새로 배우거나 도전해 보고 싶은 것이 있나요?',
+  '지금 창밖 풍경은 어떤가요? 한 줄로 표현해 주세요 🌤️',
+  '가족과 함께 다시 보고 싶은 영화나 드라마가 있다면?',
+  '오늘 하루 중 가장 기분 좋았던 순간은 언제였나요?',
+  '부모님이 우리 나이였을 때 꿈은 무엇이었을까요?',
+  '집 근처 단골 가게가 있나요? 어떤 곳인가요?',
+  '올해가 가기 전에 가족이 꼭 함께 하고 싶은 일 한 가지는?',
+  '어릴 적 살던 동네에서 가장 그리운 장소는 어디인가요?',
+  '요즘 건강을 위해 챙겨 먹는 것이 있나요?',
+  '가족 모두의 다음 모임 날짜, 오늘 정해보는 건 어떨까요? 📅',
+];
 
 const broadcastPushNotification = async (title: string, body: string, data: any = {}) => {
   const payload = JSON.stringify({ title, body, data });
@@ -326,67 +360,9 @@ const hashAppPassword = (pw: string): string => {
   return CryptoJS.SHA256('aemang-pw::' + pw + ENCRYPTION_KEY).toString();
 };
 
-// ============= EMERGENCY 119 SERVICE INTEGRATION =============
-
-// Mock 119 Emergency API call 
-const call119Emergency = async (friendData: any): Promise<{ success: boolean; dispatchId: string; eta: number }> => {
-  try {
-    // For development: simulate 119 call
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('🚨 [DEV MODE] Simulated 119 emergency dispatch:', {
-        name: friendData.name,
-        location: `${friendData.lat}, ${friendData.lng}`,
-        timestamp: new Date().toISOString()
-      });
-
-      return {
-        success: true,
-        dispatchId: `DISP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        eta: Math.floor(Math.random() * 10) + 5 // 5-15분
-      };
-    }
-
-    // For production: call actual 119 API
-    // Example structure (실제 119 API 문서에 따라 조정 필요)
-    const dispatchPayload = {
-      apiKey: EMERGENCY_API_KEY,
-      incident: {
-        type: 'MEDICAL_EMERGENCY',
-        severity: 'CRITICAL',
-        location: {
-          latitude: friendData.lat,
-          longitude: friendData.lng,
-          address: `위도 ${friendData.lat.toFixed(4)}, 경도 ${friendData.lng.toFixed(4)}`
-        },
-        patient: {
-          name: friendData.name,
-          contact: friendData.phone,
-          vitals: {
-            heartRate: friendData.heartRate || 'unknown'
-          }
-        },
-        timestamp: new Date().toISOString()
-      }
-    };
-
-    // Placeholder for actual HTTP request
-    // const response = await fetch(EMERGENCY_API_ENDPOINT, {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(dispatchPayload)
-    // });
-
-    console.log('🚨 Emergency dispatch initiated:', dispatchPayload);
-    return {
-      success: true,
-      dispatchId: `DISP-${Date.now()}`,
-      eta: 7
-    };
-  } catch (error) {
-    console.error('Emergency call failed:', error);
-    return { success: false, dispatchId: 'ERROR', eta: 0 };
-  }
-};
+// ============= EMERGENCY 119 SERVICE INTEGRATION (제거됨) =============
+// BIZ-CORE-8 ④: 119 자동신고(call119Emergency)는 법적 리스크(거짓신고·미개방 API)로 제거되었습니다.
+// 대체 기능: /api/emergency/sos — 보호자 전원 푸시 알림 + 클라이언트에서 119 직접 전화(tel:) 안내.
 
 // In-Memory Database State
 // 환영 메시지 생성 헬퍼
@@ -518,7 +494,7 @@ async function loadImage(id: string): Promise<string | null> {
 }
 
 function saveDatabase() {
-  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic, dbMeta });
+  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic, dbMeta, dbSafePlaces });
   // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
   if (useRedis) {
     redisSet(REDIS_DB_KEY, payload).catch(err =>
@@ -567,6 +543,10 @@ function applyLoadedData(data: any, source: string) {
   if (data.dbMeta && typeof data.dbMeta === 'object') {
     Object.keys(dbMeta).forEach(k => delete dbMeta[k]);
     Object.assign(dbMeta, data.dbMeta);
+  }
+  if (data.dbSafePlaces && typeof data.dbSafePlaces === 'object') {
+    Object.keys(dbSafePlaces).forEach(k => delete dbSafePlaces[k]);
+    Object.assign(dbSafePlaces, data.dbSafePlaces);
   }
 
   // 기존에 '이름 미등록'으로 저장되어 표시되던 가입 멤버들의 이름 복원 마이그레이션
@@ -822,6 +802,167 @@ function checkAppointmentArrival(room: { appointments: any[]; notifications: any
   });
 }
 
+// ============= BIZ-CORE-8: 이동 타임라인 기록 =============
+// 5분 경과 또는 30m 이상 이동 시에만 기록(저장량 억제), 최대 2,000개(약 1주일치)
+function recordTimelinePoint(friend: any, lat: number, lng: number) {
+  if (!Array.isArray(friend.timeline)) friend.timeline = [];
+  const last = friend.timeline[friend.timeline.length - 1];
+  const now = Date.now();
+  if (last) {
+    const dt = now - new Date(last.t).getTime();
+    const dist = haversineMeters(last.lat, last.lng, lat, lng);
+    if (dt < 5 * 60 * 1000 && dist < 30) return;
+  }
+  friend.timeline.push({ lat, lng, t: new Date(now).toISOString() });
+  while (friend.timeline.length > 2000) friend.timeline.shift();
+}
+
+// ============= BIZ-CORE-8: 안심 장소 도착·출발 자동 알림 =============
+function checkSafePlaces(room: any, friendId: string, lat: number, lng: number) {
+  const places = dbSafePlaces[friendId];
+  if (!places || places.length === 0) return;
+  const friend = room.friends[friendId];
+  if (!friend) return;
+  if (!friend.placeStates || typeof friend.placeStates !== 'object') friend.placeStates = {};
+
+  places.forEach((place) => {
+    const dist = haversineMeters(lat, lng, place.lat, place.lng);
+    const inside = dist <= place.radiusM;
+    const wasInside = !!friend.placeStates[place.id];
+    if (inside === wasInside) return;
+    friend.placeStates[place.id] = inside;
+
+    if (inside && place.notifyArrive) {
+      room.notifications.unshift({
+        id: `notif-place-arr-${Date.now()}-${friendId}`,
+        type: 'arrival',
+        title: `🏁 ${place.name} 도착`,
+        message: `${friend.name} 님이 [${place.name}]에 안전하게 도착했습니다. 🍎`,
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+      broadcastPushNotification(
+        `🏁 ${place.name} 도착`,
+        `${friend.name} 님이 ${place.name}에 도착했습니다.`,
+        { type: 'place_arrive', friendId, placeId: place.id }
+      ).catch(() => {});
+    } else if (!inside && place.notifyLeave && wasInside) {
+      room.notifications.unshift({
+        id: `notif-place-dep-${Date.now()}-${friendId}`,
+        type: 'system',
+        title: `🚶 ${place.name} 출발`,
+        message: `${friend.name} 님이 [${place.name}]에서 출발했습니다.`,
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+      broadcastPushNotification(
+        `🚶 ${place.name} 출발`,
+        `${friend.name} 님이 ${place.name}에서 출발했습니다.`,
+        { type: 'place_leave', friendId, placeId: place.id }
+      ).catch(() => {});
+    }
+  });
+}
+
+// ============= BIZ-CORE-8 ⑤: 가족 걸음 챌린지 달성 체크 =============
+function checkChallengeProgress() {
+  const today = new Date().toISOString().slice(0, 10);
+  Object.values(dbRooms).forEach((room: any) => {
+    const ch = room.challenge;
+    if (!ch || !ch.goalSteps) return;
+    const total = Object.values(room.friends || {}).reduce((sum: number, f: any) =>
+      sum + (f.stepsTodayDate === today ? (f.stepsToday || 0) : 0), 0);
+    if (total >= ch.goalSteps && ch.achievedDate !== today) {
+      ch.achievedDate = today;
+      room.notifications.unshift({
+        id: `notif-challenge-${Date.now()}`,
+        type: 'system',
+        title: '🏆 가족 걸음 챌린지 달성!',
+        message: `[${room.name}] 오늘 합산 ${total.toLocaleString()}걸음으로 목표 ${ch.goalSteps.toLocaleString()}걸음을 달성했습니다! 🎉`,
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+      room.messages.push({
+        id: `msg-challenge-${Date.now()}`,
+        senderId: 'system', senderName: '걸음 챌린지', senderAvatar: '🏆', senderColor: '#F59E0B',
+        text: `🏆 오늘의 가족 걸음 챌린지 달성! 모두 합쳐 ${total.toLocaleString()}걸음을 걸었어요. 내일도 함께 걸어요! 🥭`,
+        timestamp: new Date().toISOString(), isSystem: true,
+      });
+      broadcastPushNotification('🏆 가족 걸음 챌린지 달성!',
+        `${room.name}: 오늘 목표 ${ch.goalSteps.toLocaleString()}걸음 달성!`,
+        { type: 'challenge_achieved', roomId: room.id }).catch(() => {});
+      saveDatabaseDebounced();
+    }
+  });
+}
+
+// ============= BIZ-CORE-8 ①: 부모님 무활동 감지 =============
+// 케어·가족방 멤버 중 careWatch가 켜진 멤버의 위치·걸음 활동이 임계 시간 이상 없으면 보호자 알림
+function checkInactivity() {
+  const now = Date.now();
+  const today = new Date().toISOString().slice(0, 10);
+  Object.values(dbRooms).forEach((room: any) => {
+    if (room.type !== 'care' && room.type !== 'family') return;
+    Object.values(room.friends || {}).forEach((friend: any) => {
+      const watch = friend.careWatch;
+      if (!watch || !watch.enabled) return;
+      const thresholdMs = (watch.thresholdHours || 6) * 60 * 60 * 1000;
+      const lastLoc = friend.updatedAt ? new Date(friend.updatedAt).getTime() : 0;
+      const lastStep = friend.lastActivityAt ? new Date(friend.lastActivityAt).getTime() : 0;
+      const lastActive = Math.max(lastLoc, lastStep);
+      if (!lastActive) return;
+      if (now - lastActive > thresholdMs && friend.inactivityAlertDate !== today) {
+        friend.inactivityAlertDate = today;
+        const hours = Math.round((now - lastActive) / (60 * 60 * 1000));
+        room.notifications.unshift({
+          id: `notif-inactive-${Date.now()}-${friend.id}`,
+          type: 'system',
+          title: '⚠️ 장시간 무활동 감지',
+          message: `${friend.name} 님의 위치·걸음 활동이 약 ${hours}시간 동안 감지되지 않았습니다. 안부 전화를 권해 드립니다. 📞`,
+          timestamp: new Date().toISOString(),
+          read: false,
+        });
+        room.messages.push({
+          id: `msg-inactive-${Date.now()}`,
+          senderId: 'system', senderName: '안심 케어', senderAvatar: '⚠️', senderColor: '#DC2626',
+          text: `⚠️ [무활동 감지] ${friend.name} 님의 활동이 약 ${hours}시간 동안 없습니다. 가족 여러분, 안부를 확인해 주세요.`,
+          timestamp: new Date().toISOString(), isSystem: true,
+        });
+        broadcastPushNotification('⚠️ 장시간 무활동 감지',
+          `${friend.name} 님의 활동이 ${hours}시간 동안 감지되지 않았습니다.`,
+          { type: 'inactivity', roomId: room.id, friendId: friend.id }).catch(() => {});
+        saveDatabaseDebounced();
+      }
+    });
+  });
+}
+setInterval(checkInactivity, 10 * 60 * 1000); // 10분 간격
+
+// ============= BIZ-CORE-8 ⑬: 오늘의 가족 질문(대화 스타터) =============
+function postDailyQuestions() {
+  const now = new Date();
+  if (now.getHours() < 9) return; // 오전 9시 이후에만 발송
+  const today = now.toISOString().slice(0, 10);
+  const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
+  Object.values(dbRooms).forEach((room: any) => {
+    if (room.type !== 'family' && room.type !== 'care') return;
+    if (Object.keys(room.friends || {}).length < 2) return; // 멤버 2명 이상일 때만
+    const metaKey = `dailyQuestion:${room.id}`;
+    if (dbMeta[metaKey] === today) return;
+    dbMeta[metaKey] = today;
+    const question = FAMILY_QUESTIONS[dayOfYear % FAMILY_QUESTIONS.length];
+    room.messages.push({
+      id: `msg-dq-${Date.now()}-${room.id}`,
+      senderId: 'system', senderName: '오늘의 가족 질문', senderAvatar: '💬', senderColor: '#8B5CF6',
+      text: `💬 [오늘의 가족 질문]\n${question}\n\n답글로 가족과 이야기를 나눠보세요 🥭`,
+      timestamp: new Date().toISOString(), isSystem: true,
+    });
+    if (broadcastRoomUpdate) broadcastRoomUpdate(room.id, 'room-refresh');
+    saveDatabaseDebounced();
+  });
+}
+setInterval(postDailyQuestions, 30 * 60 * 1000); // 30분 간격 체크(하루 1회 발송)
+
 /**
  * Apply GPS/manual location to a friend and optionally broadcast via Socket.IO
  */
@@ -883,6 +1024,8 @@ function applyFriendLocationUpdate(
   }
 
   checkAppointmentArrival(room, friendId, lat, lng);
+  recordTimelinePoint(friend, lat, lng);   // BIZ-CORE-8 ③ 이동 타임라인
+  checkSafePlaces(room, friendId, lat, lng); // BIZ-CORE-8 ② 안심 장소 도착·출발
 
   const payload = {
     friendId,
@@ -2728,9 +2871,19 @@ async function startServer() {
       if (typeof stepsToday === 'number') {
         friend.stepsToday = stepsToday;
         friend.stepsTodayDate = today;
+        // BIZ-CORE-8 ⑧: 서버측 일별 걸음 히스토리(효도 리포트·챌린지 데이터원), 최근 90일 보관
+        if (!friend.stepsHistory || typeof friend.stepsHistory !== 'object') friend.stepsHistory = {};
+        friend.stepsHistory[today] = Math.max(friend.stepsHistory[today] || 0, stepsToday);
+        const dates = Object.keys(friend.stepsHistory).sort();
+        while (dates.length > 90) { delete friend.stepsHistory[dates.shift() as string]; }
+        // 활동 감지 시각 갱신(무활동 감지 오탐 방지)
+        if (stepsToday > (friend.lastStepCount || 0)) friend.lastActivityAt = new Date().toISOString();
+        friend.lastStepCount = stepsToday;
       }
       if (friend.pedometerEnabled && friend.stepsToday === undefined) friend.stepsToday = 0;
     });
+    // BIZ-CORE-8 ⑤: 걸음 챌린지 달성 체크
+    checkChallengeProgress();
     void roomId;
     if (!updatedAny) {
       return res.status(404).json({ error: 'Friend not found' });
@@ -2781,6 +2934,204 @@ async function startServer() {
     res.json({ success: true, friend });
   });
 
+  // ============= BIZ-CORE-8 신규 API =============
+
+  // ② 안심 장소(이름 있는 다중 지오펜스) CRUD
+  app.get('/api/friends/places/:friendId', (req, res) => {
+    res.json(dbSafePlaces[req.params.friendId] || []);
+  });
+
+  app.post('/api/friends/places', requireAuth, (req: AuthRequest, res: Response) => {
+    const { friendId, name, lat, lng, radiusM, notifyArrive, notifyLeave } = req.body;
+    if (!friendId || !name || typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({ error: 'friendId, name, lat, lng are required' });
+    }
+    if (!dbSafePlaces[friendId]) dbSafePlaces[friendId] = [];
+    if (dbSafePlaces[friendId].length >= 10) {
+      return res.status(400).json({ error: '안심 장소는 최대 10개까지 등록할 수 있습니다.' });
+    }
+    const place: SafePlace = {
+      id: `place-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: String(name).slice(0, 30),
+      lat, lng,
+      radiusM: Math.min(Math.max(Number(radiusM) || 300, 100), 5000),
+      notifyArrive: notifyArrive !== false,
+      notifyLeave: notifyLeave !== false,
+    };
+    dbSafePlaces[friendId].push(place);
+    saveDatabaseDebounced();
+    res.json({ success: true, place, places: dbSafePlaces[friendId] });
+  });
+
+  app.delete('/api/friends/places/:friendId/:placeId', requireAuth, (req, res) => {
+    const { friendId, placeId } = req.params;
+    if (!dbSafePlaces[friendId]) return res.status(404).json({ error: 'not found' });
+    dbSafePlaces[friendId] = dbSafePlaces[friendId].filter(p => p.id !== placeId);
+    saveDatabaseDebounced();
+    res.json({ success: true, places: dbSafePlaces[friendId] });
+  });
+
+  // ③ 이동 타임라인 조회 (날짜별 동선 + 요약)
+  app.get('/api/friends/timeline', (req, res) => {
+    const roomId = (req.query.roomId as string) || 'room-friends';
+    const friendId = req.query.friendId as string;
+    const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
+    const room = dbRooms[roomId] || dbRooms['room-friends'];
+    const friend = room?.friends?.[friendId];
+    if (!friend) return res.status(404).json({ error: 'Friend not found' });
+
+    const points = (Array.isArray(friend.timeline) ? friend.timeline : [])
+      .filter((pt: any) => typeof pt?.t === 'string' && pt.t.slice(0, 10) === date);
+
+    let distanceM = 0;
+    for (let i = 1; i < points.length; i++) {
+      distanceM += haversineMeters(points[i - 1].lat, points[i - 1].lng, points[i].lat, points[i].lng);
+    }
+    res.json({
+      friendId, date, points,
+      summary: {
+        pointCount: points.length,
+        distanceM: Math.round(distanceM),
+        firstAt: points[0]?.t || null,
+        lastAt: points[points.length - 1]?.t || null,
+      },
+    });
+  });
+
+  // ① 무활동 감지 설정 (케어·가족방 멤버별)
+  app.post('/api/care/watch', requireAuth, (req: AuthRequest, res: Response) => {
+    const { roomId, friendId, enabled, thresholdHours } = req.body;
+    const room = dbRooms[roomId || 'room-care'];
+    const friend = room?.friends?.[friendId];
+    if (!friend) return res.status(404).json({ error: 'Friend not found' });
+    friend.careWatch = {
+      enabled: !!enabled,
+      thresholdHours: Math.min(Math.max(Number(thresholdHours) || 6, 1), 48),
+    };
+    if (enabled) friend.inactivityAlertDate = undefined; // 재설정 시 당일 알림 초기화
+    saveDatabaseDebounced();
+    res.json({ success: true, careWatch: friend.careWatch });
+  });
+
+  // ⑤ 가족 걸음 챌린지 설정·현황
+  app.post('/api/rooms/challenge', requireAuth, (req: AuthRequest, res: Response) => {
+    const { roomId, goalSteps } = req.body;
+    const room = dbRooms[roomId];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const goal = Number(goalSteps);
+    if (!goal || goal < 1000) {
+      room.challenge = undefined; // 0 또는 미만 값이면 챌린지 해제
+    } else {
+      room.challenge = { goalSteps: Math.min(goal, 1000000), setAt: new Date().toISOString() };
+      room.messages.push({
+        id: `msg-ch-set-${Date.now()}`,
+        senderId: 'system', senderName: '걸음 챌린지', senderAvatar: '🏆', senderColor: '#F59E0B',
+        text: `🏆 가족 걸음 챌린지가 설정되었습니다! 오늘 다 함께 ${goal.toLocaleString()}걸음을 걸어봐요. 진행 상황은 만보기 탭에서 확인! 🥾`,
+        timestamp: new Date().toISOString(), isSystem: true,
+      });
+    }
+    saveDatabaseDebounced();
+    res.json({ success: true, challenge: room.challenge || null });
+  });
+
+  app.get('/api/rooms/challenge', (req, res) => {
+    const roomId = (req.query.roomId as string) || 'room-friends';
+    const room = dbRooms[roomId];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const today = new Date().toISOString().slice(0, 10);
+    const members = Object.values(room.friends || {}).map((f: any) => ({
+      id: f.id, name: f.name, avatar: f.avatar,
+      steps: f.stepsTodayDate === today ? (f.stepsToday || 0) : 0,
+    }));
+    const totalSteps = members.reduce((s, m) => s + m.steps, 0);
+    const ch = room.challenge || null;
+    res.json({
+      challenge: ch,
+      totalSteps,
+      members,
+      progress: ch?.goalSteps ? Math.min(100, Math.round((totalSteps / ch.goalSteps) * 100)) : 0,
+      achievedToday: ch?.achievedDate === today,
+    });
+  });
+
+  // ⑧ 디지털 효도 리포트 — 최근 7일 활동을 따뜻한 문장으로 요약
+  app.get('/api/care/report', requireAuth, async (req: AuthRequest, res: Response) => {
+    const roomId = (req.query.roomId as string) || 'room-care';
+    const friendId = req.query.friendId as string;
+    const room = dbRooms[roomId];
+    const friend = room?.friends?.[friendId];
+    if (!friend) return res.status(404).json({ error: 'Friend not found' });
+
+    // 최근 7일 걸음 데이터
+    const days: Array<{ date: string; steps: number }> = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+      days.push({ date: d, steps: friend.stepsHistory?.[d] || (friend.stepsTodayDate === d ? friend.stepsToday || 0 : 0) });
+    }
+    const totalSteps = days.reduce((s, d) => s + d.steps, 0);
+    const activeDays = days.filter(d => d.steps > 500).length;
+    const bestDay = days.reduce((a, b) => (b.steps > a.steps ? b : a), days[0]);
+    const avgBpm = Array.isArray(friend.heartRateHistory) && friend.heartRateHistory.length
+      ? Math.round(friend.heartRateHistory.reduce((s: number, h: any) => s + h.bpm, 0) / friend.heartRateHistory.length)
+      : null;
+
+    const stats = { name: friend.name, totalSteps, activeDays, bestDay, avgBpm, days };
+
+    let reportText =
+      `🍎 ${friend.name} 님의 일주일 안심 리포트\n` +
+      `이번 주 총 ${totalSteps.toLocaleString()}걸음을 걸으셨고, 7일 중 ${activeDays}일 활동하셨어요.\n` +
+      `가장 많이 걸은 날은 ${bestDay.date} (${bestDay.steps.toLocaleString()}걸음)입니다.` +
+      (avgBpm ? `\n최근 평균 심박수는 ${avgBpm}bpm으로 기록되었습니다.` : '');
+
+    if (ai) {
+      try {
+        const result = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: `아래는 부모님(${friend.name} 님)의 최근 7일 활동 데이터입니다. 자녀에게 보내는 따뜻하고 안심되는 '효도 리포트'를 한국어 3~4문장으로 작성해 주세요. 감시하는 느낌이 아니라 따뜻한 안부 느낌으로, 구체적 수치를 1~2개만 자연스럽게 녹여 주세요. 말끝에 🍎나 🥭를 한 번만 사용하세요.\n데이터: ${JSON.stringify(stats)}`,
+        });
+        if (result.text) reportText = `🍎 ${friend.name} 님의 일주일 안심 리포트\n${result.text}`;
+      } catch (err) {
+        console.error('Care report AI generation failed, using template:', err);
+      }
+    }
+
+    res.json({ success: true, report: reportText, stats });
+  });
+
+  // ⑧ 효도 리포트를 방 채팅으로 공유
+  app.post('/api/care/report/send', requireAuth, (req: AuthRequest, res: Response) => {
+    const { roomId, report } = req.body;
+    const room = dbRooms[roomId];
+    if (!room || !report) return res.status(400).json({ error: 'roomId and report are required' });
+    const msg = {
+      id: `msg-care-report-${Date.now()}`,
+      senderId: 'system', senderName: '효도 리포트', senderAvatar: '🍎', senderColor: '#10B981',
+      text: String(report).slice(0, 2000),
+      timestamp: new Date().toISOString(), isSystem: true,
+    };
+    room.messages.push(msg);
+    if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'room-refresh');
+    saveDatabaseDebounced();
+    res.json({ success: true, message: msg });
+  });
+
+  // ⑬ 오늘의 가족 질문 수동 발송(테스트·즉시 발송용)
+  app.post('/api/rooms/daily-question', requireAuth, (req: AuthRequest, res: Response) => {
+    const { roomId } = req.body;
+    const room = dbRooms[roomId];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const question = FAMILY_QUESTIONS[Math.floor(Math.random() * FAMILY_QUESTIONS.length)];
+    room.messages.push({
+      id: `msg-dq-${Date.now()}`,
+      senderId: 'system', senderName: '오늘의 가족 질문', senderAvatar: '💬', senderColor: '#8B5CF6',
+      text: `💬 [오늘의 가족 질문]\n${question}\n\n답글로 가족과 이야기를 나눠보세요 🥭`,
+      timestamp: new Date().toISOString(), isSystem: true,
+    });
+    if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'room-refresh');
+    saveDatabaseDebounced();
+    res.json({ success: true, question });
+  });
+
   app.get('/api/push/vapidPublicKey', (req, res) => {
     res.json({ publicKey: vapidKeys.publicKey });
   });
@@ -2806,98 +3157,120 @@ async function startServer() {
   }));
 
   // 6. Emergency 119 API Endpoint
-  app.post('/api/emergency/dispatch', requireAuth, tryCatch(async (req: AuthRequest, res: Response) => {
-    const { friendId, roomId } = req.body;
+  // BIZ-CORE-8 ④: 119 자동신고 → 보호자 SOS 알림으로 변경
+  // 법적 사유: 119는 민간 앱에 개방된 신고 API가 없으며, 자동신고 구조는 거짓신고 리스크가 있음.
+  // 동작: 방 전체 멤버에게 긴급 푸시 + 채팅·알림 기록. 119 연결은 사용자가 직접 전화(클라이언트 tel: 링크).
+  const handleSosRequest = (roomId: string, friendId: string, requesterName?: string) => {
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
+    const friend = room.friends[friendId];
+    if (!friend) return null;
 
+    const sosMsg = {
+      id: `msg-sos-${Date.now()}`,
+      senderId: 'system',
+      senderName: '🆘 SOS 긴급 알림',
+      senderAvatar: '🆘',
+      senderColor: '#DC2626',
+      text: `🆘 [SOS 긴급 호출]\n- 대상: ${friend.name}\n- 현재 위치: (위도 ${friend.lat.toFixed(4)}, 경도 ${friend.lng.toFixed(4)})\n- 심박수: ${friend.heartRate ? `${friend.heartRate}bpm` : '미공유'} / 배터리: ${friend.battery ?? '-'}%\n${requesterName ? `- 호출자: ${requesterName}\n` : ''}- 지도에서 위치를 확인하고, 응급 상황이면 119에 직접 전화해 주세요.`,
+      timestamp: new Date().toISOString(),
+      isSystem: true
+    };
+    room.messages.push(sosMsg);
+
+    room.notifications.unshift({
+      id: `notif-sos-${Date.now()}`,
+      type: 'system',
+      title: '🆘 SOS 긴급 호출',
+      message: `${friend.name} 님에 대한 SOS가 발신되었습니다. 위치를 확인하고 안부를 확인해 주세요!`,
+      timestamp: new Date().toISOString(),
+      read: false
+    });
+
+    broadcastPushNotification(
+      '🆘 SOS 긴급 호출',
+      `${friend.name} 님의 SOS! 지금 위치를 확인해 주세요.`,
+      { type: 'sos', roomId: activeRoomId, friendId, lat: friend.lat, lng: friend.lng }
+    ).catch(() => {});
+
+    saveDatabaseDebounced();
+    return { sosMsg, friend };
+  };
+
+  app.post('/api/emergency/sos', requireAuth, tryCatch(async (req: AuthRequest, res: Response) => {
+    const { friendId, roomId, requesterName } = req.body;
     if (!friendId) {
       return res.status(400).json({ error: 'friendId is required' });
     }
+    const result = handleSosRequest(roomId, friendId, requesterName);
+    if (!result) return res.status(404).json({ error: 'Friend not found' });
+    return res.json({ success: true, message: result.sosMsg });
+  }));
 
-    const friend = room.friends[friendId];
-    if (!friend) {
-      return res.status(404).json({ error: 'Friend not found' });
+  // (구) /api/emergency/dispatch — 하위 호환을 위해 SOS로 동일 처리
+  app.post('/api/emergency/dispatch', requireAuth, tryCatch(async (req: AuthRequest, res: Response) => {
+    const { friendId, roomId } = req.body;
+    if (!friendId) {
+      return res.status(400).json({ error: 'friendId is required' });
     }
-
-    try {
-      // Call 119 emergency service
-      const emergencyResult = await call119Emergency(friend);
-
-      if (emergencyResult.success) {
-        // Add system message to room
-        const emergencyMsg = {
-          id: `msg-emergency-${Date.now()}`,
-          senderId: 'system',
-          senderName: '긴급 알림',
-          senderAvatar: '🚨',
-          senderColor: '#DC2626',
-          text: `🚨 [긴급 상황] 119 구급대 출동 요청됨!\n- 대상: ${friend.name}\n- 위치: (${friend.lat.toFixed(4)}, ${friend.lng.toFixed(4)})\n- 출동 ID: ${emergencyResult.dispatchId}\n- 예상 도착: ${emergencyResult.eta}분\n- 심박수: ${friend.heartRate || '감지 중'}bpm`,
-          timestamp: new Date().toISOString(),
-          isSystem: true
-        };
-
-        room.messages.push(emergencyMsg);
-
-        // Add notification
-        room.notifications.unshift({
-          id: `notif-emergency-${Date.now()}`,
-          type: 'system',
-          title: '🚨 119 출동 요청',
-          message: `${friend.name} 님을 위해 119 구급대 출동이 요청되었습니다. (ID: ${emergencyResult.dispatchId})`,
-          timestamp: new Date().toISOString(),
-          read: false
-        });
-
-        await broadcastPushNotification(
-          '🚨 긴급 출동 요청',
-          `${friend.name} 님을 위한 119 출동이 요청되었습니다. 위치를 확인하세요.`,
-          {
-            type: 'emergency',
-            roomId: activeRoomId,
-            friendId,
-            dispatchId: emergencyResult.dispatchId,
-            eta: emergencyResult.eta
-          }
-        );
-
-        return res.json({
-          success: true,
-          dispatchId: emergencyResult.dispatchId,
-          eta: emergencyResult.eta,
-          message: emergencyMsg
-        });
-      } else {
-        throw new Error('Emergency dispatch failed');
-      }
-    } catch (error) {
-      console.error('Emergency dispatch error:', error);
-      return res.status(500).json({ error: 'Emergency dispatch failed' });
-    }
+    const result = handleSosRequest(roomId, friendId);
+    if (!result) return res.status(404).json({ error: 'Friend not found' });
+    return res.json({ success: true, message: result.sosMsg });
   }));
 
   // 5. Google GenAI Coordinates Advisor Endpoint (@api/gemini/coordinate)
+  // BIZ-CORE-8 ⑦: AI 약속 어드바이저 — 멤버들의 실제 위치 기반 중간지점 추천(홍대 하드코딩 제거)
   app.post('/api/gemini/advisor', rateLimit(20), requireAuth, async (req, res) => {
     const { message, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
+
+    // 위치를 실제로 공유 중인 멤버들의 중간지점(centroid) 계산
+    const locatedMembers = Object.values(room.friends || {}).filter(
+      (f: any) => f.located && typeof f.lat === 'number' && typeof f.lng === 'number'
+    ) as any[];
+    let midpoint: { lat: number; lng: number } | null = null;
+    if (locatedMembers.length > 0) {
+      midpoint = {
+        lat: locatedMembers.reduce((s, f) => s + f.lat, 0) / locatedMembers.length,
+        lng: locatedMembers.reduce((s, f) => s + f.lng, 0) / locatedMembers.length,
+      };
+    }
+    const memberSummary = locatedMembers
+      .map((f: any) => `${f.name}(${f.lat.toFixed(4)}, ${f.lng.toFixed(4)})`)
+      .join(', ');
+
     if (!ai) {
       return res.json({
-        advice: '🍎 애플망고톡! 구글 AI가 설정되어 있지 않아 위트 가이드를 출력합니다. 경의선 숲길 책거리가 모임 장소로 산뜻하고 아주 안전합니다! 🍎'
+        advice: midpoint
+          ? `🍎 멤버 ${locatedMembers.length}명의 중간지점은 위도 ${midpoint.lat.toFixed(4)}, 경도 ${midpoint.lng.toFixed(4)} 부근입니다. 지도에서 이 근처의 카페나 공원을 약속 장소로 정해보세요! 🥭`
+          : '🍎 아직 위치를 공유한 멤버가 없어요. 위치 공유를 켜면 모두에게 공평한 중간지점을 추천해 드립니다! 🥭',
+        midpoint,
       });
     }
 
     try {
       const result = await ai.models.generateContent({
         model: 'gemini-3.5-flash',
-        contents: `사용자가 친구들과 만날 만한 특별한 장소나 코스를 맛깔나게 추천해 달라고 제안했습니다. 메세지: "${message}".
+        contents: `사용자가 모임 장소 추천을 요청했습니다. 메세지: "${message}".
         이 방은 [${room.name}] 방이며 유형은 "${room.type}"입니다.
-        서울 홍대 인근이며, 애플망고톡 특유의 산뜻하고 안심 가득한 톤앤매너로(말끝에 과일🍎 이나 🥭을 소량 섞어서) 3문장 이내로 근사하게 추천해주시되, 이 방의 성격(가족, 친구, 혹은 부모님 안심)에 어울리는 추천 코스를 맛집이나 공원 등 구체적인 지명과 함께 묘사해 주세요.`
+        ${midpoint
+          ? `현재 위치를 공유 중인 멤버: ${memberSummary}. 모두의 중간지점은 대략 위도 ${midpoint.lat.toFixed(4)}, 경도 ${midpoint.lng.toFixed(4)} 입니다. 이 좌표가 속한 한국의 실제 동네/지역을 추정하고, 그 인근에서 모두에게 공평한 만남 장소(카페·공원·역 등)를 추천해 주세요.`
+          : '아직 위치를 공유한 멤버가 없으므로, 서울 시내에서 접근성이 좋은 보편적인 만남 장소를 추천해 주세요.'}
+        애플망고톡 특유의 산뜻하고 안심 가득한 톤앤매너로(말끝에 과일🍎 이나 🥭을 소량 섞어서) 3문장 이내로, 방의 성격(가족, 친구, 부모님 안심)에 어울리게 추천해 주세요.`
       });
-      res.json({ advice: result.text || '🍎 홍대 맛집 골목 혹은 경의선 숲길 책거리가 조율하기 좋은 최고의 쉼터망고! 🥭' });
+      res.json({
+        advice: result.text || '🍎 멤버들의 중간지점 근처 카페나 공원이 조율하기 좋은 만남 장소망고! 🥭',
+        midpoint,
+      });
     } catch (err: any) {
       console.error(err);
-      res.json({ advice: '🥭 애망 서포트 추천: 동교동 근처 오붓한 허브 과일 카페나 산뜻한 정원이 피크닉 장소로 최적이망고!' });
+      res.json({
+        advice: midpoint
+          ? `🥭 멤버들의 중간지점(위도 ${midpoint.lat.toFixed(4)}, 경도 ${midpoint.lng.toFixed(4)}) 근처에서 만나는 것을 추천해요!`
+          : '🥭 위치 공유를 켜면 모두에게 공평한 중간지점을 추천해 드릴 수 있어망고!',
+        midpoint,
+      });
     }
   });
 
@@ -3069,60 +3442,21 @@ async function startServer() {
       }
     });
 
-    // 119 Emergency call event
+    // BIZ-CORE-8 ④: (구) 119 자동신고 이벤트 → 보호자 SOS 알림으로 변경 (이벤트명은 하위 호환 유지)
     socket.on('emergency-119', async ({ roomId, friendId }, callback) => {
       try {
-        const room = dbRooms[roomId] || dbRooms['room-friends'];
-        const friend = room.friends[friendId];
-
-        if (!friend) {
+        const result = handleSosRequest(roomId, friendId);
+        if (!result) {
           return callback({ error: 'Friend not found' });
         }
-
-        // Call 119 emergency service
-        const emergencyResult = await call119Emergency(friend);
-
-        if (emergencyResult.success) {
-          // Broadcast emergency alert to room
-          const emergencyMsg = {
-            id: `msg-emergency-${Date.now()}`,
-            senderId: 'system',
-            senderName: '긴급 알림',
-            senderAvatar: '🚨',
-            senderColor: '#DC2626',
-            text: `🚨 [긴급 상황] 119 구급대 출동 요청됨!\n- 대상: ${friend.name}\n- 위치: (${friend.lat.toFixed(4)}, ${friend.lng.toFixed(4)})\n- 출동 ID: ${emergencyResult.dispatchId}\n- 예상 도착: ${emergencyResult.eta}분`,
-            timestamp: new Date().toISOString(),
-            isSystem: true
-          };
-
-          room.messages.push(emergencyMsg);
-          broadcastToRoom(roomId, 'emergency-alert', {
-            friendId,
-            dispatchId: emergencyResult.dispatchId,
-            eta: emergencyResult.eta,
-            message: emergencyMsg
-          });
-          saveDatabaseDebounced();
-
-          await broadcastPushNotification(
-            '🚨 긴급 출동 요청',
-            `${friend.name} 님을 위한 119 출동이 요청되었습니다. 위치를 확인하세요.`,
-            {
-              type: 'emergency',
-              roomId,
-              friendId,
-              dispatchId: emergencyResult.dispatchId,
-              eta: emergencyResult.eta
-            }
-          );
-
-          callback({ success: true, dispatchId: emergencyResult.dispatchId, eta: emergencyResult.eta });
-        } else {
-          callback({ error: 'Emergency dispatch failed' });
-        }
+        broadcastToRoom(roomId, 'emergency-alert', {
+          friendId,
+          message: result.sosMsg
+        });
+        callback({ success: true, message: result.sosMsg });
       } catch (error) {
-        console.error('Emergency call error:', error);
-        callback({ error: 'Emergency call failed' });
+        console.error('SOS call error:', error);
+        callback({ error: 'SOS call failed' });
       }
     });
 

@@ -4,8 +4,17 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Footprints, Calendar, TrendingUp, Users } from 'lucide-react';
+import { Footprints, Calendar, TrendingUp, Users, Trophy, HeartHandshake, ShieldAlert, Route, Send } from 'lucide-react';
 import { Friend } from '../types';
+
+// BIZ-CORE-8: 가족 걸음 챌린지 현황 타입
+interface ChallengeStatus {
+  challenge: { goalSteps: number } | null;
+  totalSteps: number;
+  members: Array<{ id: string; name: string; avatar: string; steps: number }>;
+  progress: number;
+  achievedToday: boolean;
+}
 
 interface PedometerPanelProps {
   phone: string;
@@ -38,6 +47,105 @@ export default function PedometerPanel({
   const [stepGoal, setStepGoal] = useState<number>(10000);
   const [history, setHistory] = useState<StepRecord[]>([]);
   const graphScrollRef = useRef<HTMLDivElement>(null);
+
+  // ===== BIZ-CORE-8 상태 =====
+  // ⑤ 가족 걸음 챌린지
+  const [challengeStatus, setChallengeStatus] = useState<ChallengeStatus | null>(null);
+  const [challengeGoalInput, setChallengeGoalInput] = useState<number>(30000);
+  // ⑧ 효도 리포트
+  const [reportFriendId, setReportFriendId] = useState<string>('');
+  const [careReport, setCareReport] = useState<string>('');
+  const [reportLoading, setReportLoading] = useState(false);
+  // ① 무활동 감지
+  const [careWatchStates, setCareWatchStates] = useState<Record<string, boolean>>({});
+  // ③ 오늘 이동 타임라인 요약
+  const [timelineSummary, setTimelineSummary] = useState<{ distanceM: number; pointCount: number } | null>(null);
+
+  // 챌린지 현황 로드
+  const loadChallenge = async () => {
+    try {
+      const res = await fetch(`/api/rooms/challenge?roomId=${encodeURIComponent(activeRoomId)}`);
+      if (res.ok) setChallengeStatus(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => {
+    loadChallenge();
+    // 오늘 내 이동 타임라인 요약
+    (async () => {
+      try {
+        const res = await fetch(`/api/friends/timeline?roomId=${encodeURIComponent(activeRoomId)}&friendId=${encodeURIComponent(activeProfileId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setTimelineSummary({ distanceM: data.summary?.distanceM || 0, pointCount: data.summary?.pointCount || 0 });
+        }
+      } catch (e) { console.error(e); }
+    })();
+    // 친구별 무활동 감지 상태 초기화(서버 friend.careWatch는 friends prop에 실려 옴)
+    const states: Record<string, boolean> = {};
+    friends.forEach(f => { states[f.id] = !!(f as any).careWatch?.enabled; });
+    setCareWatchStates(states);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId, activeProfileId]);
+
+  // ⑤ 챌린지 목표 설정
+  const handleSetChallenge = async () => {
+    try {
+      await fetch('/api/rooms/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId: activeRoomId, goalSteps: challengeGoalInput }),
+      });
+      await loadChallenge();
+    } catch (e) { console.error(e); }
+  };
+
+  // ⑧ 효도 리포트 생성
+  const handleGenerateReport = async () => {
+    const targetId = reportFriendId || friends.find(f => f.id !== activeProfileId)?.id || activeProfileId;
+    if (!targetId) return;
+    setReportLoading(true);
+    setCareReport('');
+    try {
+      const res = await fetch(`/api/care/report?roomId=${encodeURIComponent(activeRoomId)}&friendId=${encodeURIComponent(targetId)}`);
+      const data = await res.json();
+      setCareReport(data.report || '리포트를 생성하지 못했습니다.');
+    } catch (e) {
+      console.error(e);
+      setCareReport('리포트 생성 중 오류가 발생했습니다.');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  // ⑧ 리포트 채팅방 공유
+  const handleShareReport = async () => {
+    if (!careReport) return;
+    try {
+      await fetch('/api/care/report/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId: activeRoomId, report: careReport }),
+      });
+      alert('효도 리포트를 채팅방에 공유했습니다. 🍎');
+    } catch (e) { console.error(e); }
+  };
+
+  // ① 무활동 감지 토글
+  const handleToggleCareWatch = async (friendId: string) => {
+    const next = !careWatchStates[friendId];
+    setCareWatchStates(prev => ({ ...prev, [friendId]: next }));
+    try {
+      await fetch('/api/care/watch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId: activeRoomId, friendId, enabled: next, thresholdHours: 6 }),
+      });
+    } catch (e) {
+      console.error(e);
+      setCareWatchStates(prev => ({ ...prev, [friendId]: !next })); // 실패 시 롤백
+    }
+  };
 
   // 오늘 날짜 가져오기 (YYYY-MM-DD)
   const getTodayString = () => {
@@ -372,6 +480,158 @@ export default function PedometerPanel({
             );
           })()}
         </div>
+
+        {/* BIZ-CORE-8 ⑤: 가족 걸음 챌린지 */}
+        <div className="bg-white rounded-3xl p-5 border border-amber-100 shadow-sm space-y-3">
+          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+            <Trophy className="w-4 h-4 text-amber-500" />
+            <span>가족 걸음 챌린지 (오늘 합산)</span>
+          </h3>
+          {challengeStatus?.challenge ? (
+            <div className="space-y-2">
+              <div className="flex justify-between items-end">
+                <span className="text-lg font-black text-gray-900 font-mono">
+                  {challengeStatus.totalSteps.toLocaleString()}
+                  <span className="text-[11px] text-gray-400 font-bold"> / {challengeStatus.challenge.goalSteps.toLocaleString()} 걸음</span>
+                </span>
+                <span className={`text-xs font-black ${challengeStatus.achievedToday ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {challengeStatus.achievedToday ? '🏆 오늘 달성!' : `${challengeStatus.progress}%`}
+                </span>
+              </div>
+              <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${challengeStatus.achievedToday ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' : 'bg-gradient-to-r from-amber-400 to-rose-400'}`}
+                  style={{ width: `${challengeStatus.progress}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-gray-400">멤버 모두의 오늘 걸음을 합산합니다. 함께 걸을수록 빨리 달성! 🥾</p>
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-400">아직 챌린지가 없습니다. 목표를 설정해 가족과 함께 걸어보세요!</p>
+          )}
+          <div className="flex gap-2 items-center pt-1">
+            <input
+              type="number"
+              min={1000}
+              step={5000}
+              value={challengeGoalInput}
+              onChange={(e) => setChallengeGoalInput(parseInt(e.target.value) || 0)}
+              className="flex-1 text-xs font-mono font-bold border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-amber-400"
+              placeholder="합산 목표 걸음 수"
+            />
+            <button
+              type="button"
+              onClick={handleSetChallenge}
+              className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-black px-4 py-2 rounded-xl transition cursor-pointer"
+            >
+              목표 설정
+            </button>
+          </div>
+        </div>
+
+        {/* BIZ-CORE-8 ⑧: 디지털 효도 리포트 */}
+        <div className="bg-white rounded-3xl p-5 border border-emerald-100 shadow-sm space-y-3">
+          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+            <HeartHandshake className="w-4 h-4 text-emerald-500" />
+            <span>일주일 효도 리포트</span>
+          </h3>
+          <p className="text-[10px] text-gray-400">최근 7일 활동을 따뜻한 안부 문장으로 요약해 드립니다.</p>
+          <div className="flex gap-2 items-center">
+            <select
+              value={reportFriendId}
+              onChange={(e) => setReportFriendId(e.target.value)}
+              className="flex-1 text-xs font-bold border border-gray-200 rounded-xl px-2 py-2 focus:outline-none focus:border-emerald-400 bg-white"
+            >
+              <option value="">대상 선택 (기본: 첫 번째 가족)</option>
+              {friends.map(f => (
+                <option key={f.id} value={f.id}>
+                  {f.avatar} {(f.name || '').replace(' (대기)', '').replace(' (합류)', '')}{f.id === activeProfileId ? ' (나)' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleGenerateReport}
+              disabled={reportLoading}
+              className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 text-white text-xs font-black px-4 py-2 rounded-xl transition cursor-pointer"
+            >
+              {reportLoading ? '생성 중...' : '리포트 생성'}
+            </button>
+          </div>
+          {careReport && (
+            <div className="space-y-2">
+              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap">
+                {careReport}
+              </div>
+              <button
+                type="button"
+                onClick={handleShareReport}
+                className="w-full flex items-center justify-center gap-1.5 bg-white hover:bg-emerald-50 text-emerald-600 text-xs font-black px-4 py-2 rounded-xl border border-emerald-200 transition cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>채팅방에 공유하기</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* BIZ-CORE-8 ①: 무활동 안심 감지 */}
+        <div className="bg-white rounded-3xl p-5 border border-rose-100 shadow-sm space-y-3">
+          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+            <ShieldAlert className="w-4 h-4 text-rose-500" />
+            <span>무활동 안심 감지</span>
+          </h3>
+          <p className="text-[10px] text-gray-400">
+            6시간 이상 위치·걸음 활동이 없으면 방 전체에 안부 확인 알림을 보냅니다. (가족·효도방 전용)
+          </p>
+          {friends.length === 0 ? (
+            <p className="text-[11px] text-gray-400 text-center py-1">같은 방 멤버가 없습니다.</p>
+          ) : (
+            <div className="space-y-2">
+              {friends.map(f => (
+                <div key={f.id} className="flex items-center gap-2.5">
+                  <span className="text-base shrink-0">{f.avatar || '🙂'}</span>
+                  <span className="text-xs font-bold text-gray-800 flex-1 truncate">
+                    {(f.name || '').replace(' (대기)', '').replace(' (합류)', '')}{f.id === activeProfileId && <span className="text-rose-500"> (나)</span>}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleCareWatch(f.id)}
+                    className={`relative w-10 h-6 rounded-full transition cursor-pointer ${careWatchStates[f.id] ? 'bg-rose-500' : 'bg-gray-200'}`}
+                    aria-label="무활동 감지 토글"
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${careWatchStates[f.id] ? 'left-[18px]' : 'left-0.5'}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BIZ-CORE-8 ③: 오늘 이동 요약 */}
+        {timelineSummary && (
+          <div className="bg-white rounded-3xl p-5 border border-sky-100 shadow-sm space-y-2">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+              <Route className="w-4 h-4 text-sky-500" />
+              <span>오늘 나의 이동 기록</span>
+            </h3>
+            <div className="flex items-center justify-around text-center">
+              <div>
+                <p className="text-xl font-black text-gray-900 font-mono">
+                  {timelineSummary.distanceM >= 1000
+                    ? `${(timelineSummary.distanceM / 1000).toFixed(1)}km`
+                    : `${timelineSummary.distanceM}m`}
+                </p>
+                <p className="text-[10px] text-gray-400 font-bold">이동 거리</p>
+              </div>
+              <div>
+                <p className="text-xl font-black text-gray-900 font-mono">{timelineSummary.pointCount}</p>
+                <p className="text-[10px] text-gray-400 font-bold">기록 지점</p>
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-400 text-center">위치 공유 중에만 자동 기록됩니다. 지도 탭에서 동선을 확인하세요.</p>
+          </div>
+        )}
 
         {/* 히스토리 리스트 */}
         <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm space-y-3">

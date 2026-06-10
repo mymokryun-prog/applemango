@@ -385,7 +385,7 @@ export default function ChatRoom({
             }}
             className="bg-red-600 hover:bg-red-700 text-white font-extrabold text-[9px] px-2 py-1 rounded-lg border border-black shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
           >
-            🚨 119 긴급연결
+            🆘 SOS 보내기
           </button>
         </div>
       )}
