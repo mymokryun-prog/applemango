@@ -78,6 +78,20 @@ export default function App() {
   const [regAlias, setRegAlias] = useState(() => localStorage.getItem('aemang_nickname') || '');
   const [regFruit, setRegFruit] = useState(() => localStorage.getItem('aemang_fruit') || '🍎');
 
+  // Call simulation states
+  const [callingState, setCallingState] = useState<{
+    type: 'voice' | 'video';
+    status: 'ringing' | 'connected' | 'ended';
+    friend: any;
+    duration: number;
+    micMuted?: boolean;
+    speakerOn?: boolean;
+    cameraOff?: boolean;
+  } | null>(null);
+
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+
   // 내 프로필 설정 모달 드래그다운(Swipe-down) 닫기 제스처 상태
   const [profileDragY, setProfileDragY] = useState(0);
   const profileDragStartRef = useRef<number | null>(null);
@@ -1794,6 +1808,72 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  const handleStartCall = (friend: any, type: 'voice' | 'video') => {
+    setCallingState({
+      type,
+      status: 'ringing',
+      friend,
+      duration: 0,
+      micMuted: false,
+      speakerOn: true,
+      cameraOff: false,
+    });
+  };
+
+  const handleEndCall = () => {
+    setCallingState(prev => prev ? { ...prev, status: 'ended' } : null);
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    setTimeout(() => {
+      setCallingState(null);
+    }, 1200);
+  };
+
+  // Ringing to Connected auto-transition
+  useEffect(() => {
+    let ringTimer: any;
+    if (callingState && callingState.status === 'ringing') {
+      ringTimer = setTimeout(() => {
+        setCallingState(prev => prev ? { ...prev, status: 'connected' } : null);
+      }, 3000);
+    }
+    return () => clearTimeout(ringTimer);
+  }, [callingState?.status]);
+
+  // Duration timer
+  useEffect(() => {
+    let timer: any;
+    if (callingState && callingState.status === 'connected') {
+      timer = setInterval(() => {
+        setCallingState(prev => prev ? { ...prev, duration: prev.duration + 1 } : null);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [callingState?.status]);
+
+  // Handle video stream request
+  useEffect(() => {
+    if (callingState && callingState.type === 'video' && callingState.status === 'connected' && !callingState.cameraOff) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        .then(stream => {
+          localStreamRef.current = stream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+        })
+        .catch(err => {
+          console.error("Error accessing camera: ", err);
+        });
+    } else {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+    }
+  }, [callingState?.status, callingState?.type, callingState?.cameraOff]);
+
   const handleMapTouchClick = (lat: number, lng: number) => {
     // 약속이 선택된 상태에서 지도를 터치하면, 그 약속의 소집 장소를 이 위치로 변경할지 확인
     if (selectedPromiseId) {
@@ -2011,7 +2091,13 @@ export default function App() {
               className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-full transition text-[11px] font-bold text-slate-700 shadow-sm cursor-pointer"
               title="내 프로필"
             >
-              <span className="text-sm leading-none">{regFruit || activeProfile?.avatar || '👤'}</span>
+              <span className="text-sm leading-none flex items-center justify-center w-5 h-5 rounded-full overflow-hidden shrink-0">
+                {(regFruit || activeProfile?.avatar || '👤').startsWith('data:image/') ? (
+                  <img src={regFruit || activeProfile?.avatar} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  regFruit || activeProfile?.avatar || '👤'
+                )}
+              </span>
               <span className="max-w-[75px] truncate leading-none">{regAlias || regRealName || '내 프로필'}</span>
             </button>
             {/* 설정 버튼 */}
@@ -2222,6 +2308,7 @@ export default function App() {
             roomId={activeRoomId}
             ownerId={rooms.find(r => r.id === activeRoomId)?.ownerId || ''}
             onCreateAppointment={handleCreateAppointment}
+            onStartCall={handleStartCall}
           />
         )}
 
@@ -2476,7 +2563,8 @@ export default function App() {
       )}
 
       {/* 3. 하단 내비게이션 */}
-      <div className="bg-white border-t border-gray-100 px-1 flex items-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
+      <div className="bg-white border-t border-gray-100 px-1.5 flex items-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
+        {/* Core Services Group */}
         {([
           { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
           { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
@@ -2484,11 +2572,7 @@ export default function App() {
           { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
           { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
           { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
-          { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
-          { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
-          { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
           { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
-          { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
         ]).map(({ id, Icon, label, onClick }) => (
           <button
             key={id}
@@ -2508,6 +2592,29 @@ export default function App() {
             {id === 'appointments' && tempPromiseCoords && (
               <span className="absolute top-1.5 right-2 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
             )}
+          </button>
+        ))}
+
+        {/* 세로 구분선 */}
+        <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
+
+        {/* Leisure/Entertainment Group */}
+        {([
+          { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
+          { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
+          { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
+          { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
+        ]).map(({ id, Icon, label, onClick }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={onClick}
+            className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
+              activeTab === id ? 'text-indigo-600 bg-indigo-50 border border-indigo-150' : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50/30'
+            }`}
+          >
+            <Icon className="w-5 h-5" />
+            <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
           </button>
         ))}
       </div>
@@ -2889,8 +2996,12 @@ export default function App() {
 
             {/* 상단 프로필 카드 요약 */}
             <div className="bg-rose-50/50 border border-rose-100 rounded-2xl p-4 flex items-center gap-4">
-              <div className="w-14 h-14 bg-white border-2 border-rose-200 rounded-2xl shadow-sm flex items-center justify-center text-3xl shrink-0">
-                {regFruit}
+              <div className="w-14 h-14 bg-white border-2 border-rose-200 rounded-2xl shadow-sm flex items-center justify-center text-3xl shrink-0 overflow-hidden">
+                {regFruit.startsWith('data:image/') ? (
+                  <img src={regFruit} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  regFruit
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-rose-500 font-bold tracking-wider uppercase">현재 프로필 정보</p>
@@ -2900,23 +3011,110 @@ export default function App() {
             </div>
 
             <div className="space-y-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-gray-600">아바타 과일 선택</label>
-                <div className="grid grid-cols-5 gap-2 pt-1">
-                  {['🍎', '🥭', '🍊', '🍑', '🍓', '🍉', '🍇', '🍈', '🍌', '🍒'].map((fruit) => (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-gray-600">🍎 아바타 과일 선택 (15종)</label>
+                <div className="grid grid-cols-5 gap-1.5 pt-0.5">
+                  {['🍎', '🥭', '🍊', '🍑', '🍓', '🍉', '🍇', '🍈', '🍌', '🍒', '🥝', '🍍', '🥥', '🫐', '🍋'].map((fruit) => (
                     <button
                       key={fruit}
                       type="button"
                       onClick={() => setRegFruit(fruit)}
-                      className={`text-2xl h-11 w-full rounded-xl flex items-center justify-center transition border ${
+                      className={`text-xl h-9 w-full rounded-xl flex items-center justify-center transition border ${
                         regFruit === fruit
-                          ? 'bg-rose-100 border-rose-400 shadow-sm font-bold scale-110'
+                          ? 'bg-rose-100 border-rose-400 shadow-sm font-bold scale-105'
                           : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
                       }`}
                     >
                       {fruit}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-gray-600">🙋‍♂️ 남성 아바타</label>
+                  <div className="grid grid-cols-5 gap-1 pt-0.5">
+                    {['👦', '👨', '🧔', '👴', '🧑‍💻'].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setRegFruit(emoji)}
+                        className={`text-lg h-8 w-full rounded-lg flex items-center justify-center transition border ${
+                          regFruit === emoji
+                            ? 'bg-rose-100 border-rose-400 shadow-sm font-bold scale-105'
+                            : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
+                        }`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-gray-600">👧 여성 아바타</label>
+                  <div className="grid grid-cols-5 gap-1 pt-0.5">
+                    {['👧', '👩', '👩‍🦱', '👵', '👩‍💻'].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setRegFruit(emoji)}
+                        className={`text-lg h-8 w-full rounded-lg flex items-center justify-center transition border ${
+                          regFruit === emoji
+                            ? 'bg-rose-100 border-rose-400 shadow-sm font-bold scale-105'
+                            : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
+                        }`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5 border-t border-gray-150 pt-2.5">
+                <label className="text-xs font-semibold text-gray-600">📷 내 사진 업로드</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('profile-photo-file-upload')?.click()}
+                    className="px-4 py-2 border-2 border-black bg-rose-50 hover:bg-rose-100 text-xs font-black rounded-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition cursor-pointer"
+                  >
+                    사진 파일 선택
+                  </button>
+                  <input
+                    id="profile-photo-file-upload"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          if (event.target?.result && typeof event.target.result === 'string') {
+                            setRegFruit(event.target.result); // Base64
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                  />
+                  {regFruit.startsWith('data:image/') ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-emerald-600 font-bold">✓ 사진 등록 완료</span>
+                      <button
+                        type="button"
+                        onClick={() => setRegFruit('🍎')}
+                        className="text-[9px] text-gray-400 hover:text-rose-500 font-bold underline cursor-pointer"
+                      >
+                        초기화
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-gray-400">직접 찍은 사진이나 갤러리 이미지 등록 가능</span>
+                  )}
                 </div>
               </div>
 
@@ -3151,6 +3349,148 @@ export default function App() {
                 수락!
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 모의 음성/화상 통화 전체화면 오버레이 */}
+      {callingState && (
+        <div className="absolute inset-0 bg-slate-950 z-50 flex flex-col justify-between p-6 text-white font-sans animate-fadeIn select-none">
+          {/* Top Info Section */}
+          <div className="flex flex-col items-center mt-12 space-y-3">
+            <div className="relative">
+              <div
+                style={{ backgroundColor: callingState.friend.color || '#EC4899' }}
+                className="w-24 h-24 rounded-full border-4 border-slate-800 flex items-center justify-center text-4xl shadow-2xl overflow-hidden font-black"
+              >
+                {callingState.friend.avatar.startsWith('data:image/') ? (
+                  <img src={callingState.friend.avatar} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  callingState.friend.avatar
+                )}
+              </div>
+              {callingState.status === 'connected' && (
+                <span className="absolute bottom-1 right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-950 animate-pulse" />
+              )}
+            </div>
+
+            <div className="text-center space-y-1">
+              <h2 className="text-xl font-black">{callingState.friend.name}</h2>
+              <p className="text-xs text-slate-400 font-mono tracking-wider">{callingState.friend.phone || '010-0000-0000'}</p>
+              <p className="text-xs text-rose-400 font-bold mt-1.5 flex items-center justify-center gap-1">
+                {callingState.type === 'voice' ? '📞 음성 통화' : '📹 화상 통화'}
+              </p>
+            </div>
+
+            {/* Status & Timer */}
+            <div className="pt-4 text-center">
+              {callingState.status === 'ringing' ? (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-300 animate-pulse">신호 가는 중...</p>
+                  <div className="flex justify-center gap-1">
+                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></span>
+                  </div>
+                </div>
+              ) : callingState.status === 'connected' ? (
+                <p className="text-lg font-extrabold font-mono text-emerald-400">
+                  {Math.floor(callingState.duration / 60).toString().padStart(2, '0')}:
+                  {(callingState.duration % 60).toString().padStart(2, '0')}
+                </p>
+              ) : (
+                <p className="text-sm font-black text-rose-500 animate-pulse">통화가 종료되었습니다.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Video Preview Center (For Video Calls) */}
+          {callingState.type === 'video' && callingState.status === 'connected' && (
+            <div className="relative flex-1 my-6 rounded-3xl border-2 border-slate-800 bg-slate-900 overflow-hidden flex items-center justify-center shadow-inner">
+              {callingState.cameraOff ? (
+                <div className="text-center space-y-2">
+                  <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center text-2xl mx-auto">👤</div>
+                  <p className="text-xs text-slate-400 font-semibold">내 카메라 꺼짐</p>
+                </div>
+              ) : (
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover transform scale-x-[-1]"
+                />
+              )}
+              <span className="absolute top-3 left-3 bg-black/60 backdrop-blur-md text-[9px] font-bold px-2 py-0.5 rounded-full border border-white/10">내 화면 실시간 전송</span>
+            </div>
+          )}
+
+          {/* Voice Call Pulse Visualizer Center */}
+          {callingState.type === 'voice' && callingState.status === 'connected' && (
+            <div className="flex-1 flex items-center justify-center my-6">
+              <div className="flex items-center gap-1.5 h-16 w-full justify-center">
+                {[1, 2, 3, 4, 5, 4, 3, 2, 1].map((bar, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      height: `${15 + Math.sin((callingState.duration * 2) + i) * 35}%`,
+                    }}
+                    className="w-1.5 bg-gradient-to-t from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Control Buttons Footer */}
+          <div className="mb-6 flex flex-col items-center space-y-6">
+            {callingState.status === 'connected' && (
+              <div className="flex items-center gap-6">
+                {/* Mute Mic */}
+                <button
+                  type="button"
+                  onClick={() => setCallingState(prev => prev ? { ...prev, micMuted: !prev.micMuted } : null)}
+                  className={`w-12 h-12 rounded-full flex items-center justify-center border border-white/10 transition-colors cursor-pointer text-lg ${
+                    callingState.micMuted ? 'bg-rose-500 text-white' : 'bg-slate-850 hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  🎙️
+                </button>
+
+                {/* Toggle Camera (Only for video) */}
+                {callingState.type === 'video' && (
+                  <button
+                    type="button"
+                    onClick={() => setCallingState(prev => prev ? { ...prev, cameraOff: !prev.cameraOff } : null)}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center border border-white/10 transition-colors cursor-pointer text-lg ${
+                      callingState.cameraOff ? 'bg-rose-500 text-white' : 'bg-slate-855 hover:bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    📹
+                  </button>
+                )}
+
+                {/* Speaker */}
+                <button
+                  type="button"
+                  onClick={() => setCallingState(prev => prev ? { ...prev, speakerOn: !prev.speakerOn } : null)}
+                  className={`w-12 h-12 rounded-full flex items-center justify-center border border-white/10 transition-colors cursor-pointer text-lg ${
+                    callingState.speakerOn ? 'bg-indigo-500 text-white' : 'bg-slate-850 hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  🔊
+                </button>
+              </div>
+            )}
+
+            {/* Decline/Hang Up Button */}
+            <button
+              type="button"
+              onClick={handleEndCall}
+              className="w-16 h-16 bg-red-600 hover:bg-red-700 text-white rounded-full flex items-center justify-center text-2xl shadow-xl hover:shadow-red-600/30 active:scale-95 transition cursor-pointer"
+            >
+              📞
+            </button>
           </div>
         </div>
       )}

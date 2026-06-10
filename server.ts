@@ -120,7 +120,7 @@ const sendPushToUser = async (userId: string, title: string, body: string, data:
 const MessageSchema = z.object({
   senderId: z.string().min(1).max(100),
   senderName: z.string().min(1).max(100),
-  senderAvatar: z.string().max(10),
+  senderAvatar: z.string().max(3000000),
   senderColor: z.string().regex(/^#[0-9A-F]{6}$/i),
   text: z.string().max(5000).optional(),
   locationShared: z.object({
@@ -133,7 +133,7 @@ const MessageSchema = z.object({
 
 const FriendInviteSchema = z.object({
   name: z.string().max(50).optional().nullable(),
-  avatar: z.string().max(10).optional(),
+  avatar: z.string().max(3000000).optional(),
   color: z.string().regex(/^#[0-9A-F]{6}$/i).optional(),
   phone: z.string().max(50).optional().nullable(),
   roomId: z.string().optional(),
@@ -176,7 +176,7 @@ const ProfileSchema = z.object({
   phone: z.string().regex(/^\d{2,3}-\d{3,4}-\d{4}$/, 'Invalid phone format').optional(),
   realName: z.string().min(1).max(50).optional(),
   alias: z.string().min(1).max(50).optional(),
-  avatar: z.string().max(10).optional()
+  avatar: z.string().max(3000000).optional()
 });
 
 const RoomSchema = z.object({

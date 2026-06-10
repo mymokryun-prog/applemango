@@ -51,6 +51,13 @@ const getFruitColor = (fruitEmoji: string): string => {
 };
 
 // ─── 마커 HTML ───────────────────────────────────────────────────────────────
+function renderAvatar(avatarString: string): string {
+  if (avatarString && avatarString.startsWith('data:image/')) {
+    return `<img src="${avatarString}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block" />`;
+  }
+  return avatarString || '👤';
+}
+
 function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
   const isOffline = friend.isOnline === false;
   // 로그아웃/앱종료(오프라인) 친구는 마지막 위치에 고정 표시 — 어둡게 + 굵은 검정 테두리
@@ -65,11 +72,11 @@ function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): s
     : '';
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
     ${statusSnippet}
-    <div style="position:relative;width:28px;height:28px;background:${markerBg};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring}">
-      ${friend.avatar}
+    <div style="position:relative;width:28px;height:28px;background:${markerBg};${border};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;${ring};overflow:hidden">
+      ${renderAvatar(friend.avatar)}
       ${hrBadge}
-      <div style="position:absolute;bottom:-4px;right:-7px;background:#1F2937;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">${friend.battery}%</div>
-      <div style="position:absolute;top:0;right:0;width:8px;height:8px;background:${friend.isOnline ? '#34D399' : '#9CA3AF'};border:1.5px solid #fff;border-radius:50%"></div>
+      <div style="position:absolute;bottom:-4px;right:-7px;background:#1F2937;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;z-index:2">${friend.battery}%</div>
+      <div style="position:absolute;top:0;right:0;width:8px;height:8px;background:${friend.isOnline ? '#34D399' : '#9CA3AF'};border:1.5px solid #fff;border-radius:50%;z-index:2"></div>
     </div>
     <div style="background:#fff;border:1px solid #D1D5DB;color:#111;font-size:7px;font-weight:600;padding:1px 5px;border-radius:4px;margin-top:2px;white-space:nowrap;font-family:sans-serif">${friend.name.split(' ')[0]}${friend.speed > 0 ? ` ·${Math.round(friend.speed)}k` : ''}</div>
   </div>`;
@@ -77,14 +84,14 @@ function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): s
 
 function appointmentMarkerHtml(app: Appointment): string {
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
-    <div style="width:36px;height:36px;background:#FBBF24;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:2px 2px 0 #111">📍</div>
+    <div style="font-size:28px;line-height:1.2;display:flex;align-items:center;justify-content:center">🚩</div>
     <div style="background:#111;color:#FDE68A;font-size:9px;font-weight:900;padding:2px 6px;border-radius:5px;margin-top:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${app.title.length > 9 ? app.title.slice(0, 9) + '…' : app.title}</div>
   </div>`;
 }
 
 function tempPromiseMarkerHtml(): string {
   return `<div style="display:flex;flex-direction:column;align-items:center;animation:bounce 1s infinite;cursor:pointer">
-    <div style="width:32px;height:32px;background:#EF4444;border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px">⭐️</div>
+    <div style="font-size:26px;line-height:1.2;display:flex;align-items:center;justify-content:center">🚩</div>
     <div style="background:#111;color:#FCA5A5;font-size:8px;font-weight:900;padding:1px 5px;border-radius:4px;margin-top:2px;font-family:sans-serif">여기 소집</div>
   </div>`;
 }
@@ -133,7 +140,8 @@ function computeSpread<T extends { lat: number; lng: number; color?: string }>(i
         out.push({ ...it, dLat: it.lat, dLng: it.lng, grouped: false, gLat: it.lat, gLng: it.lng });
       } else {
         // 부채꼴 형태로 반사하여 고르게 펼쳐 배치
-        const radius = 0.00030; // 약 33미터 꼬리 길이
+        // 짝수 인덱스는 0.00012(약 13m), 홀수 인덱스는 0.00020(약 22m)으로 분산시켜 꼬리 길이는 대폭 줄이고 겹침 방지
+        const radius = (i % 2 === 0) ? 0.00012 : 0.00020;
         let angle = Math.PI / 2; // 기본 90도 (위)
         if (n > 1) {
           const minAngle = Math.PI / 6; // 30도
@@ -151,9 +159,9 @@ function computeSpread<T extends { lat: number; lng: number; color?: string }>(i
 
 function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string }): string {
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
-    <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1)">
-      ${myProfile.avatar}
-      <div style="position:absolute;bottom:-4px;right:-7px;background:#3B82F6;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;border:1px solid #111">내 위치</div>
+    <div style="position:relative;width:30px;height:30px;background:${myProfile.color};border:2px solid #111;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:2px 2px 0px 0px rgba(0,0,0,1);overflow:hidden">
+      ${renderAvatar(myProfile.avatar)}
+      <div style="position:absolute;bottom:-4px;right:-7px;background:#3B82F6;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2;border:1px solid #111;z-index:2">내 위치</div>
     </div>
   </div>`;
 }

@@ -25,6 +25,7 @@ interface ChatRoomProps {
   roomId?: string;
   ownerId?: string;
   onCreateAppointment?: (title: string, placeName: string, datetime: string, lat: number, lng: number) => void;
+  onStartCall?: (friend: Friend, type: 'voice' | 'video') => void;
 }
 
 export default function ChatRoom({
@@ -44,7 +45,8 @@ export default function ChatRoom({
   onRemoveFriend,
   roomId = '',
   ownerId = '',
-  onCreateAppointment
+  onCreateAppointment,
+  onStartCall,
 }: ChatRoomProps) {
   const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
   // 방장(커스텀방) 또는 기본 시스템방에서는 멤버를 내보낼 수 있음
@@ -322,64 +324,38 @@ export default function ChatRoom({
         </div>
       </div>
 
-      {/* 초대된 멤버 가로 스크롤 리스트 (전체 초대된 사람 리스트) */}
-      <div className="bg-[#FFFDF9] border-b-2 border-black px-3 py-2 flex items-center gap-2 select-none overflow-x-auto whitespace-nowrap shrink-0 scrollbar-none shadow-sm">
-        <button type="button" onClick={() => setShowMembersModal(true)}
-          className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1 hover:text-rose-500">
-          <Users className="w-3.5 h-3.5 text-rose-500" />
-          <span>멤버 관리 ({friends.length}) ▸</span>
-        </button>
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-          {friends.map((friend) => {
-            const isOwner = friend.id === ownerId || (friend.id === 'user-minsu' && !ownerId);
-            const isOnline = friend.isOnline !== false;
-            const isPending = friend.isPendingInvite;
-            
-            return (
-              <div 
+      {/* 겹쳐진 아바타 버튼형 멤버 관리 바 */}
+      <div className="bg-[#FFFDF9] border-b-2 border-black px-3 py-1.5 flex items-center select-none shrink-0 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowMembersModal(true)}
+          className="flex items-center gap-2 px-3 py-1 bg-white hover:bg-rose-50 border-2 border-black rounded-full shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition cursor-pointer select-none"
+        >
+          {/* Overlapping avatars representation */}
+          <div className="flex -space-x-2 overflow-hidden">
+            {friends.slice(0, 3).map((friend, idx) => (
+              <div
                 key={friend.id}
-                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border-2 border-black text-[10px] font-extrabold shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] bg-white shrink-0 ${
-                  isPending ? 'border-dashed border-amber-500 text-amber-900 bg-amber-50/50' : 'text-slate-800'
-                }`}
-                title={`${friend.name} - ${friend.statusMsg || ''}`}
+                style={{ backgroundColor: friend.color || '#3B82F6', zIndex: 10 - idx }}
+                className="inline-block h-6 w-6 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-black text-white shrink-0 overflow-hidden"
               >
-                <div
-                  style={{ backgroundColor: friend.color || '#3B82F6' }}
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 font-black text-white"
-                >
-                  {friend.avatar}
-                </div>
-                <div className="flex flex-col justify-center leading-none text-left">
-                  <div className="flex items-center gap-0.5">
-                    <span className="max-w-[70px] truncate">{friend.name.replace(' (대기)', '').replace(' (합류)', '')}</span>
-                    {isOwner && <span className="text-[7px]" title="방장">👑</span>}
-                  </div>
-                  <span className="text-[6px] text-slate-400 font-bold">
-                    {isPending ? '수락대기' : isOnline ? '온라인' : '오프라인'}
-                    {friend.phone && ` · ${friend.phone}`}
-                  </span>
-                </div>
-                <span className={`w-1.5 h-1.5 rounded-full border border-black shrink-0 ${
-                  isPending ? 'bg-amber-400 animate-pulse' : isOnline ? 'bg-emerald-500' : 'bg-gray-300'
-                }`} />
-                {iAmOwner && friend.id !== activeProfileId && onRemoveFriend && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm(`${friend.name.replace(' (대기)', '').replace(' (합류)', '')} 님을 이 그룹방에서 탈퇴시키겠습니까?`)) {
-                        onRemoveFriend(friend.id, friend.name);
-                      }
-                    }}
-                    title="이 멤버 탈퇴시키기 (방장)"
-                    className="ml-0.5 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0 hover:bg-rose-600"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
+                {friend.avatar.startsWith('data:image/') ? (
+                  <img src={friend.avatar} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  friend.avatar
                 )}
               </div>
-            );
-          })}
-        </div>
+            ))}
+            {friends.length > 3 && (
+              <div className="inline-block h-6 w-6 rounded-full border-2 border-black bg-slate-900 flex items-center justify-center text-[8px] font-black text-white shrink-0 z-0">
+                +{friends.length - 3}
+              </div>
+            )}
+          </div>
+          <span className="text-[10px] font-black text-slate-800 flex items-center gap-0.5">
+            그룹 멤버 ({friends.length}명) <span className="text-rose-500 font-extrabold text-[8px]">▶</span>
+          </span>
+        </button>
       </div>
 
 
@@ -465,9 +441,13 @@ export default function ChatRoom({
                     if (f && typeof f.lat === 'number' && typeof f.lng === 'number') onFocusLocation(f.lat, f.lng);
                   }}
                   title={`${msg.senderName} 위치 보기`}
-                  className="w-8.5 h-8.5 rounded-full flex items-center justify-center text-base bg-white shrink-0 font-sans cursor-pointer active:scale-95 transition"
+                  className="w-8.5 h-8.5 rounded-full flex items-center justify-center text-base bg-white shrink-0 font-sans cursor-pointer active:scale-95 transition overflow-hidden border border-gray-200"
                 >
-                  {msg.senderAvatar}
+                  {msg.senderAvatar.startsWith('data:image/') ? (
+                    <img src={msg.senderAvatar} alt="" className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    msg.senderAvatar
+                  )}
                 </button>
               )}
 
@@ -687,9 +667,13 @@ export default function ChatRoom({
                     <div className="flex items-center gap-3">
                       <div 
                         style={{ backgroundColor: friend.color || '#3B82F6' }}
-                        className="w-10 h-10 rounded-full border-2 border-black flex items-center justify-center text-lg shadow-sm font-black text-white shrink-0"
+                        className="w-10 h-10 rounded-full border-2 border-black flex items-center justify-center text-lg shadow-sm font-black text-white shrink-0 overflow-hidden"
                       >
-                        {friend.avatar}
+                        {friend.avatar.startsWith('data:image/') ? (
+                          <img src={friend.avatar} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          friend.avatar
+                        )}
                       </div>
                       <div>
                         <div className="flex items-center gap-1">
@@ -707,24 +691,52 @@ export default function ChatRoom({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
-                        <span className="text-[9px] font-bold text-gray-500">{isOnline ? '온라인' : '오프라인'}</span>
-                      </div>
-                      {iAmOwner && friend.id !== activeProfileId && onRemoveFriend && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (window.confirm(`${friend.name.replace(' (대기)', '').replace(' (합류)', '')} 님을 이 그룹방에서 내보내시겠습니까?`)) {
-                              onRemoveFriend(friend.id, friend.name);
+                      {friend.id !== activeProfileId && (
+                        <div className="flex gap-1 mr-1">
+                          <button
+                            type="button"
+                            onClick={() => {
                               setShowMembersModal(false);
-                            }
-                          }}
-                          className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition"
-                        >
-                          내보내기
-                        </button>
+                              onStartCall?.(friend, 'voice');
+                            }}
+                            className="bg-emerald-500 hover:bg-emerald-600 text-white w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold cursor-pointer active:scale-95 transition"
+                            title="음성통화"
+                          >
+                            📞
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMembersModal(false);
+                              onStartCall?.(friend, 'video');
+                            }}
+                            className="bg-indigo-500 hover:bg-indigo-600 text-white w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold cursor-pointer active:scale-95 transition"
+                            title="화상통화"
+                          >
+                            📹
+                          </button>
+                        </div>
                       )}
+                      <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex items-center gap-1">
+                          <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
+                          <span className="text-[8px] font-bold text-gray-500">{isOnline ? '온라인' : '오프라인'}</span>
+                        </div>
+                        {iAmOwner && friend.id !== activeProfileId && onRemoveFriend && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`${friend.name.replace(' (대기)', '').replace(' (합류)', '')} 님을 이 그룹방에서 내보내시겠습니까?`)) {
+                                onRemoveFriend(friend.id, friend.name);
+                                setShowMembersModal(false);
+                              }
+                            }}
+                            className="bg-rose-500 hover:bg-rose-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded transition"
+                          >
+                            내보내기
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

@@ -205,7 +205,13 @@ export default function FriendListPanel({
                 <p className="text-[10px] font-bold text-blue-500 px-2">앱 유저</p>
                 {searchResults.map(u => (
                   <div key={u.id} className="flex items-center gap-2 bg-white rounded-xl px-3 py-2">
-                    <span className="text-xl">{u.avatar}</span>
+                    <span className="text-xl flex items-center justify-center w-8 h-8 rounded-full overflow-hidden shrink-0">
+                      {u.avatar.startsWith('data:image/') ? (
+                        <img src={u.avatar} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        u.avatar
+                      )}
+                    </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{u.name}</p>
                       <p className="text-[11px] text-gray-400 font-mono">{u.phone}</p>
@@ -225,7 +231,13 @@ export default function FriendListPanel({
                 <p className="text-[10px] font-bold text-emerald-600 px-2">🟢 지금 접속 중</p>
                 {onlineUsers.map(u => (
                   <div key={u.id} className="flex items-center gap-2 bg-white rounded-xl px-3 py-2">
-                    <span className="text-xl">{u.avatar}</span>
+                    <span className="text-xl flex items-center justify-center w-8 h-8 rounded-full overflow-hidden shrink-0">
+                      {u.avatar.startsWith('data:image/') ? (
+                        <img src={u.avatar} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        u.avatar
+                      )}
+                    </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{u.name}</p>
                       {u.phone && <p className="text-[11px] text-gray-400 font-mono">{u.phone}</p>}
@@ -283,10 +295,14 @@ export default function FriendListPanel({
                     {/* 아바타 */}
                     <div className="relative shrink-0">
                       <div
-                        className="w-12 h-12 rounded-full flex items-center justify-center text-2xl border-2 border-white"
+                        className="w-12 h-12 rounded-full flex items-center justify-center text-2xl border-2 border-white overflow-hidden"
                         style={{ backgroundColor: friend.color, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}
                       >
-                        {friend.avatar}
+                        {friend.avatar.startsWith('data:image/') ? (
+                          <img src={friend.avatar} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          friend.avatar
+                        )}
                       </div>
                       <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${friend.isOnline ? 'bg-emerald-400' : 'bg-gray-300'}`} />
                     </div>

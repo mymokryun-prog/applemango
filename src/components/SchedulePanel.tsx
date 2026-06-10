@@ -316,7 +316,7 @@ export default function SchedulePanel({
 
 
   return (
-    <div className="flex flex-col h-full bg-white overflow-y-auto">
+    <div className="flex flex-col h-full bg-white overflow-y-auto schedule-panel-container">
 
       {/* 약속 만들기 카드 */}
       <div className="mx-4 mt-2.5 mb-1.5 bg-amber-50 border-2 border-black rounded-3xl overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
@@ -324,11 +324,15 @@ export default function SchedulePanel({
           {/* 약속 이름 */}
           <div className="space-y-1">
             <label className="text-[11px] font-black text-gray-700">약속 이름 *</label>
-            <input
-              type="text" required value={title}
+            <textarea
+              rows={1}
+              required
+              value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+              autoComplete="one-time-code"
               placeholder="예) 민수 생일 파티, 금요 번개"
-              className="w-full bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-bold"
+              className="w-full bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-bold resize-none overflow-hidden"
             />
           </div>
 
@@ -370,12 +374,14 @@ export default function SchedulePanel({
                   {isSearching && (
                     <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-amber-400 animate-spin" />
                   )}
-                  <input
-                    type="text"
+                  <textarea
+                    rows={1}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                    autoComplete="one-time-code"
                     placeholder="예: 강남역, 홍대 카페, 스타벅스 또는 직접 입력"
-                    className="w-full bg-white border-2 border-black rounded-xl py-2 pl-8 pr-8 text-xs focus:outline-none focus:border-amber-400 font-bold"
+                    className="w-full bg-white border-2 border-black rounded-xl py-2 pl-8 pr-8 text-xs focus:outline-none focus:border-amber-400 font-bold resize-none overflow-hidden"
                   />
                 </div>
 
@@ -700,6 +706,12 @@ export default function SchedulePanel({
                       setEditLng(app.lng);
                       setEditSearchQuery('');
                       setEditResults([]);
+                      setTimeout(() => {
+                        const container = document.querySelector('.schedule-panel-container');
+                        if (container) {
+                          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+                        }
+                      }, 100);
                     }
                   }} className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 cursor-pointer">
                     <Edit3 className="w-3 h-3" />
@@ -708,26 +720,30 @@ export default function SchedulePanel({
                 </div>
 
                 {isEditing && (
-                  <div className="px-4 pb-4 border-t border-gray-50 pt-3 space-y-2.5">
+                  <div className="px-4 pb-8 border-t-2 border-black pt-4 space-y-3 bg-amber-50/30 rounded-b-2xl mb-4">
                     <p className="text-xs font-semibold text-gray-500">약속 수정</p>
-                    <input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                    <textarea rows={1} value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                      autoComplete="one-time-code"
                       placeholder="약속 이름"
-                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400 resize-none overflow-hidden font-bold" />
 
                     <div className="relative">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                         {isEditSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-amber-400 animate-spin" />}
-                        <input type="text" value={editSearchQuery}
+                        <textarea rows={1} value={editSearchQuery}
                           onChange={e => setEditSearchQuery(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                          autoComplete="one-time-code"
                           placeholder="장소 다시 검색"
-                          className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-2.5 pl-8 pr-8 text-sm focus:outline-none focus:border-amber-400" />
+                          className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-2.5 pl-8 pr-8 text-sm focus:outline-none focus:border-amber-400 resize-none overflow-hidden font-bold" />
                       </div>
                       {editResults.length > 0 && (
                         <div className="mt-1 bg-white border border-gray-100 rounded-2xl overflow-hidden max-h-36 overflow-y-auto shadow-sm">
                           {editResults.map((item, i) => (
                             <button key={i} type="button"
-                              onClick={() => { setEditPlaceName(item.name); setEditLat(item.lat); setEditLng(item.lng); setEditSearchQuery(item.name); setEditResults([]); onFocusLocation(item.lat, item.lng); }}
+                              onClick={() => { setEditPlaceName(item.name); setEditLat(item.lat); setEditLng(item.lng); setEditSearchQuery(item.name); setEditResults([]); }}
                               className="w-full text-left px-3 py-2 hover:bg-amber-50 border-b border-gray-50 last:border-0 text-xs">
                               <p className="font-semibold text-gray-800 truncate">{item.name}</p>
                               <p className="text-gray-400 truncate">{item.address}</p>
@@ -737,8 +753,10 @@ export default function SchedulePanel({
                       )}
                     </div>
 
-                    <input type="text" value={editPlaceName} onChange={e => setEditPlaceName(e.target.value)}
-                      placeholder="장소 주소" className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400" />
+                    <textarea rows={1} value={editPlaceName} onChange={e => setEditPlaceName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                      autoComplete="one-time-code"
+                      placeholder="장소 주소" className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400 resize-none overflow-hidden font-bold" />
                     <div className="grid grid-cols-2 gap-2">
                       <input type="date" value={editDate} min={getLocalDateString()} onChange={e => setEditDate(e.target.value)}
                         onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
