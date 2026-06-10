@@ -3,7 +3,7 @@
   "appName": "애플망고톡",
   "webDir": "dist",
   "server": {
-    "url": "https://REPLACE-WITH-YOUR-RAILWAY-DOMAIN.up.railway.app",
+    "url": "https://applemangotalk.onrender.com",
     "cleartext": false
   },
   "android": {
