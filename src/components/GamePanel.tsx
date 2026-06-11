@@ -358,6 +358,43 @@ class TetrisAudioSynth {
 }
 
 // ==========================================
+// GAME-SOCIAL 공용 헬퍼
+// ==========================================
+
+// ① 게임 리그: 승자 클라이언트가 결과를 서버에 신고 → 채팅 카드 + 주간 승점 반영
+async function reportLeagueResult(
+  roomId: string,
+  game: 'drone_battle' | 'tetris' | 'yut_nori',
+  winnerId: string,
+  winnerName: string,
+  loserId: string,
+  loserName: string
+) {
+  try {
+    await fetch('/api/games/result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId, game, winnerId, winnerName, loserId, loserName }),
+    });
+  } catch (e) {
+    console.warn('League result report failed:', e);
+  }
+}
+
+// ③ 걸음×게임 크로스: 오늘 걸음 수 조회 (오늘 날짜 기록만 인정)
+function stepsTodayOf(friends: any[], userId: string): number {
+  const f = friends.find(fr => fr.id === userId);
+  if (!f) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  return (f as any).stepsTodayDate === today ? (f.stepsToday || 0) : 0;
+}
+
+function friendDisplayName(friends: any[], userId: string, fallback: string): string {
+  const f = friends.find(fr => fr.id === userId);
+  return (f?.alias || f?.name || fallback).replace(' (대기)', '').replace(' (합류)', '');
+}
+
+// ==========================================
 // 1. DRONE BATTLE GAME SUBCOMPONENT
 // ==========================================
 interface DroneCrashGameProps {
@@ -574,9 +611,15 @@ function DroneCrashGame({
     const p1Name = isMultiplayer ? (multiplayerConfig.role === 'p1' ? '나 (P1)' : '상대방 (P1)') : 'Player 1';
     const p2Name = isMultiplayer ? (multiplayerConfig.role === 'p2' ? '나 (P2)' : '상대방 (P2)') : 'Player 2';
 
+    // ③ 걸음×게임 크로스: 오늘 5,000보 이상 걸은 플레이어는 도탄 스킬 +2
+    const p1UserId = isMultiplayer ? (multiplayerConfig.role === 'p1' ? activeProfileId : multiplayerConfig.opponentId) : activeProfileId;
+    const p2UserId = isMultiplayer ? (multiplayerConfig.role === 'p2' ? activeProfileId : multiplayerConfig.opponentId) : '';
+    const p1SkillBonus = stepsTodayOf(friends, p1UserId) >= 5000 ? 2 : 0;
+    const p2SkillBonus = p2UserId && stepsTodayOf(friends, p2UserId) >= 5000 ? 2 : 0;
+
     const newPlayers: Player[] = [
-      { id: 1, name: p1Name, x: 220, y: 0, color: "#3b82f6", hp: 100, angle: 45, power: 70, moveFuel: 100, skills: 5, bullets: 20 },
-      { id: 2, name: p2Name, x: width - 220, y: 0, color: "#ef4444", hp: 100, angle: 135, power: 70, moveFuel: 100, skills: 5, bullets: 20 }
+      { id: 1, name: p1Name, x: 220, y: 0, color: "#3b82f6", hp: 100, angle: 45, power: 70, moveFuel: 100, skills: 5 + p1SkillBonus, bullets: 20 },
+      { id: 2, name: p2Name, x: width - 220, y: 0, color: "#ef4444", hp: 100, angle: 135, power: 70, moveFuel: 100, skills: 5 + p2SkillBonus, bullets: 20 }
     ];
 
     updateTankY(newPlayers[0], newTerrain);
@@ -1134,6 +1177,14 @@ function DroneCrashGame({
             next[winnerIdx!] += 1;
             return next;
           });
+          // ① 게임 리그: 승자 클라이언트만 결과 신고
+          if (isMultiplayer && winnerIdx === myPlayerIdx) {
+            reportLeagueResult(
+              activeRoomId, 'drone_battle',
+              activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+              multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+            );
+          }
         }
         synthRef.current?.playVictory();
       } else if (state.players[0].bullets <= 0 && state.players[1].bullets <= 0) {
@@ -1156,6 +1207,14 @@ function DroneCrashGame({
             next[winnerIdx!] += 1;
             return next;
           });
+          // ① 게임 리그: 승자 클라이언트만 결과 신고
+          if (isMultiplayer && winnerIdx === myPlayerIdx) {
+            reportLeagueResult(
+              activeRoomId, 'drone_battle',
+              activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+              multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+            );
+          }
         }
         synthRef.current?.playVictory();
       } else {
@@ -1467,6 +1526,7 @@ function DroneCrashGame({
           <div className="text-left">
             <p>1. 조작: 내 차례에 [-5/-1/+1/+5]로 각도·파워를 정밀 조정하고 🚀 발사! 키보드 [←/→]로 드론 이동도 가능합니다.</p>
             <p>2. 📱 휴대폰을 가로로 돌리면 전장이 약 2배 크게 보입니다. 드론은 공중 부유 중이라 피격 판정이 지면보다 약간 높습니다.</p>
+            <p>3. 👣 오늘 5,000보 이상 걸은 플레이어는 🎳 도탄 스킬 +2 보너스! (만보기 연동)</p>
           </div>
         </div>
       </div>
@@ -1507,6 +1567,27 @@ function TetrisGame({
   const isMultiplayer = !!multiplayerConfig && multiplayerConfig.game === 'tetris';
   const opponent = isMultiplayer ? friends.find(f => f.id === multiplayerConfig!.opponentId) : null;
   const opponentName = opponent ? (opponent.alias || opponent.name || '상대방') : '상대방';
+
+  // ③ 걸음×게임 크로스: 상대보다 많이 걸은 사람(1,000보 이상)은 낙하 속도 15% 느려지는 혜택
+  const mySteps = stepsTodayOf(friends, activeProfileId);
+  const oppSteps = isMultiplayer ? stepsTodayOf(friends, multiplayerConfig!.opponentId) : 0;
+  const hasStepAdvantage = isMultiplayer && mySteps >= 1000 && mySteps > oppSteps;
+
+  // ④ 어르신 모드: 낙하 속도 60% 느림 — 조부모·손주 공정 대결용 (기기별 저장)
+  const [elderMode, setElderMode] = useState(() => {
+    try { return localStorage.getItem('aemang_tetris_elder') === '1'; } catch { return false; }
+  });
+  const elderModeRef = useRef(elderMode);
+  useEffect(() => {
+    elderModeRef.current = elderMode;
+    try { localStorage.setItem('aemang_tetris_elder', elderMode ? '1' : '0'); } catch {}
+  }, [elderMode]);
+  const [opponentElder, setOpponentElder] = useState(false);
+
+  // ② 관전 응원 수신 (떠다니는 이모지 토스트)
+  const [cheers, setCheers] = useState<Array<{ id: number; emoji: string; fromName: string }>>([]);
+  // ① 리그 결과 중복 신고 방지
+  const reportedRef = useRef(false);
   const opponentCanvasRef = useRef<HTMLCanvasElement>(null);
   const opponentGridRef = useRef<(string | null)[][]>(
     Array(20).fill(null).map(() => Array(10).fill(null))
@@ -1543,6 +1624,7 @@ function TetrisGame({
           score: scoreRef.current,
           lines: linesRef.current,
           gameOver: isGameOverRef.current,
+          elder: elderModeRef.current,
         },
       });
     };
@@ -1556,13 +1638,32 @@ function TetrisGame({
     if (!isMultiplayer) return;
     const socket = getLocationSocket();
     const handleTetrisSync = (payload: any) => {
+      // ② 관전자 응원 수신 (대전 당사자 화면에 이모지 표시)
+      if (payload?.type === 'cheer') {
+        const cheerId = Date.now() + Math.random();
+        setCheers(prev => [...prev.slice(-4), { id: cheerId, emoji: payload.emoji || '👏', fromName: payload.fromName || '관전자' }]);
+        setTimeout(() => setCheers(prev => prev.filter(c => c.id !== cheerId)), 2500);
+        return;
+      }
       if (payload?.type !== 'sync-tetris') return;
       if (payload.from !== multiplayerConfig!.opponentId) return;
       if (Array.isArray(payload.grid)) opponentGridRef.current = payload.grid;
       opponentPieceRef.current = payload.piece || null;
       if (typeof payload.score === 'number') setOpponentScore(payload.score);
       if (typeof payload.lines === 'number') setOpponentLines(payload.lines);
-      if (payload.gameOver) setOpponentGameOver(true);
+      setOpponentElder(!!payload.elder);
+      if (payload.gameOver) {
+        setOpponentGameOver(true);
+        // ① 상대 탈락 + 나는 생존 → 내가 승자 → 리그 결과 신고 (1회)
+        if (!isGameOverRef.current && !reportedRef.current) {
+          reportedRef.current = true;
+          reportLeagueResult(
+            activeRoomId, 'tetris',
+            activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+            multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+          );
+        }
+      }
     };
     socket.on('game-relayed', handleTetrisSync);
     return () => { socket.off('game-relayed', handleTetrisSync); };
@@ -1840,7 +1941,9 @@ function TetrisGame({
 
     const gameTick = (timestamp: number) => {
       if (!lastDropTimeRef.current) lastDropTimeRef.current = timestamp;
-      const dropDelay = Math.max(80, 1000 - (level - 1) * 90);
+      // ④ 어르신 모드(60% 느림) + ③ 걸음 혜택(상대보다 많이 걸으면 15% 느림 = 유리)
+      const baseDelay = Math.max(80, 1000 - (level - 1) * 90);
+      const dropDelay = baseDelay * (elderModeRef.current ? 1.6 : 1) * (hasStepAdvantage ? 1.15 : 1);
       
       if (!isGameOver) {
         const elapsed = timestamp - lastDropTimeRef.current;
@@ -2005,6 +2108,16 @@ function TetrisGame({
           <span>게임 목록</span>
         </button>
         <div className="flex items-center gap-2">
+          {/* ④ 어르신 모드 토글 — 낙하 속도 60% 느림 */}
+          <button
+            onClick={() => setElderMode(v => !v)}
+            title="어르신 모드: 블록이 천천히 내려옵니다 (조부모·손주 공정 대결)"
+            className={`px-2 py-1.5 rounded-lg border text-[10px] font-black transition ${
+              elderMode ? 'border-emerald-500 text-emerald-300 bg-emerald-950/40' : 'border-slate-700 text-slate-500'
+            }`}
+          >
+            🧓 어르신 {elderMode ? 'ON' : 'OFF'}
+          </button>
           <button
             onClick={() => setIsMuted(!isMuted)}
             className={`p-1.5 rounded-lg border transition ${
@@ -2015,7 +2128,11 @@ function TetrisGame({
           </button>
           <div className="text-right">
             <h2 className="text-xs font-black text-pink-400">{isMultiplayer ? `네온 테트리스 대전 — VS ${opponentName}` : '네온 테트리스'}</h2>
-            <p className="text-[9px] text-pink-300">{isMultiplayer ? '실시간 1:1 경쟁전 (먼저 쌓이면 패배!)' : '클래식 낙하형 블록 퍼즐'}</p>
+            <p className="text-[9px] text-pink-300">
+              {isMultiplayer
+                ? (hasStepAdvantage ? '👣 걸음왕 혜택: 낙하 15% 느림!' : '실시간 1:1 경쟁전 (먼저 쌓이면 패배!)')
+                : '클래식 낙하형 블록 퍼즐'}
+            </p>
           </div>
         </div>
       </div>
@@ -2044,7 +2161,18 @@ function TetrisGame({
         </div>
 
         {/* 보드 영역: 솔로 = 단일 / 대전 = 좌(나) + 우(상대 실시간) */}
-        <div className="flex flex-row items-start justify-center gap-2.5 w-full">
+        <div className="relative flex flex-row items-start justify-center gap-2.5 w-full">
+          {/* ② 관전자 응원 이모지 토스트 */}
+          {cheers.length > 0 && (
+            <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 pointer-events-none">
+              {cheers.map(c => (
+                <div key={c.id} className="bg-slate-900/90 border border-amber-500/60 rounded-full px-3 py-1 flex items-center gap-1.5 animate-bounce shadow-lg">
+                  <span className="text-lg leading-none">{c.emoji}</span>
+                  <span className="text-[9px] font-bold text-amber-300">{c.fromName}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {/* 내 보드 */}
           <div className="flex flex-col items-center gap-1">
             {isMultiplayer && <p className="text-[9px] font-black text-rose-400">🙋 나 ({lines}줄)</p>}
@@ -2086,7 +2214,7 @@ function TetrisGame({
           {/* 상대 보드 (실시간 미러) */}
           {isMultiplayer && (
             <div className="flex flex-col items-center gap-1">
-              <p className="text-[9px] font-black text-indigo-400 truncate max-w-[140px]">⚔️ {opponentName} ({opponentLines}줄)</p>
+              <p className="text-[9px] font-black text-indigo-400 truncate max-w-[140px]">⚔️ {opponentName} ({opponentLines}줄){opponentElder ? ' 🧓' : ''}</p>
               <div className="relative border-4 border-indigo-900 bg-slate-900 rounded-2xl overflow-hidden w-[140px] h-[280px] shrink-0 shadow-lg">
                 <canvas
                   ref={opponentCanvasRef}
@@ -3048,14 +3176,221 @@ const TETRIS_COLORS = {
 
 type ShapeType = keyof typeof TETRIS_SHAPES;
 
-export default function GamePanel({ 
-  friends, 
-  activeProfileId, 
-  activeRoomId, 
-  multiplayerConfig, 
-  onResetMultiplayer 
+// ==========================================
+// GAME-SOCIAL ②: 테트리스 대전 관전 + 응원 뷰
+// ==========================================
+function TetrisSpectateView({
+  streamerIds,
+  friends,
+  activeRoomId,
+  activeProfileId,
+  onBack,
+}: {
+  streamerIds: string[];
+  friends: any[];
+  activeRoomId: string;
+  activeProfileId: string;
+  onBack: () => void;
+}) {
+  const boardsRef = useRef<Record<string, any>>({});
+  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
+  const [, setTick] = useState(0); // 점수 라벨 주기 갱신
+  const [sentCheer, setSentCheer] = useState<string | null>(null);
+  const streamKey = streamerIds.join(',');
+
+  // 스트림 수신
+  useEffect(() => {
+    const socket = getLocationSocket();
+    const handler = (payload: any) => {
+      if (payload?.type !== 'sync-tetris') return;
+      if (!streamerIds.includes(payload.from)) return;
+      boardsRef.current[payload.from] = payload;
+    };
+    socket.on('game-relayed', handler);
+    return () => { socket.off('game-relayed', handler); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamKey]);
+
+  // 보드 렌더 루프
+  useEffect(() => {
+    let raf: number;
+    const drawBlock = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, color: string) => {
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 5;
+      ctx.fillStyle = color + '30';
+      ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(x + 1.5, y + 1.5, size - 3, size - 3);
+      ctx.restore();
+    };
+    const draw = () => {
+      streamerIds.forEach(id => {
+        const cv = canvasRefs.current[id];
+        const data = boardsRef.current[id];
+        if (!cv) return;
+        const ctx = cv.getContext('2d');
+        if (!ctx) return;
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        const block = cv.height / 20;
+        if (data?.grid) {
+          for (let r = 0; r < 20; r++) {
+            for (let c = 0; c < 10; c++) {
+              const color = data.grid?.[r]?.[c];
+              if (color) drawBlock(ctx, c * block, r * block, block, color);
+            }
+          }
+        }
+        const piece = data?.piece;
+        if (piece && Array.isArray(piece.matrix)) {
+          for (let r = 0; r < piece.matrix.length; r++) {
+            for (let c = 0; c < piece.matrix[r].length; c++) {
+              if (piece.matrix[r][c] !== 0) {
+                drawBlock(ctx, (piece.x + c) * block, (piece.y + r) * block, block, piece.color);
+              }
+            }
+          }
+        }
+      });
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    const labelTimer = setInterval(() => setTick(v => v + 1), 500);
+    return () => { cancelAnimationFrame(raf); clearInterval(labelTimer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamKey]);
+
+  // 응원 이모지 전송 (대전 당사자 양쪽 화면에 표시됨)
+  const sendCheer = (emoji: string) => {
+    const socket = getLocationSocket();
+    socket.emit('game-relay', {
+      roomId: activeRoomId,
+      payload: {
+        type: 'cheer',
+        emoji,
+        from: activeProfileId,
+        fromName: friendDisplayName(friends, activeProfileId, '관전자'),
+      },
+    });
+    setSentCheer(emoji);
+    setTimeout(() => setSentCheer(null), 1200);
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-slate-950 text-white select-none overflow-y-auto">
+      <div className="bg-gradient-to-r from-slate-950 to-indigo-950 px-4 py-3 flex items-center justify-between border-b border-indigo-900 shadow-md shrink-0">
+        <button
+          onClick={onBack}
+          className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>게임 목록</span>
+        </button>
+        <div className="text-right">
+          <h2 className="text-xs font-black text-indigo-400">👀 테트리스 대전 관전 중</h2>
+          <p className="text-[9px] text-indigo-300">아래 이모지로 응원을 보내보세요!</p>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center p-3 gap-3">
+        <div className="flex flex-row items-start justify-center gap-3 w-full">
+          {streamerIds.map(id => {
+            const data = boardsRef.current[id];
+            return (
+              <div key={id} className="flex flex-col items-center gap-1">
+                <p className="text-[10px] font-black text-indigo-300 truncate max-w-[150px]">
+                  {friendDisplayName(friends, id, '플레이어')}{data?.elder ? ' 🧓' : ''} — {data?.score ?? 0}점 ({data?.lines ?? 0}줄)
+                </p>
+                <div className="relative border-4 border-indigo-900 bg-slate-900 rounded-2xl overflow-hidden w-[150px] h-[300px] shadow-lg">
+                  <canvas
+                    ref={el => { canvasRefs.current[id] = el; }}
+                    width={200}
+                    height={400}
+                    className="w-full h-full block"
+                  />
+                  {data?.gameOver && (
+                    <div className="absolute inset-0 bg-slate-950/85 flex items-center justify-center z-10">
+                      <p className="text-rose-400 font-black text-sm">탈락!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 응원 이모지 패드 */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 w-full max-w-[360px]">
+          <p className="text-[10px] font-bold text-slate-400 text-center mb-2">
+            {sentCheer ? `${sentCheer} 응원을 보냈습니다!` : '응원 보내기 (선수 화면에 표시됩니다)'}
+          </p>
+          <div className="flex justify-center gap-2">
+            {['👏', '🔥', '😂', '💪', '🍎'].map(e => (
+              <button
+                key={e}
+                onClick={() => sendCheer(e)}
+                className="bg-slate-800 hover:bg-slate-700 active:bg-amber-900 border border-slate-700 rounded-xl w-12 h-12 text-2xl transition cursor-pointer"
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function GamePanel({
+  friends,
+  activeProfileId,
+  activeRoomId,
+  multiplayerConfig,
+  onResetMultiplayer
 }: GamePanelProps) {
   const [activeGame, setActiveGame] = useState<'drone_battle' | 'tetris' | 'yut_nori' | null>(null);
+
+  // ===== GAME-SOCIAL ①: 주간 게임 리그 순위표 =====
+  const [leagueStandings, setLeagueStandings] = useState<Array<{ id: string; name: string; wins: number; losses: number; points: number }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/games/league?roomId=${encodeURIComponent(activeRoomId)}`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setLeagueStandings(Array.isArray(data.standings) ? data.standings : []);
+        }
+      } catch { /* 무시 */ }
+    };
+    load();
+    const timer = setInterval(load, 20000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [activeRoomId, activeGame]);
+
+  // ===== GAME-SOCIAL ②: 진행 중인 테트리스 대전 감지 (관전용) =====
+  const liveStreamsRef = useRef<Record<string, number>>({});
+  const [liveStreamers, setLiveStreamers] = useState<string[]>([]);
+  const [spectateIds, setSpectateIds] = useState<string[] | null>(null);
+  useEffect(() => {
+    const socket = getLocationSocket();
+    const handler = (payload: any) => {
+      if (payload?.type !== 'sync-tetris') return;
+      if (!payload.from || payload.from === activeProfileId) return;
+      liveStreamsRef.current[payload.from] = Date.now();
+    };
+    socket.on('game-relayed', handler);
+    const prune = setInterval(() => {
+      const now = Date.now();
+      const active = Object.entries(liveStreamsRef.current)
+        .filter(([, at]) => now - (at as number) < 6000)
+        .map(([id]) => id);
+      setLiveStreamers(prev => (prev.join(',') === active.join(',') ? prev : active));
+    }, 2000);
+    return () => { socket.off('game-relayed', handler); clearInterval(prune); };
+  }, [activeProfileId]);
 
   // Transition to multiplayer game automatically if matched globally
   useEffect(() => {
@@ -3097,6 +3432,19 @@ export default function GamePanel({
     
     alert('게임 대결 신청이 발송되었습니다. 상대방이 알림창이나 팝업에서 수락하면 바로 대국이 연동됩니다! 🎮');
   };
+
+  // ② 관전 모드 진입
+  if (spectateIds && activeGame === null) {
+    return (
+      <TetrisSpectateView
+        streamerIds={spectateIds}
+        friends={friends}
+        activeRoomId={activeRoomId}
+        activeProfileId={activeProfileId}
+        onBack={() => setSpectateIds(null)}
+      />
+    );
+  }
 
   if (activeGame === null) {
     // Show Selection Cards and Online Room Friends list to invite
@@ -3164,6 +3512,54 @@ export default function GamePanel({
               테트리스 혼자 하기
             </button>
           </div>
+        </div>
+
+        {/* ② 진행 중인 대전 관전 배너 */}
+        {liveStreamers.length > 0 && (
+          <div className="bg-gradient-to-r from-indigo-950/80 to-slate-900 border border-indigo-500/50 rounded-2xl p-4 flex items-center justify-between gap-2 animate-pulse">
+            <div className="min-w-0">
+              <p className="text-xs font-black text-indigo-300 flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-red-500 rounded-full inline-block animate-ping" />
+                🧱 테트리스 대전 진행 중!
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                {liveStreamers.map(id => friendDisplayName(friends, id, '플레이어')).join(' vs ')}
+              </p>
+            </div>
+            <button
+              onClick={() => setSpectateIds(liveStreamers.slice(0, 2))}
+              className="bg-indigo-500 hover:bg-indigo-600 text-white text-[11px] font-black px-4 py-2 rounded-xl transition cursor-pointer shrink-0"
+            >
+              👀 관전하기
+            </button>
+          </div>
+        )}
+
+        {/* ① 주간 게임 리그 순위표 */}
+        <div className="bg-slate-900 border border-amber-900/50 rounded-2xl p-4 space-y-2">
+          <h3 className="text-xs font-black text-amber-400 flex items-center gap-1">
+            <span>🏆</span>
+            <span>이번 주 게임 리그 (승리 3점 · 참가 1점)</span>
+          </h3>
+          {leagueStandings.length === 0 ? (
+            <p className="text-[10px] text-slate-500 italic text-center py-1.5">
+              아직 기록이 없습니다. 친구와 1:1 대결을 하면 자동으로 순위가 집계됩니다!
+            </p>
+          ) : (
+            <div className="space-y-1 pt-1">
+              {leagueStandings.slice(0, 5).map((s, i) => (
+                <div key={s.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-xl ${s.id === activeProfileId ? 'bg-amber-950/40 border border-amber-800/50' : 'bg-slate-950'}`}>
+                  <span className="text-sm w-6 text-center shrink-0">{['🥇', '🥈', '🥉'][i] || `${i + 1}`}</span>
+                  <span className="text-xs font-bold text-white flex-1 truncate">
+                    {s.name}{s.id === activeProfileId && <span className="text-amber-400"> (나)</span>}
+                  </span>
+                  <span className="text-[9px] text-slate-400 shrink-0">{s.wins}승 {s.losses}패</span>
+                  <span className="text-xs font-black text-amber-400 font-mono w-10 text-right shrink-0">{s.points}점</span>
+                </div>
+              ))}
+              <p className="text-[8.5px] text-slate-500 text-center pt-1">매주 월요일 자동 초기화 · 결과는 채팅방에 자동 공유됩니다</p>
+            </div>
+          )}
         </div>
 
         {/* Room multiplayer invite lobby */}

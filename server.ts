@@ -2833,6 +2833,90 @@ async function startServer() {
     });
   });
 
+  // ============= GAME-SOCIAL ①: 방 게임 리그 (주간 승점 + 결과 채팅 카드) =============
+  // 주간 키: 해당 주 월요일 날짜 (YYYY-MM-DD)
+  const leagueWeekKey = (): string => {
+    const now = new Date();
+    const day = (now.getDay() + 6) % 7; // 월=0
+    const monday = new Date(now.getTime() - day * 86400000);
+    return monday.toISOString().slice(0, 10);
+  };
+  const GAME_EMOJI: Record<string, string> = { drone_battle: '🛸', tetris: '🧱', yut_nori: '🎲' };
+  const GAME_NAME: Record<string, string> = { drone_battle: '드론 전쟁', tetris: '테트리스 대전', yut_nori: '윷놀이' };
+  const recentResultKeys: Record<string, number> = {}; // 중복 신고 방지 (10초)
+
+  app.post('/api/games/result', requireRoomMember, (req: AuthRequest, res: Response) => {
+    const { roomId, game, winnerId, winnerName, loserId, loserName, draw } = req.body;
+    const room = dbRooms[roomId];
+    if (!room || !game || (!draw && (!winnerId || !loserId))) {
+      return res.status(400).json({ error: 'roomId, game, winnerId, loserId are required' });
+    }
+
+    // 양쪽 클라이언트 동시 신고 중복 제거
+    const dedupeKey = `${roomId}:${game}:${winnerId}:${loserId}`;
+    const now = Date.now();
+    if (recentResultKeys[dedupeKey] && now - recentResultKeys[dedupeKey] < 10000) {
+      return res.json({ success: true, deduped: true });
+    }
+    recentResultKeys[dedupeKey] = now;
+    Object.keys(recentResultKeys).forEach(k => { if (now - recentResultKeys[k] > 60000) delete recentResultKeys[k]; });
+
+    // 주간 리그 갱신 (주가 바뀌면 자동 리셋)
+    const week = leagueWeekKey();
+    if (!room.gameLeague || room.gameLeague.week !== week) {
+      room.gameLeague = { week, standings: {} };
+    }
+    const standings = room.gameLeague.standings;
+    const ensure = (id: string, name: string) => {
+      if (!standings[id]) standings[id] = { name, wins: 0, losses: 0, points: 0 };
+      standings[id].name = name || standings[id].name;
+      return standings[id];
+    };
+    if (!draw) {
+      const w = ensure(winnerId, winnerName || '승자');
+      const l = ensure(loserId, loserName || '상대');
+      w.wins += 1; w.points += 3;
+      l.losses += 1; l.points += 1; // 참가 점수
+    }
+
+    // 순위 요약 (상위 3명)
+    const top = Object.values(standings as Record<string, any>)
+      .sort((a: any, b: any) => b.points - a.points)
+      .slice(0, 3)
+      .map((s: any, i: number) => `${['🥇','🥈','🥉'][i]} ${s.name} ${s.points}점`)
+      .join(' · ');
+
+    const emoji = GAME_EMOJI[game] || '🎮';
+    const gName = GAME_NAME[game] || '게임';
+    const cardText = draw
+      ? `🏆 [게임 리그] ${emoji} ${gName} — 무승부! (${winnerName} vs ${loserName})\n이번 주 리그: ${top || '집계 중'}`
+      : `🏆 [게임 리그] ${emoji} ${gName} — ${winnerName} 승리! (vs ${loserName})\n이번 주 리그: ${top || '집계 중'}`;
+
+    room.messages.push({
+      id: `msg-league-${Date.now()}`,
+      senderId: 'system', senderName: '게임 리그', senderAvatar: '🏆', senderColor: '#F59E0B',
+      text: cardText,
+      timestamp: new Date().toISOString(), isSystem: true,
+    });
+    if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'room-refresh');
+    saveDatabaseDebounced();
+    res.json({ success: true, league: room.gameLeague });
+  });
+
+  app.get('/api/games/league', requireRoomMember, (req, res) => {
+    const roomId = (req.query.roomId as string) || 'room-friends';
+    const room = dbRooms[roomId];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const week = leagueWeekKey();
+    if (!room.gameLeague || room.gameLeague.week !== week) {
+      return res.json({ week, standings: [] });
+    }
+    const list = Object.entries(room.gameLeague.standings as Record<string, any>)
+      .map(([id, s]: [string, any]) => ({ id, ...s }))
+      .sort((a: any, b: any) => b.points - a.points);
+    res.json({ week, standings: list });
+  });
+
   // 4. Notifications Endpoints
   app.get('/api/notifications', (req: AuthRequest, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
