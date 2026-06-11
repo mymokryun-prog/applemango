@@ -363,7 +363,7 @@ export default function SchedulePanel({
     <div className="flex flex-col h-full bg-white overflow-y-auto schedule-panel-container">
 
       {nextAppointment && (
-        <div className="mx-4 mt-3 mb-1.5 bg-slate-900 text-white rounded-3xl p-4 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
+        <div className="mx-4 mt-3 mb-1.5 bg-slate-900 text-white rounded-3xl p-4 border border-amber-200 shadow-sm shrink-0">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[10px] font-black text-amber-300">약속 ETA 브리핑</p>
@@ -373,7 +373,7 @@ export default function SchedulePanel({
             <button
               type="button"
               onClick={() => onSelectPromise ? onSelectPromise(nextAppointment.id, nextAppointment.lat, nextAppointment.lng) : onFocusLocation(nextAppointment.lat, nextAppointment.lng)}
-              className="bg-amber-400 text-slate-950 border border-black rounded-xl px-3 py-2 text-[10px] font-black shrink-0"
+              className="bg-amber-400 text-slate-950 rounded-xl px-3 py-2 text-[10px] font-black shrink-0"
             >
               지도
             </button>
@@ -400,7 +400,7 @@ export default function SchedulePanel({
       )}
 
       {/* 약속 만들기 카드 */}
-      <div className="mx-4 mt-2.5 mb-1.5 bg-amber-50 border-2 border-black rounded-3xl overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
+      <div className="mx-4 mt-2.5 mb-1.5 bg-amber-50 border border-amber-200 rounded-3xl overflow-hidden shadow-sm shrink-0">
         <form onSubmit={handleSubmit} className="p-2.5 space-y-2 font-sans pb-2.5">
           {/* 약속 이름 */}
           <div className="space-y-1">
@@ -413,7 +413,7 @@ export default function SchedulePanel({
               onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
               autoComplete="one-time-code"
               placeholder="예) 민수 생일 파티, 금요 번개"
-              className="w-full bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-bold resize-none overflow-hidden"
+              className="w-full bg-white border border-amber-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-rose-400 font-bold resize-none overflow-hidden"
             />
           </div>
 
@@ -462,13 +462,13 @@ export default function SchedulePanel({
                     onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
                     autoComplete="one-time-code"
                     placeholder="예: 강남역, 홍대 카페, 스타벅스 또는 직접 입력"
-                    className="w-full bg-white border-2 border-black rounded-xl py-2 pl-8 pr-8 text-xs focus:outline-none focus:border-amber-400 font-bold resize-none overflow-hidden"
+                    className="w-full bg-white border border-amber-200 rounded-xl py-2 pl-8 pr-8 text-xs focus:outline-none focus:border-amber-400 font-bold resize-none overflow-hidden"
                   />
                 </div>
 
                 {/* 검색 결과 드롭다운 */}
                 {searchQuery.trim() && searchResults.length > 0 && (
-                  <div className="absolute left-0 right-0 mt-1 bg-white border-2 border-black rounded-xl shadow-lg z-10 max-h-48 overflow-y-auto divide-y divide-gray-100">
+                  <div className="absolute left-0 right-0 mt-1 bg-white border border-amber-200 rounded-xl shadow-lg z-10 max-h-48 overflow-y-auto divide-y divide-gray-100">
                     {searchResults.map((place, idx) => (
                       <button
                         key={idx}
@@ -499,14 +499,14 @@ export default function SchedulePanel({
                 min={getLocalDateString()}
                 onChange={e => setDateValue(e.target.value)}
                 onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
-                className="bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+                className="bg-white border border-amber-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
               />
               <input
                 type="time"
                 value={timeValue}
                 onChange={e => setTimeValue(e.target.value)}
                 onClick={e => { try { e.currentTarget.showPicker(); } catch(err) {} }}
-                className="bg-white border-2 border-black rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
+                className="bg-white border border-amber-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400 cursor-pointer w-full font-bold"
               />
             </div>
             {dateValue && (
@@ -519,13 +519,13 @@ export default function SchedulePanel({
           {/* 등록 버튼 */}
           <div className="flex gap-2 pt-0.5">
             <button type="button" onClick={resetForm}
-              className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 border-2 border-black rounded-xl text-xs font-bold text-gray-600 transition shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none">
+              className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 border border-amber-200 rounded-xl text-xs font-bold text-gray-600 transition shadow-sm active:translate-y-0.5 active:shadow-none">
               초기화
             </button>
             <button
               type="submit"
               disabled={!title.trim() || isSubmitting}
-              className="flex-1 bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 text-gray-900 font-black py-2 rounded-xl text-xs border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition flex items-center justify-center gap-1.5"
+              className="flex-1 bg-amber-400 hover:bg-amber-500 disabled:bg-gray-200 disabled:text-gray-400 text-gray-900 font-black py-2 rounded-xl text-xs border border-amber-200 shadow-sm active:translate-y-0.5 active:shadow-none transition flex items-center justify-center gap-1.5"
             >
               <Flag className="w-3 h-3" />
               <span>약속 깃발 꽂기</span>
@@ -535,7 +535,7 @@ export default function SchedulePanel({
       </div>
 
       {/* 월별 약속 달력 */}
-      <div className="mx-4 my-1 bg-slate-50 border-2 border-black rounded-3xl p-2.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] select-none font-sans shrink-0">
+      <div className="mx-4 my-1 bg-slate-50 border border-amber-200 rounded-3xl p-2.5 shadow-sm select-none font-sans shrink-0">
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-xs font-black text-gray-900 flex items-center gap-1.5">
             <span className="text-sm">📅</span>
@@ -545,7 +545,7 @@ export default function SchedulePanel({
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="w-5 h-5 border-2 border-black rounded-md bg-white flex items-center justify-center font-bold text-[10px] hover:bg-gray-100 active:translate-y-0.5 transition shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
+              className="w-5 h-5 border border-amber-200 rounded-md bg-white flex items-center justify-center font-bold text-[10px] hover:bg-gray-100 active:translate-y-0.5 transition shadow-sm cursor-pointer"
             >
               &lt;
             </button>
@@ -555,7 +555,7 @@ export default function SchedulePanel({
             <button
               type="button"
               onClick={handleNextMonth}
-              className="w-5 h-5 border-2 border-black rounded-md bg-white flex items-center justify-center font-bold text-[10px] hover:bg-gray-100 active:translate-y-0.5 transition shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
+              className="w-5 h-5 border border-amber-200 rounded-md bg-white flex items-center justify-center font-bold text-[10px] hover:bg-gray-100 active:translate-y-0.5 transition shadow-sm cursor-pointer"
             >
               &gt;
             </button>
@@ -600,9 +600,9 @@ export default function SchedulePanel({
                 }}
                 className={`relative h-6 w-full rounded-lg flex flex-col items-center justify-center text-[10px] font-bold border transition ${
                   isSelected
-                    ? 'bg-rose-500 text-white border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] font-black scale-105'
+                    ? 'bg-rose-500 text-white border border-amber-200 shadow-sm font-black scale-105'
                     : hasApp
-                      ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-black cursor-pointer'
+                      ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-200 cursor-pointer'
                       : isToday
                         ? 'bg-blue-50 text-blue-600 border-blue-200'
                         : 'bg-white border-gray-100 hover:bg-gray-50 cursor-pointer'
@@ -619,7 +619,7 @@ export default function SchedulePanel({
 
         {/* 선택한 날짜의 약속 상세 */}
         {selectedCalendarDay !== null && (
-          <div className="mt-2 p-2 bg-amber-50 border-2 border-black rounded-xl space-y-1.5">
+          <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
             <div className="flex items-center justify-between border-b border-amber-200 pb-1">
               <span className="text-[9px] font-black text-amber-900">
                 📌 {currentMonth}월 {selectedCalendarDay}일 약속 ({getAppsForDay(selectedCalendarDay).length}개)

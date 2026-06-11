@@ -1124,7 +1124,9 @@ export default function App() {
     }
   };
 
-  const handleInviteFriend = async (name: string, emoji: string, color: string, phone: string) => {
+  // targetRoomId를 주면 해당 방으로, 없으면 현재 방으로 초대
+  const handleInviteFriend = async (name: string, emoji: string, color: string, phone: string, targetRoomId?: string) => {
+    const inviteRoomId = targetRoomId || activeRoomId;
     try {
       const response = await authFetch('/api/friends/invite', {
         method: 'POST',
@@ -1133,13 +1135,32 @@ export default function App() {
           avatar: emoji,
           color,
           phone,
-          roomId: activeRoomId,
+          roomId: inviteRoomId,
           creatorName: activeProfile.name
         })
       });
       if (response.ok) {
-        alert('📩 초대장이 발송되었습니다! 상대방이 수락하면 그룹에 자동 합류합니다.');
+        const targetRoomName = rooms.find(r => r.id === inviteRoomId)?.name || '그룹방';
+        alert(`📩 [${targetRoomName}] 초대장이 발송되었습니다! 상대방이 수락하면 그룹에 자동 합류합니다.`);
         fetchAllStates(activeRoomId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 그룹방 이미지(이모지) 변경 — 방장 전용
+  const handleUpdateRoomEmoji = async (roomId: string, emoji: string) => {
+    try {
+      const response = await authFetch('/api/rooms/update', {
+        method: 'POST',
+        body: JSON.stringify({ roomId, emoji })
+      });
+      if (response.ok) {
+        authFetch('/api/rooms').then(r => r.json()).then(data => setRooms(data)).catch(() => {});
+      } else {
+        const err = await response.json().catch(() => null);
+        alert(err?.error || '방 이미지 변경에 실패했습니다.');
       }
     } catch (err) {
       console.error(err);
@@ -2280,42 +2301,42 @@ export default function App() {
             <button
               type="button"
               onClick={handleOpenProfileModal}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-full transition text-[11px] font-bold text-slate-700 shadow-sm cursor-pointer"
+              className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-full transition text-[13px] font-bold text-slate-700 shadow-sm cursor-pointer"
               title="내 프로필"
             >
-              <span className="text-sm leading-none flex items-center justify-center w-5 h-5 rounded-full overflow-hidden shrink-0">
+              <span className="text-lg leading-none flex items-center justify-center w-7 h-7 rounded-full overflow-hidden shrink-0">
                 {(regFruit || activeProfile?.avatar || '👤').startsWith('data:image/') ? (
                   <img src={regFruit || activeProfile?.avatar} alt="" className="w-full h-full object-cover" />
                 ) : (
                   regFruit || activeProfile?.avatar || '👤'
                 )}
               </span>
-              <span className="max-w-[75px] truncate leading-none">{regAlias || regRealName || '내 프로필'}</span>
+              <span className="max-w-[90px] truncate leading-none">{regAlias || regRealName || '내 프로필'}</span>
+            </button>
+            {/* 설정 버튼 (일기 왼쪽) */}
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base border border-gray-200"
+              title="설정"
+            >
+              <Settings className="w-5 h-5 text-gray-500" />
             </button>
             <button
               type="button"
               onClick={() => setPersonalPanelMode('diary')}
-              className="w-8 h-8 rounded-full hover:bg-indigo-50 flex items-center justify-center transition text-base border border-indigo-100"
+              className="w-10 h-10 rounded-full hover:bg-indigo-50 flex items-center justify-center transition text-base border border-indigo-100"
               title="일기"
             >
-              <BookOpen className="w-4 h-4 text-indigo-500" />
+              <BookOpen className="w-5 h-5 text-indigo-500" />
             </button>
             <button
               type="button"
               onClick={() => setPersonalPanelMode('memo')}
-              className="w-8 h-8 rounded-full hover:bg-emerald-50 flex items-center justify-center transition text-base border border-emerald-100"
+              className="w-10 h-10 rounded-full hover:bg-emerald-50 flex items-center justify-center transition text-base border border-emerald-100"
               title="메모"
             >
-              <StickyNote className="w-4 h-4 text-emerald-500" />
-            </button>
-            {/* 설정 버튼 (메모 오른쪽) */}
-            <button
-              type="button"
-              onClick={() => setShowSettingsModal(true)}
-              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base border border-gray-200"
-              title="설정"
-            >
-              <Settings className="w-4 h-4 text-gray-500" />
+              <StickyNote className="w-5 h-5 text-emerald-500" />
             </button>
 
           </div>
@@ -2481,6 +2502,7 @@ export default function App() {
             messages={messages.map(m => ({ roomId: activeRoomId, text: m.text, timestamp: m.timestamp }))}
             onSelectRoom={(roomId) => enterRoom(roomId)}
             onCreateRoom={handleCreateRoom}
+            onUpdateRoomEmoji={handleUpdateRoomEmoji}
             onDeleteRoom={(roomId) => {
               setPendingDeleteRoomId(roomId);
               setDeleteRoomConfirmKey('');
@@ -2660,7 +2682,8 @@ export default function App() {
         {activeTab === 'contacts' && (
           <ContactsPanel
             currentRoomName={rooms.find(r => r.id === activeRoomId)?.name}
-            onInvite={(name, phone) => handleInviteFriend(name, '👤', '#EC4899', phone)}
+            rooms={rooms.filter(r => !r.isDisbanded)}
+            onInvite={(name, phone, roomId) => handleInviteFriend(name, '👤', '#EC4899', phone, roomId)}
           />
         )}
 

@@ -1003,11 +1003,11 @@ export default function MapComponent({
       <button
         type="button"
         onClick={() => setPlaceSelectMode(m => !m)}
-        className={`absolute bottom-4 left-4 z-30 font-black border-2 border-black text-[10px] px-3 py-2 rounded-xl shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] flex items-center gap-1.5 transition active:translate-y-0.5 ${
-          placeSelectMode ? 'bg-rose-500 text-white animate-pulse' : 'bg-yellow-400 text-slate-950'
+        className={`absolute bottom-4 left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+          placeSelectMode ? 'bg-rose-500 text-white animate-pulse' : 'bg-yellow-300 text-slate-900'
         }`}
       >
-        <span className={`w-2.5 h-2.5 rounded-full border border-white ${placeSelectMode ? 'bg-white' : 'bg-black'}`} />
+        <span className={`w-2.5 h-2.5 rounded-full ${placeSelectMode ? 'bg-white' : 'bg-rose-500'}`} />
         <span>{placeSelectMode ? '지도를 터치해 장소를 지정하세요 (취소하려면 다시 탭)' : '📍 소집 장소 지정하기'}</span>
       </button>
     </div>

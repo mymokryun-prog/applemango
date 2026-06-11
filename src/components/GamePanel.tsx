@@ -464,6 +464,22 @@ function DroneCrashGame({
   const [gameOverMsg, setGameOverMsg] = useState<string | null>(null);
   const isGameOver = gameOverMsg !== null;
 
+  // GAME-SOCIAL ②: 관전자 응원 이모지 수신 (대전 중 화면에 표시)
+  const [droneCheers, setDroneCheers] = useState<Array<{ id: number; emoji: string; fromName: string }>>([]);
+  useEffect(() => {
+    if (!multiplayerConfig) return;
+    const socket = getLocationSocket();
+    const handleCheer = (payload: any) => {
+      if (payload?.type !== 'cheer') return;
+      if (payload.from === activeProfileId) return;
+      const cheerId = Date.now() + Math.random();
+      setDroneCheers(prev => [...prev.slice(-3), { id: cheerId, emoji: payload.emoji || '👏', fromName: payload.fromName || '관전자' }]);
+      setTimeout(() => setDroneCheers(prev => prev.filter(c => c.id !== cheerId)), 2500);
+    };
+    socket.on('game-relayed', handleCheer);
+    return () => { socket.off('game-relayed', handleCheer); };
+  }, [multiplayerConfig, activeProfileId]);
+
   // 4차 개선 추가 상태
   const [selectedTerrainIdx, setSelectedTerrainIdx] = useState<number>(0);
   const [matchScores, setMatchScores] = useState<number[]>([0, 0]);
@@ -1341,6 +1357,18 @@ function DroneCrashGame({
           <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-900/90 border border-slate-700 rounded-full px-3 py-1 font-bold text-[9px] text-amber-400 select-none shadow-md z-10">
             🏆 5전 스코어: P1 ({matchScores[0]}승) vs P2 ({matchScores[1]}승)
           </div>
+
+          {/* 관전자 응원 이모지 토스트 */}
+          {droneCheers.length > 0 && (
+            <div className="absolute top-9 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1 pointer-events-none">
+              {droneCheers.map(c => (
+                <div key={c.id} className="bg-slate-900/90 border border-amber-500/60 rounded-full px-3 py-1 flex items-center gap-1.5 animate-bounce shadow-lg">
+                  <span className="text-base leading-none">{c.emoji}</span>
+                  <span className="text-[9px] font-bold text-amber-300">{c.fromName}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* HP & 탄수 표시기 */}
           <div className="absolute top-2 left-3 flex gap-1.5 pointer-events-none select-none font-sans z-10">
@@ -3450,16 +3478,27 @@ export default function GamePanel({
     return () => { cancelled = true; clearInterval(timer); };
   }, [activeRoomId, activeGame]);
 
-  // ===== GAME-SOCIAL ②: 진행 중인 테트리스 대전 감지 (관전용) =====
+  // ===== GAME-SOCIAL ②: 진행 중인 대전 감지 (테트리스 = 풀 관전 / 드론·윷 = 라이브 응원) =====
   const liveStreamsRef = useRef<Record<string, number>>({});
+  const liveOtherGameRef = useRef<{ game: string; at: number } | null>(null);
   const [liveStreamers, setLiveStreamers] = useState<string[]>([]);
+  const [liveOtherGame, setLiveOtherGame] = useState<string | null>(null);
   const [spectateIds, setSpectateIds] = useState<string[] | null>(null);
+  const [lobbyCheerSent, setLobbyCheerSent] = useState<string | null>(null);
   useEffect(() => {
     const socket = getLocationSocket();
     const handler = (payload: any) => {
-      if (payload?.type !== 'sync-tetris') return;
-      if (!payload.from || payload.from === activeProfileId) return;
-      liveStreamsRef.current[payload.from] = Date.now();
+      if (payload?.type === 'sync-tetris') {
+        if (!payload.from || payload.from === activeProfileId) return;
+        liveStreamsRef.current[payload.from] = Date.now();
+        return;
+      }
+      // 드론·윷놀이는 액션 릴레이 발생 = 대전 진행 중으로 감지
+      if (payload?.type === 'sync-drone-action') {
+        liveOtherGameRef.current = { game: 'drone_battle', at: Date.now() };
+      } else if (payload?.type === 'sync-yut-action') {
+        liveOtherGameRef.current = { game: 'yut_nori', at: Date.now() };
+      }
     };
     socket.on('game-relayed', handler);
     const prune = setInterval(() => {
@@ -3468,9 +3507,28 @@ export default function GamePanel({
         .filter(([, at]) => now - (at as number) < 6000)
         .map(([id]) => id);
       setLiveStreamers(prev => (prev.join(',') === active.join(',') ? prev : active));
+      // 드론·윷은 턴 간격이 길어 30초 유지
+      const other = liveOtherGameRef.current;
+      setLiveOtherGame(other && now - other.at < 30000 ? other.game : null);
     }, 2000);
     return () => { socket.off('game-relayed', handler); clearInterval(prune); };
   }, [activeProfileId]);
+
+  // 로비에서 진행 중인 드론·윷 대전에 응원 보내기
+  const sendLobbyCheer = (emoji: string) => {
+    const socket = getLocationSocket();
+    socket.emit('game-relay', {
+      roomId: activeRoomId,
+      payload: {
+        type: 'cheer',
+        emoji,
+        from: activeProfileId,
+        fromName: friendDisplayName(friends, activeProfileId, '관전자'),
+      },
+    });
+    setLobbyCheerSent(emoji);
+    setTimeout(() => setLobbyCheerSent(null), 1200);
+  };
 
   // Transition to multiplayer game automatically if matched globally
   useEffect(() => {
@@ -3535,11 +3593,11 @@ export default function GamePanel({
     const onlineFriends = friends.filter(f => f.id !== activeProfileId && !f.isPendingInvite);
 
     return (
-      <div className="flex flex-col h-full bg-slate-950 text-white select-none p-5 space-y-5 overflow-y-auto font-sans">
+      <div className="flex flex-col h-full bg-gradient-to-b from-fuchsia-50 via-white to-cyan-50 text-slate-900 select-none p-5 space-y-5 overflow-y-auto font-sans">
         <div className="text-center pt-3 pb-1">
-          <Gamepad2 className="w-10 h-10 text-rose-500 mx-auto animate-bounce" />
-          <h2 className="text-base font-black mt-2.5 text-slate-100">애플망고 안심 게임방 (beta)</h2>
-          <p className="text-[10px] text-slate-400 mt-0.5">심심할 때 즐기는 미니 게임 리스트</p>
+          <Gamepad2 className="w-10 h-10 text-fuchsia-500 mx-auto animate-bounce drop-shadow-[0_0_8px_rgba(217,70,239,0.45)]" />
+          <h2 className="text-base font-black mt-2.5 text-slate-900">애플망고 안심 게임방 (beta)</h2>
+          <p className="text-[10px] text-slate-500 mt-0.5">심심할 때 즐기는 미니 게임 리스트</p>
         </div>
 
         <div className="grid grid-cols-1 gap-3.5 pt-1">
@@ -3598,15 +3656,15 @@ export default function GamePanel({
           </div>
         </div>
 
-        {/* ② 진행 중인 대전 관전 배너 */}
+        {/* ② 진행 중인 대전 관전 배너 — 테트리스: 풀 관전 / 드론·윷: 라이브 응원 */}
         {liveStreamers.length > 0 && (
-          <div className="bg-gradient-to-r from-indigo-950/80 to-slate-900 border border-indigo-500/50 rounded-2xl p-4 flex items-center justify-between gap-2 animate-pulse">
+          <div className="bg-gradient-to-r from-indigo-100 to-violet-50 border border-indigo-300 rounded-2xl p-4 flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs font-black text-indigo-300 flex items-center gap-1.5">
+              <p className="text-xs font-black text-indigo-700 flex items-center gap-1.5">
                 <span className="w-2 h-2 bg-red-500 rounded-full inline-block animate-ping" />
                 🧱 테트리스 대전 진행 중!
               </p>
-              <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+              <p className="text-[10px] text-slate-500 mt-0.5 truncate">
                 {liveStreamers.map(id => friendDisplayName(friends, id, '플레이어')).join(' vs ')}
               </p>
             </div>
@@ -3619,47 +3677,70 @@ export default function GamePanel({
           </div>
         )}
 
+        {liveStreamers.length === 0 && liveOtherGame && (
+          <div className="bg-gradient-to-r from-amber-100 to-orange-50 border border-amber-300 rounded-2xl p-4 space-y-2">
+            <p className="text-xs font-black text-amber-700 flex items-center gap-1.5">
+              <span className="w-2 h-2 bg-red-500 rounded-full inline-block animate-ping" />
+              {liveOtherGame === 'drone_battle' ? '🛸 드론 전쟁' : '🎲 윷놀이'} 대전 진행 중!
+            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] text-slate-500 flex-1">
+                {lobbyCheerSent ? `${lobbyCheerSent} 응원을 보냈습니다!` : '선수들 화면에 응원 이모지를 보내보세요'}
+              </p>
+              {['👏', '🔥', '💪'].map(e => (
+                <button
+                  key={e}
+                  onClick={() => sendLobbyCheer(e)}
+                  className="bg-white hover:bg-amber-100 border border-amber-200 rounded-xl w-9 h-9 text-lg transition cursor-pointer shrink-0"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ① 주간 게임 리그 순위표 */}
-        <div className="bg-slate-900 border border-amber-900/50 rounded-2xl p-4 space-y-2">
-          <h3 className="text-xs font-black text-amber-400 flex items-center gap-1">
+        <div className="bg-white border border-amber-200 rounded-2xl p-4 space-y-2 shadow-sm">
+          <h3 className="text-xs font-black text-amber-600 flex items-center gap-1">
             <span>🏆</span>
             <span>이번 주 게임 리그 (승리 3점 · 참가 1점)</span>
           </h3>
           {leagueStandings.length === 0 ? (
-            <p className="text-[10px] text-slate-500 italic text-center py-1.5">
+            <p className="text-[10px] text-slate-400 italic text-center py-1.5">
               아직 기록이 없습니다. 친구와 1:1 대결을 하면 자동으로 순위가 집계됩니다!
             </p>
           ) : (
             <div className="space-y-1 pt-1">
               {leagueStandings.slice(0, 5).map((s, i) => (
-                <div key={s.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-xl ${s.id === activeProfileId ? 'bg-amber-950/40 border border-amber-800/50' : 'bg-slate-950'}`}>
+                <div key={s.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-xl ${s.id === activeProfileId ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
                   <span className="text-sm w-6 text-center shrink-0">{['🥇', '🥈', '🥉'][i] || `${i + 1}`}</span>
-                  <span className="text-xs font-bold text-white flex-1 truncate">
-                    {s.name}{s.id === activeProfileId && <span className="text-amber-400"> (나)</span>}
+                  <span className="text-xs font-bold text-slate-800 flex-1 truncate">
+                    {s.name}{s.id === activeProfileId && <span className="text-amber-600"> (나)</span>}
                   </span>
                   <span className="text-[9px] text-slate-400 shrink-0">{s.wins}승 {s.losses}패</span>
-                  <span className="text-xs font-black text-amber-400 font-mono w-10 text-right shrink-0">{s.points}점</span>
+                  <span className="text-xs font-black text-amber-600 font-mono w-10 text-right shrink-0">{s.points}점</span>
                 </div>
               ))}
-              <p className="text-[8.5px] text-slate-500 text-center pt-1">매주 월요일 자동 초기화 · 결과는 채팅방에 자동 공유됩니다</p>
+              <p className="text-[8.5px] text-slate-400 text-center pt-1">매주 월요일 자동 초기화 · 결과는 채팅방에 자동 공유됩니다</p>
             </div>
           )}
         </div>
 
         {/* Room multiplayer invite lobby */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2 mt-2">
-          <h3 className="text-xs font-black text-rose-400 flex items-center gap-1">
+        <div className="bg-white border border-rose-200 rounded-2xl p-4 space-y-2 mt-2 shadow-sm">
+          <h3 className="text-xs font-black text-rose-500 flex items-center gap-1">
             <span>👥</span>
             <span>대화방 친구와 1:1 대결하기</span>
           </h3>
-          <p className="text-[9.5px] text-slate-400 leading-tight">
+          <p className="text-[9.5px] text-slate-500 leading-tight">
             현재 같은 모임 대화방에 들어와 있는 온라인 친구에게 초대를 보낼 수 있습니다.
           </p>
 
-          <div className="bg-slate-950 border border-pink-900/50 rounded-2xl p-3 space-y-2">
+          <div className="bg-pink-50 border border-pink-200 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-black text-pink-300">테트리스 초대 지형</p>
-              <span className="text-[8.5px] text-slate-500">초대한 사람이 선택</span>
+              <p className="text-[10px] font-black text-pink-600">테트리스 초대 지형</p>
+              <span className="text-[8.5px] text-slate-400">초대한 사람이 선택</span>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
               {TETRIS_TERRAINS.map(terrain => (
@@ -3669,8 +3750,8 @@ export default function GamePanel({
                   onClick={() => setSelectedTetrisTerrain(terrain.key)}
                   className={`text-left rounded-xl border px-2.5 py-2 transition ${
                     selectedTetrisTerrain === terrain.key
-                      ? 'bg-pink-600 border-pink-400 text-white'
-                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-pink-700'
+                      ? 'bg-pink-500 border-pink-400 text-white'
+                      : 'bg-white border-pink-100 text-slate-600 hover:border-pink-300'
                   }`}
                 >
                   <p className="text-[10px] font-black">{terrain.label}</p>
@@ -3687,12 +3768,12 @@ export default function GamePanel({
               </p>
             ) : (
               onlineFriends.map(f => (
-                <div key={f.id} className="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-xl border border-slate-850">
+                <div key={f.id} className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
                   <div className="flex items-center gap-2">
                     <span className="text-lg">{f.avatar || '👤'}</span>
                     <div>
-                      <p className="text-xs font-bold text-white">{f.alias || f.name}</p>
-                      <p className="text-[8.5px] text-emerald-400 font-bold">● 접속중</p>
+                      <p className="text-xs font-bold text-slate-800">{f.alias || f.name}</p>
+                      <p className="text-[8.5px] text-emerald-500 font-bold">● 접속중</p>
                     </div>
                   </div>
                   <div className="flex gap-1.5">

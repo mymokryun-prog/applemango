@@ -3013,6 +3013,20 @@ async function startServer() {
       tetrisTerrain
     });
 
+    // GAME-SOCIAL ②: 매치 시작을 방 채팅에 공지 → 다른 멤버들의 관전 유도
+    const matchRoom = dbRooms[roomId];
+    if (matchRoom) {
+      const gName = game === 'drone_battle' ? '🛸 드론 전쟁' : game === 'tetris' ? '🧱 테트리스 대전' : '🎲 윷놀이';
+      matchRoom.messages.push({
+        id: `msg-match-${Date.now()}`,
+        senderId: 'system', senderName: '게임 리그', senderAvatar: '🎮', senderColor: '#8B5CF6',
+        text: `🎮 [대결 시작] ${gName} — ${senderName} vs ${receiverName}!\n게임방 탭에서 실시간 관전과 응원이 가능합니다 👀`,
+        timestamp: new Date().toISOString(), isSystem: true,
+      });
+      if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'room-refresh');
+      saveDatabaseDebounced();
+    }
+
     // Remove the notification from lists
     Object.values(dbRooms).forEach(r => {
       r.notifications = r.notifications.filter(n => n.id !== inviteId);
@@ -3099,6 +3113,23 @@ async function startServer() {
     if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'room-refresh');
     saveDatabaseDebounced();
     res.json({ success: true, league: room.gameLeague });
+  });
+
+  // 그룹방 이미지(이모지)·이름 변경 — 방장(또는 시스템방 멤버)만 가능
+  app.post('/api/rooms/update', requireAuth, requireRoomMember, (req: AuthRequest, res: Response) => {
+    const { roomId, emoji, name } = req.body;
+    const room = dbRooms[roomId];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const userId = req.user?.userId;
+    const isSystemRoom = ['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId);
+    if (!isSystemRoom && room.ownerId && room.ownerId !== userId) {
+      return res.status(403).json({ error: '방장만 방 정보를 변경할 수 있습니다.' });
+    }
+    if (emoji && typeof emoji === 'string') room.emoji = emoji.slice(0, 8);
+    if (name && typeof name === 'string') room.name = name.slice(0, 30);
+    if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'rooms-updated');
+    saveDatabaseDebounced();
+    res.json({ success: true, room: { id: room.id, emoji: room.emoji, name: room.name } });
   });
 
   app.get('/api/games/league', requireRoomMember, (req, res) => {

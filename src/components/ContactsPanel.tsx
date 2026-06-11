@@ -4,22 +4,27 @@
  */
 
 import React, { useState } from 'react';
-import { Contact, Download, UserPlus, Trash2, Phone } from 'lucide-react';
+import { Contact, Download, UserPlus, Trash2, Phone, X } from 'lucide-react';
 
 interface SavedContact { id: string; name: string; tel: string; }
 
+interface RoomOption { id: string; name: string; emoji: string; memberCount?: number; }
+
 interface Props {
-  onInvite: (name: string, phone: string) => void;
+  onInvite: (name: string, phone: string, roomId: string) => void;
   currentRoomName?: string;
+  rooms?: RoomOption[];
 }
 
 const STORAGE_KEY = 'aemang_contacts';
 
-export default function ContactsPanel({ onInvite, currentRoomName }: Props) {
+export default function ContactsPanel({ onInvite, currentRoomName, rooms = [] }: Props) {
   const [list, setList] = useState<SavedContact[]>(() => {
     try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
   });
   const [loading, setLoading] = useState(false);
+  // 초대 대상 연락처 — 선택 시 "어느 그룹방으로 초대할지" 선택 모달 표시
+  const [invitingContact, setInvitingContact] = useState<SavedContact | null>(null);
   const supported = typeof (navigator as any).contacts?.select === 'function';
 
   const persist = (next: SavedContact[]) => { setList(next); localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); };
@@ -100,9 +105,9 @@ export default function ContactsPanel({ onInvite, currentRoomName }: Props) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => onInvite(c.name, c.tel)}
+                  onClick={() => setInvitingContact(c)}
                   className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition shrink-0"
-                  title={currentRoomName ? `${currentRoomName}에 초대` : '현재 방에 초대'}
+                  title="그룹방을 선택해 초대"
                 >
                   <UserPlus className="w-3.5 h-3.5" /> 초대
                 </button>
@@ -112,6 +117,59 @@ export default function ContactsPanel({ onInvite, currentRoomName }: Props) {
           </div>
         )}
       </div>
+
+      {/* 초대할 그룹방 선택 모달 */}
+      {invitingContact && (
+        <div
+          className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-6"
+          onClick={() => setInvitingContact(null)}
+        >
+          <div
+            className="bg-white rounded-3xl p-5 w-full max-w-[300px] shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h4 className="text-sm font-black text-gray-900">어느 그룹방으로 초대할까요?</h4>
+              <button
+                type="button"
+                onClick={() => setInvitingContact(null)}
+                className="w-7 h-7 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-400 mb-3">
+              <b className="text-gray-700">{invitingContact.name}</b> ({invitingContact.tel}) 님을 초대합니다
+            </p>
+
+            {rooms.length === 0 ? (
+              <p className="text-[11px] text-gray-400 text-center py-4">
+                초대할 수 있는 그룹방이 없습니다.<br />그룹방 탭에서 먼저 방을 만들어 주세요.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-[260px] overflow-y-auto">
+                {rooms.map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      onInvite(invitingContact.name, invitingContact.tel, r.id);
+                      setInvitingContact(null);
+                    }}
+                    className="w-full flex items-center gap-2.5 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-200 border border-transparent rounded-2xl px-3 py-2.5 transition text-left"
+                  >
+                    <span className="text-xl shrink-0">{r.emoji}</span>
+                    <span className="text-[13px] font-bold text-gray-800 flex-1 truncate">{r.name}</span>
+                    {typeof r.memberCount === 'number' && (
+                      <span className="text-[10px] text-gray-400 shrink-0">{r.memberCount}명</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

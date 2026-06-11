@@ -27,6 +27,7 @@ interface GroupRoomsPanelProps {
   onSelectRoom: (roomId: string) => void;
   onCreateRoom: (name: string, emoji: string, type: string, trackingStyle: string) => void;
   onDeleteRoom: (roomId: string) => void;
+  onUpdateRoomEmoji?: (roomId: string, emoji: string) => void;
 }
 
 const ROOM_TYPE_OPTIONS = [
@@ -38,11 +39,19 @@ const ROOM_TYPE_OPTIONS = [
 
 const EMOJI_OPTIONS = ['🍎','🥭','🏠','👔','👵','🍻','🎯','🌸','🚀','💎'];
 
+// 방 이미지 변경용 확장 선택지
+const ROOM_EMOJI_CHOICES = [
+  '🍎','🥭','🏠','👔','👵','🍻','🎯','🌸','🚀','💎',
+  '❤️','🐶','🐱','⚽','🎮','📚','🎵','✈️','⛰️','🏖️',
+  '🍜','☕','🌙','⭐','🔥','🎂','👨‍👩‍👧‍👦','💪','🙏','🎓',
+];
+
 export default function GroupRoomsPanel({
   rooms, activeRoomId, activeProfileId, messages,
-  onSelectRoom, onCreateRoom, onDeleteRoom,
+  onSelectRoom, onCreateRoom, onDeleteRoom, onUpdateRoomEmoji,
 }: GroupRoomsPanelProps) {
   const [showCreate, setShowCreate] = useState(false);
+  const [emojiEditRoomId, setEmojiEditRoomId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newEmoji, setNewEmoji] = useState('🍎');
   const [newType, setNewType] = useState('friends');
@@ -159,15 +168,27 @@ export default function GroupRoomsPanel({
               ['room-friends','room-family','room-work','room-care'].includes(room.id);
 
             return (
+              <div key={room.id}>
               <div
-                key={room.id}
                 onClick={() => onSelectRoom(room.id)}
                 className={`flex items-center gap-3 px-4 py-3.5 cursor-pointer transition ${isActive ? 'bg-rose-50' : 'hover:bg-gray-50'}`}
               >
-                {/* 이모지 아바타 */}
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 ${isActive ? 'bg-rose-100' : 'bg-gray-100'}`}>
+                {/* 이모지 아바타 — 방장은 탭하여 이미지 변경 */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    if (!isOwner || !onUpdateRoomEmoji) return;
+                    e.stopPropagation();
+                    setEmojiEditRoomId(prev => (prev === room.id ? null : room.id));
+                  }}
+                  className={`relative w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition ${isActive ? 'bg-rose-100' : 'bg-gray-100'} ${isOwner && onUpdateRoomEmoji ? 'hover:ring-2 hover:ring-rose-300 cursor-pointer' : ''}`}
+                  title={isOwner ? '탭하여 방 이미지 변경' : undefined}
+                >
                   {room.emoji}
-                </div>
+                  {isOwner && onUpdateRoomEmoji && (
+                    <span className="absolute -bottom-1 -right-1 w-[18px] h-[18px] bg-white border border-gray-200 rounded-full text-[9px] flex items-center justify-center shadow-sm">✏️</span>
+                  )}
+                </button>
 
                 {/* 방 정보 */}
                 <div className="flex-1 min-w-0">
@@ -207,6 +228,29 @@ export default function GroupRoomsPanel({
                   </button>
                   <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
                 </div>
+              </div>
+
+              {/* 방 이미지(이모지) 변경 피커 — 방장 전용 */}
+              {emojiEditRoomId === room.id && (
+                <div className="mx-4 mb-3 bg-rose-50/70 rounded-2xl p-3">
+                  <p className="text-[11px] font-bold text-rose-600 mb-2">방 이미지 선택</p>
+                  <div className="grid grid-cols-10 gap-1">
+                    {ROOM_EMOJI_CHOICES.map(e => (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => {
+                          onUpdateRoomEmoji?.(room.id, e);
+                          setEmojiEditRoomId(null);
+                        }}
+                        className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition ${room.emoji === e ? 'bg-rose-500 ring-2 ring-rose-300' : 'bg-white hover:bg-rose-100'}`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               </div>
             );
           })

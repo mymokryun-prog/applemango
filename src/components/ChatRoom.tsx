@@ -291,16 +291,16 @@ export default function ChatRoom({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white px-3 py-1.5 flex items-center justify-between border-b-2 border-black select-none shadow-sm font-sans">
-        <div className="text-[10px] font-black tracking-tight flex items-center gap-1">
+      <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white px-3 py-2 flex items-center justify-between select-none shadow-sm font-sans">
+        <div className="text-[13px] font-black tracking-tight flex items-center gap-1">
           <span>💬 안심톡</span>
         </div>
-        <div className="flex items-center gap-1 font-sans">
+        <div className="flex items-center gap-1.5 font-sans">
           {(!['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId) || trackingStyle === 'temporary') && !isDisbanded && onDisbandRoom && (
             <button
               onClick={onDisbandRoom}
               type="button"
-              className="bg-red-600 hover:bg-red-700 text-white font-extrabold text-[7.5px] px-1.5 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer"
+              className="bg-red-600 hover:bg-red-700 text-white font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm active:translate-y-0.5 transition cursor-pointer"
               title={
                 !['room-friends', 'room-family', 'room-work', 'room-care'].includes(roomId)
                   ? "이 커스텀 모임방과 모든 기록을 완전 폭파(삭제)합니다."
@@ -315,9 +315,9 @@ export default function ChatRoom({
             <button
               type="button"
               onClick={() => setShowAppModal(true)}
-              className="bg-sky-400 hover:bg-sky-500 text-slate-950 font-extrabold text-[7.5px] px-1.5 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer flex items-center gap-0.5"
+              className="bg-sky-400 hover:bg-sky-500 text-slate-950 font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm active:translate-y-0.5 transition cursor-pointer flex items-center gap-1"
             >
-              <Calendar className="w-2.5 h-2.5" />
+              <Calendar className="w-3.5 h-3.5" />
               <span>약속 만들기</span>
             </button>
           )}
@@ -326,26 +326,26 @@ export default function ChatRoom({
             <button
               type="button"
               onClick={() => setShowInviteModal(true)}
-              className="bg-amber-400 hover:bg-amber-500 text-gray-900 font-extrabold text-[7.5px] px-1.5 py-0.5 rounded border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition cursor-pointer flex items-center gap-0.5"
+              className="bg-amber-400 hover:bg-amber-500 text-gray-900 font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm active:translate-y-0.5 transition cursor-pointer flex items-center gap-1"
             >
-              <UserPlus className="w-2.5 h-2.5" />
+              <UserPlus className="w-3.5 h-3.5" />
               <span>초대</span>
             </button>
           )}
 
-          <div className="relative flex items-center gap-0.5 bg-black/30 px-1 py-0.5 rounded text-[7.5px] font-black uppercase text-yellow-200">
-            <span className="inline-block w-1 h-1 bg-green-500 rounded-full border border-black animate-pulse"></span>
+          <div className="relative flex items-center gap-1 bg-black/25 px-2 py-1.5 rounded-lg text-[10px] font-black uppercase text-yellow-200">
+            <span className="inline-block w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
             <span>Live</span>
           </div>
         </div>
       </div>
 
-      {/* 겹쳐진 아바타 버튼형 멤버 관리 바 */}
-      <div className="bg-[#FFFDF9] border-b-2 border-black px-3 py-1.5 flex items-center select-none shrink-0 shadow-sm">
+      {/* 겹쳐진 아바타 버튼형 멤버 관리 바 — 테두리 없는 부드러운 스타일 */}
+      <div className="bg-[#FFFDF9] px-3 py-1.5 flex items-center select-none shrink-0">
         <button
           type="button"
           onClick={() => setShowMembersModal(true)}
-          className="flex items-center gap-2 px-3 py-1 bg-white hover:bg-rose-50 border-2 border-black rounded-full shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition cursor-pointer select-none"
+          className="flex items-center gap-2 px-3 py-1 bg-white hover:bg-rose-50 rounded-full shadow-sm transition cursor-pointer select-none"
         >
           {/* Overlapping avatars representation */}
           <div className="flex -space-x-2 overflow-hidden">
@@ -353,7 +353,7 @@ export default function ChatRoom({
               <div
                 key={friend.id}
                 style={{ backgroundColor: friend.color || '#3B82F6', zIndex: 10 - idx }}
-                className="inline-block h-6 w-6 rounded-full border-2 border-black flex items-center justify-center text-[10px] font-black text-white shrink-0 overflow-hidden"
+                className="inline-block h-6 w-6 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-black text-white shrink-0 overflow-hidden"
               >
                 {friend.avatar.startsWith('data:image/') ? (
                   <img src={friend.avatar} alt="" className="w-full h-full object-cover" />
@@ -363,12 +363,12 @@ export default function ChatRoom({
               </div>
             ))}
             {friends.length > 3 && (
-              <div className="inline-block h-6 w-6 rounded-full border-2 border-black bg-slate-900 flex items-center justify-center text-[8px] font-black text-white shrink-0 z-0">
+              <div className="inline-block h-6 w-6 rounded-full border-2 border-white bg-slate-700 flex items-center justify-center text-[8px] font-black text-white shrink-0 z-0">
                 +{friends.length - 3}
               </div>
             )}
           </div>
-          <span className="text-[10px] font-black text-slate-800 flex items-center gap-0.5">
+          <span className="text-[11px] font-black text-slate-800 flex items-center gap-0.5">
             그룹 멤버 ({friends.length}명) <span className="text-rose-500 font-extrabold text-[8px]">▶</span>
           </span>
         </button>
@@ -567,8 +567,8 @@ export default function ChatRoom({
         <div ref={chatBottomRef} />
       </div>
 
-      {/* Main Send Form */}
-      <form onSubmit={handleSend} className="p-3 bg-white border-t-2 border-black flex items-center gap-2 shrink-0 font-sans">
+      {/* Main Send Form — 테두리 없는 깔끔한 입력바, 위 구분은 아주 옅은 노란색 */}
+      <form onSubmit={handleSend} className="p-3 bg-white border-t-2 border-amber-100 flex items-center gap-2 shrink-0 font-sans">
         {/* 이미지 첨부 */}
         {!isDisbanded && onSendImage && (
           <>
@@ -584,9 +584,9 @@ export default function ChatRoom({
               onClick={() => imageInputRef.current?.click()}
               disabled={isUploadingImage}
               title="사진 보내기"
-              className="w-8 h-8 rounded-lg bg-slate-100 border-2 border-black flex items-center justify-center shrink-0 shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] hover:bg-amber-50 transition active:translate-y-0.5 disabled:opacity-50"
+              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 hover:bg-rose-50 transition disabled:opacity-50"
             >
-              {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin text-rose-500" /> : <ImageIcon className="w-4 h-4 text-rose-500" />}
+              {isUploadingImage ? <Loader2 className="w-5 h-5 animate-spin text-rose-500" /> : <ImageIcon className="w-5 h-5 text-rose-500" />}
             </button>
           </>
         )}
@@ -596,7 +596,7 @@ export default function ChatRoom({
             type="button"
             onClick={handleQuickMention}
             title="@애망봇 소환"
-            className="w-8 h-8 rounded-lg bg-rose-500 text-white border-2 border-black flex items-center justify-center shrink-0 shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] hover:bg-rose-600 transition active:translate-y-0.5 text-sm"
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 hover:bg-rose-50 transition text-lg"
           >
             🤖
           </button>
@@ -624,14 +624,14 @@ export default function ChatRoom({
               }
             }
           }}
-          className="flex-1 bg-slate-100 border-2 border-black focus:border-rose-500 rounded-xl px-4 py-2 text-xs focus:outline-none placeholder-slate-400 text-slate-900 font-bold transition-all shadow-[1.5px_1.5px_0px_0px_rgba(0,0,0,1)] disabled:opacity-55 resize-none h-[38px] leading-[22px] overflow-hidden"
+          className="flex-1 bg-slate-100 focus:bg-slate-50 rounded-2xl px-4 py-2 text-xs focus:outline-none placeholder-slate-400 text-slate-900 font-bold transition-all disabled:opacity-55 resize-none h-[38px] leading-[22px] overflow-hidden"
         />
         <button
           type="submit"
           disabled={isDisbanded}
-          className="w-8 h-8 rounded-lg bg-black text-rose-400 border border-black flex items-center justify-center shadow-[1.5px_1.5px_0px_0px_rgba(244,63,94,1)] hover:bg-slate-900 transition active:translate-y-0.5 disabled:opacity-55 disabled:cursor-not-allowed"
+          className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-rose-50 transition disabled:opacity-55 disabled:cursor-not-allowed"
         >
-          <Send className="w-4 h-4 text-rose-400" />
+          <Send className="w-5 h-5 text-rose-500" />
         </button>
       </form>
       {/* 친구 초대 모달 */}
