@@ -13,13 +13,14 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone } from 'lucide-react';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
 import MusicPanel from './components/MusicPanel';
 import RestaurantPanel from './components/RestaurantPanel';
 import BookPanel from './components/BookPanel';
 import ContactsPanel from './components/ContactsPanel';
+import NoticePanel from './components/NoticePanel';
 
 import {
   queueOfflineAction,
@@ -52,13 +53,13 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice'>('rooms');
 
   // 2단계 내비게이션: 'lobby'(로비 = 앱 접속 첫 화면, 전체 공개 기능) / 'room'(특정 그룹방 내부, 멤버 전용 폐쇄 기능)
   // 로비 탭(전체 공개): 그룹방·연락처·알림·음악·맛집·책·게임방
   // 방 내부 탭(그룹 멤버 전용): 지도·채팅·약속·만보기
-  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game'] as const;
-  const ROOM_TABS = ['chat', 'map', 'appointments', 'pedometer'] as const;
+  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice'] as const;
+  const ROOM_TABS = ['chat', 'map', 'appointments', 'pedometer', 'roomNotice'] as const;
   const [view, setView] = useState<'lobby' | 'room'>('lobby');
 
   // 방 입장: 방을 선택하고 방 내부 뷰로 전환(기본 탭은 채팅)
@@ -2602,6 +2603,16 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'roomNotice' && (
+          <NoticePanel
+            scope="room"
+            authFetch={authFetch}
+            activeRoomId={activeRoomId}
+            activeRoomName={rooms.find(r => r.id === activeRoomId)?.name || '그룹방'}
+            myName={friends.find(f => f.id === activeProfileId)?.name || regAlias || regRealName || '나'}
+          />
+        )}
+
         {activeTab === 'music' && (
           <MusicPanel
             authFetch={authFetch}
@@ -2631,6 +2642,14 @@ export default function App() {
           <ContactsPanel
             currentRoomName={rooms.find(r => r.id === activeRoomId)?.name}
             onInvite={(name, phone) => handleInviteFriend(name, '👤', '#EC4899', phone)}
+          />
+        )}
+
+        {activeTab === 'lobbyNotice' && (
+          <NoticePanel
+            scope="lobby"
+            authFetch={authFetch}
+            myName={friends.find(f => f.id === activeProfileId)?.name || regAlias || regRealName || '나'}
           />
         )}
       </div>
@@ -2759,6 +2778,7 @@ export default function App() {
               { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
               { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
               { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
+              { id: 'lobbyNotice' as const, Icon: Megaphone, label: '공지', onClick: () => setActiveTab('lobbyNotice') },
             ]).map(({ id, Icon, label, onClick }) => (
               <button
                 key={id}
@@ -2793,6 +2813,7 @@ export default function App() {
               { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); } },
               { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
               { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
+              { id: 'roomNotice' as const, Icon: Megaphone, label: '공지', onClick: () => setActiveTab('roomNotice') },
             ]).map(({ id, Icon, label, onClick }) => (
               <button
                 key={id}

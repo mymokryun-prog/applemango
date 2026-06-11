@@ -443,6 +443,9 @@ const dbUserProfiles: Record<string, any> = {
 const dbRestaurants: any[] = [];
 const dbBooks: any[] = [];
 const dbMusic: any[] = [];
+const dbLobbyNotices: any[] = [];
+const NOTICE_ADMIN_PASSWORD_HASH =
+  process.env.NOTICE_ADMIN_PASSWORD_HASH || 'fba37ae0d72e780855128647aa36ebf4b9e2575561eaaf55db2d890623f2233f';
 // 일회성 마이그레이션 플래그 등 내부 메타데이터
 const dbMeta: Record<string, any> = {};
 
@@ -452,25 +455,25 @@ const dbRooms: Record<string, any> = {
     id: 'room-friends', name: '애플망고 단짝방', emoji: '🥭',
     type: 'friends', trackingStyle: 'temporary', isDisbanded: false,
     messages: welcomeMsg('friends', '🍎🥭 애플망고 단짝방에 오신 것을 환영합니다! 친구를 초대해서 실시간 위치를 공유해 보세요. 채팅에서 @망고봇 을 부르면 모임 장소도 추천해 드려요!'),
-    friends: {}, appointments: [], notifications: []
+    friends: {}, appointments: [], notifications: [], notices: []
   },
   'room-family': {
     id: 'room-family', name: '애플망고 가족방', emoji: '🏠',
     type: 'family', trackingStyle: 'continuous', isDisbanded: false,
     messages: welcomeMsg('family', '🏠 가족 안심방이 활성화되었습니다. 가족을 초대하여 상시 위치 공유를 시작하세요!'),
-    friends: {}, appointments: [], notifications: []
+    friends: {}, appointments: [], notifications: [], notices: []
   },
   'room-work': {
     id: 'room-work', name: '애플망고 직장방', emoji: '👔',
     type: 'work', trackingStyle: 'temporary', isDisbanded: false,
     messages: welcomeMsg('work', '👔 직장 동료 방이 활성화되었습니다. 외근·미팅 위치를 공유해 보세요!'),
-    friends: {}, appointments: [], notifications: []
+    friends: {}, appointments: [], notifications: [], notices: []
   },
   'room-care': {
     id: 'room-care', name: '애플망고 효도방', emoji: '👵',
     type: 'care', trackingStyle: 'continuous', isDisbanded: false,
     messages: welcomeMsg('care', '👵 부모님 안심 효도방이 활성화되었습니다. 부모님을 초대하여 실시간 위치와 건강 정보를 확인하세요!'),
-    friends: {}, appointments: [], notifications: []
+    friends: {}, appointments: [], notifications: [], notices: []
   }
 };
 
@@ -531,7 +534,7 @@ async function loadImage(id: string): Promise<string | null> {
 }
 
 function saveDatabase() {
-  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic, dbMeta, dbSafePlaces });
+  const payload = JSON.stringify({ dbRooms, dbUserProfiles, dbRestaurants, dbBooks, dbMusic, dbLobbyNotices, dbMeta, dbSafePlaces });
   // 1) 영구 저장소(Upstash Redis) — 비동기 fire-and-forget
   if (useRedis) {
     redisSet(REDIS_DB_KEY, payload).catch(err =>
@@ -576,6 +579,10 @@ function applyLoadedData(data: any, source: string) {
   if (Array.isArray(data.dbMusic)) {
     dbMusic.length = 0;
     dbMusic.push(...data.dbMusic);
+  }
+  if (Array.isArray(data.dbLobbyNotices)) {
+    dbLobbyNotices.length = 0;
+    dbLobbyNotices.push(...data.dbLobbyNotices);
   }
   if (data.dbMeta && typeof data.dbMeta === 'object') {
     Object.keys(dbMeta).forEach(k => delete dbMeta[k]);
@@ -709,6 +716,7 @@ function ensurePersonalRoom(userId: string) {
       friends: {},
       appointments: [],
       notifications: [],
+      notices: [],
     };
   }
   if (!dbRooms[roomId].friends[userId]) {
@@ -2355,6 +2363,82 @@ async function startServer() {
     res.json(item);
   });
 
+  app.get('/api/notices/lobby', (_req, res) => {
+    res.json(dbLobbyNotices.slice(0, 100));
+  });
+
+  app.post('/api/notices/lobby', (req: AuthRequest, res: Response) => {
+    const { title, body, authorName, password } = req.body || {};
+    const passwordHash = CryptoJS.SHA256(String(password || '')).toString();
+    if (passwordHash !== NOTICE_ADMIN_PASSWORD_HASH) {
+      return res.status(403).json({ error: '비밀번호가 올바르지 않습니다.' });
+    }
+    const cleanTitle = String(title || '').trim().slice(0, 80);
+    const cleanBody = String(body || '').trim().slice(0, 1500);
+    if (!cleanTitle || !cleanBody) {
+      return res.status(400).json({ error: '제목과 내용을 입력해 주세요.' });
+    }
+    const notice = {
+      id: `lobby-notice-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      scope: 'lobby',
+      title: cleanTitle,
+      body: cleanBody,
+      authorId: req.user?.userId || 'guest',
+      authorName: String(authorName || '공지 작성자').trim().slice(0, 60),
+      timestamp: new Date().toISOString(),
+    };
+    dbLobbyNotices.unshift(notice);
+    if (dbLobbyNotices.length > 100) dbLobbyNotices.length = 100;
+    saveDatabaseDebounced();
+    io.emit('lobby-notices-updated');
+    res.json(notice);
+  });
+
+  app.get('/api/notices/room', requireRoomMember, (req: AuthRequest, res) => {
+    const roomId = (req.query.roomId as string) || 'room-friends';
+    const room = dbRooms[roomId];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    room.notices = Array.isArray(room.notices) ? room.notices : [];
+    res.json(room.notices.slice(0, 100));
+  });
+
+  app.post('/api/notices/room', requireRoomMember, (req: AuthRequest, res: Response) => {
+    const { roomId, title, body, authorName } = req.body || {};
+    const room = dbRooms[roomId || 'room-friends'];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const cleanTitle = String(title || '').trim().slice(0, 80);
+    const cleanBody = String(body || '').trim().slice(0, 1500);
+    if (!cleanTitle || !cleanBody) {
+      return res.status(400).json({ error: '제목과 내용을 입력해 주세요.' });
+    }
+    room.notices = Array.isArray(room.notices) ? room.notices : [];
+    const notice = {
+      id: `room-notice-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      scope: 'room',
+      roomId: room.id,
+      title: cleanTitle,
+      body: cleanBody,
+      authorId: req.user?.userId || 'guest',
+      authorName: String(authorName || '멤버').trim().slice(0, 60),
+      timestamp: new Date().toISOString(),
+    };
+    room.notices.unshift(notice);
+    if (room.notices.length > 100) room.notices.length = 100;
+    room.messages.push({
+      id: `msg-notice-${Date.now()}`,
+      senderId: 'system',
+      senderName: '공지',
+      senderAvatar: '📢',
+      senderColor: '#F59E0B',
+      text: `📢 새 공지: ${notice.title}`,
+      timestamp: notice.timestamp,
+      isSystem: true,
+    });
+    saveDatabaseDebounced();
+    if (broadcastRoomUpdate) broadcastRoomUpdate(room.id, 'room-refresh');
+    res.json(notice);
+  });
+
   app.post('/api/chat', requireRoomMember, validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {
     const { senderId, senderName, senderAvatar, senderColor, text, locationShared, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
@@ -2445,10 +2529,10 @@ async function startServer() {
     }
 
     // 위치를 숨겨야 하는 경우 좌표(lat/lng/route)를 제거 (멤버 목록에는 남음)
-    //  - 위치공유 OFF(프라이버시) / 아직 실제 위치를 한 번도 공유 안 함(located 아님: 가짜 홍대좌표 방지)
-    //  ※ 로그아웃/앱종료(offline)는 숨기지 않음 → 마지막 위치를 검정 테두리로 계속 표시
+    //  - 위치공유 OFF(프라이버시) / 로그아웃 / 아직 실제 위치를 한 번도 공유 안 함(located 아님)
+    //  ※ 단순 앱 종료(offline)는 숨기지 않음 → 마지막 위치를 계속 정상 표시
     const list = Object.values(room.friends).map((f: any) => {
-      const locationHidden = f.shareLocation === false || !f.located;
+      const locationHidden = f.shareLocation === false || f.loggedOut === true || !f.located;
       if (locationHidden) {
         return { ...f, lat: null, lng: null, route: [], locationHidden: true };
       }
