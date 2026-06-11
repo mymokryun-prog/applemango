@@ -12,6 +12,9 @@
  * - 웹(PWA)에서는 null을 반환하여 기존 navigator.geolocation 경로를 그대로 사용합니다.
  */
 
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { BackgroundGeolocationPlugin } from '@capacitor-community/background-geolocation';
+
 interface NativeLocation {
   latitude: number;
   longitude: number;
@@ -28,8 +31,7 @@ interface NativeWatcherError {
 /** Capacitor 네이티브 런타임 위에서 실행 중인지 감지 */
 export function isNativeApp(): boolean {
   if (typeof window === 'undefined') return false;
-  const cap = (window as any).Capacitor;
-  return !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+  return Capacitor.isNativePlatform();
 }
 
 /**
@@ -44,10 +46,7 @@ export async function startNativeBackgroundWatch(
   if (!isNativeApp()) return null;
 
   try {
-    const cap = (window as any).Capacitor;
-    if (!cap?.registerPlugin) return null;
-
-    const BackgroundGeolocation = cap.registerPlugin('BackgroundGeolocation');
+    const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation');
 
     const watcherId: string = await BackgroundGeolocation.addWatcher(
       {

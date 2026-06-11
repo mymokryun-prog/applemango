@@ -4,12 +4,18 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CapacitorHttp } from '@capacitor/core';
 import { getLocationSocket } from '../realtime/socketClient';
 import type { GpsStatus, LocationUpdatedPayload } from '../realtime/types';
 import { isNativeApp, startNativeBackgroundWatch } from '../native/backgroundLocation';
 
 const MIN_SEND_INTERVAL_MS = 3500;
 const MIN_MOVE_METERS = 12;
+
+function apiUrl(path: string): string {
+  if (typeof window === 'undefined') return path;
+  return new URL(path, window.location.origin).toString();
+}
 
 /** PC·노트북: Wi-Fi/IP 위치 (빠르고 성공률 높음) */
 const GEO_RELAXED: PositionOptions = {
@@ -159,7 +165,7 @@ export function useRealtimeLocation({
       const socket = getLocationSocket();
       if (!roomId || !userId || !shareLocation) return;
       const shared = applyLocationPrivacy(lat, lng);
-      // 웹: 소켓 필수 / 네이티브: 소켓 끊김 시 HTTP 폴백 허용
+      // 웹: 소켓 필수 / 네이티브: native HTTP 전송으로 백그라운드 제한을 피한다.
       if (!socket.connected && !isNativeApp()) return;
 
       const now = Date.now();
@@ -174,13 +180,23 @@ export function useRealtimeLocation({
 
       lastEmitRef.current = { lat, lng, time: now };
 
-      // 네이티브 백그라운드 모드에서 소켓이 끊겨 있으면 HTTP로 폴백 전송
-      if (!socket.connected && isNativeApp()) {
-        fetch('/api/friends/move', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: userId, lat: shared.lat, lng: shared.lng, roomId }),
-        }).then(() => setLastSentAt(new Date().toISOString())).catch(() => {});
+      // 네이티브 백그라운드 모드에서는 WebView fetch가 제한될 수 있어 Capacitor native HTTP를 우선 사용한다.
+      if (isNativeApp()) {
+        const token = localStorage.getItem('aemang_token');
+        const isBackground = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+        CapacitorHttp.post({
+          url: apiUrl('/api/friends/move'),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': userId,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          data: { id: userId, lat: shared.lat, lng: shared.lng, roomId, background: isBackground },
+          connectTimeout: 10000,
+          readTimeout: 10000,
+        }).then(() => setLastSentAt(new Date().toISOString())).catch((err) => {
+          console.warn('Native background location send failed:', err);
+        });
         return;
       }
 

@@ -189,7 +189,8 @@ const LocationUpdateSchema = z.object({
   lat: z.number().min(-90).max(90).optional(),
   lng: z.number().min(-180).max(180).optional(),
   statusMsg: z.string().max(500).optional(),
-  roomId: z.string().optional()
+  roomId: z.string().optional(),
+  background: z.boolean().optional()
 });
 
 const PedometerSchema = z.object({
@@ -1017,7 +1018,7 @@ function applyFriendLocationUpdate(
   lat: number,
   lng: number,
   statusMsg?: string,
-  options: { broadcast?: boolean; source?: 'gps' | 'manual' } = {}
+  options: { broadcast?: boolean; source?: 'gps' | 'manual' | 'background' } = {}
 ): Record<string, unknown> | null {
   const room = dbRooms[roomId] || dbRooms['room-friends'];
   if (!room?.friends[friendId]) return null;
@@ -1057,7 +1058,7 @@ function applyFriendLocationUpdate(
   friend.lng = lng;
   friend.speed = speed;
   friend.heading = heading;
-  friend.isOnline = true;
+  friend.isOnline = options.source === 'background' ? false : true;
   friend.loggedOut = false; // 다시 활동하면 로그아웃 숨김 해제
   friend.located = true; // 실제 위치를 한 번이라도 공유함 → 지도에 표시
   friend.updatedAt = new Date().toISOString();
@@ -2568,7 +2569,7 @@ async function startServer() {
   });
 
   app.post('/api/friends/move', validateRequest(LocationUpdateSchema), (req: AuthRequest, res: Response) => {
-    const { id, lat, lng, statusMsg, roomId } = req.body;
+    const { id, lat, lng, statusMsg, roomId, background } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
     const friendId = id || 'user-minsu';
@@ -2576,7 +2577,7 @@ async function startServer() {
     if (lat !== undefined && lng !== undefined && room.friends[friendId]) {
       const payload = applyFriendLocationUpdate(activeRoomId, friendId, lat, lng, statusMsg, {
         broadcast: true,
-        source: 'manual'
+        source: background ? 'background' : 'manual'
       });
       if (payload) {
         return res.json(room.friends[friendId]);
