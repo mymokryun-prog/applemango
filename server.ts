@@ -1055,9 +1055,9 @@ function simulateMovement() {
   Object.keys(dbRooms).forEach(roomId => {
     const room = dbRooms[roomId];
     Object.keys(room.friends).forEach(id => {
+      if (id.startsWith('user-')) return; // Skip all real users
       const friend = room.friends[id];
-      if (id === 'user-minsu') return; // Skip if user
-      if (!friend.route || friend.route.length <= 1) return;
+      if (!friend || !friend.route || friend.route.length <= 1) return;
 
       // Advance path
       friend.routeIndex = (friend.routeIndex + 1) % friend.route.length;
@@ -1927,6 +1927,10 @@ async function startServer() {
         r.friends[userId].realName = realName;
         r.friends[userId].alias = alias;
         r.friends[userId].updatedAt = new Date().toISOString();
+        
+        if (broadcastRoomUpdate) {
+          broadcastRoomUpdate(roomId, 'rooms-updated');
+        }
       }
     });
 

@@ -27,6 +27,7 @@ interface MapComponentProps {
   myGpsCoords?: [number, number] | null;
   centerOnMyGpsOnce?: boolean;
   onMyGpsCentered?: () => void;
+  onUpdateStatusMsg?: (id: string, text: string) => void;
 }
 
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
@@ -61,9 +62,9 @@ function renderAvatar(avatarString: string): string {
 function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): string {
   if (isMe) {
     const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
-    const statusSnippet = friend.statusMsg
-      ? `<div style="background:#fff;color:#374151;font-size:7px;font-weight:600;border:1px solid #E5E7EB;border-radius:5px;padding:1px 4px;margin-bottom:2px;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif">${friend.statusMsg.slice(0, 9)}${friend.statusMsg.length > 9 ? '…' : ''}</div>`
-      : '';
+    const currentMsg = friend.statusMsg || '상태메시지 입력';
+    const statusSnippet = `<div onclick="window.editMyStatusMsg()" style="background:#fff;color:#374151;font-size:7px;font-weight:600;border:1px solid #E5E7EB;border-radius:5px;padding:1px 4px;margin-bottom:2px;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif;cursor:pointer">${currentMsg.slice(0, 9)}${currentMsg.length > 9 ? '…' : ''}</div>`;
+
     return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
       ${statusSnippet}
       <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:22px;filter:drop-shadow(0 0 5px #39FF14) drop-shadow(0 0 9px #39FF14);${ring};z-index:5">
@@ -78,7 +79,7 @@ function friendMarkerHtml(friend: Friend, isSelected: boolean, isMe: boolean): s
   // 로그아웃/앱종료(오프라인) 친구는 마지막 위치에 고정 표시 — 어둡게 + 굵은 검정 테두리
   const markerBg = isOffline ? '#4B5563' : friend.color;
   const ring = isSelected ? 'outline:3px solid #111;outline-offset:2px;transform:scale(1.18)' : '';
-  const border = isOffline ? 'border:3px solid #000' : 'border:2px solid #111';
+  const border = isOffline ? 'border:3px solid #000' : 'border:2px solid #39FF14;box-shadow:0 0 6px #39FF14';
   const hrBadge = friend.heartRate
     ? `<div style="position:absolute;top:-4px;left:-10px;background:#EF4444;color:#fff;font-size:6px;font-weight:700;padding:1px 3px;border-radius:8px;line-height:1.2">♥${friend.heartRate}</div>`
     : '';
@@ -172,8 +173,12 @@ function computeSpread<T extends { lat: number; lng: number; color?: string }>(i
   return out;
 }
 
-function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string }): string {
+function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string; statusMsg?: string }): string {
+  const currentMsg = myProfile.statusMsg || '상태메시지 입력';
+  const statusSnippet = `<div onclick="window.editMyStatusMsg()" style="background:#fff;color:#374151;font-size:7px;font-weight:600;border:1px solid #E5E7EB;border-radius:5px;padding:1px 4px;margin-bottom:2px;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:sans-serif;cursor:pointer">${currentMsg.slice(0, 9)}${currentMsg.length > 9 ? '…' : ''}</div>`;
+
   return `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+    ${statusSnippet}
     <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:22px;filter:drop-shadow(0 0 5px #39FF14) drop-shadow(0 0 9px #39FF14);z-index:5">
       ${renderAvatar(myProfile.avatar)}
       <div style="position:absolute;bottom:-8px;right:-10px;background:#3B82F6;color:#fff;font-size:7px;font-weight:900;padding:1.5px 3.5px;border-radius:6px;line-height:1;border:1px solid #111;z-index:10;filter:none">나</div>
@@ -186,6 +191,7 @@ export default function MapComponent({
   selectedFriendId, selectedPromiseId,
   onMapClick, tempPromiseCoords, mapViewCoords = null, isPersonalRoom = false,
   myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
+  onUpdateStatusMsg,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   // 지도 검색 결과 '보기'용 좌표 — 컴포넌트가 지도 탭 진입마다 새로 마운트되어 자동 초기화됨(약속 연동 아님)
@@ -220,6 +226,22 @@ export default function MapComponent({
   // 지도 클릭 리스너는 1회만 등록되므로 최신 onMapClick을 ref로 참조(stale 클로저 방지)
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => { onMapClickRef.current = onMapClick; }, [onMapClick]);
+
+  // Expose global editMyStatusMsg function for clicking on status bubble
+  useEffect(() => {
+    (window as any).editMyStatusMsg = () => {
+      const myProfile = friends.find(f => f.id === activeProfileId) || {
+        statusMsg: localStorage.getItem('aemang_status') || '애플망고톡 시작! 🍎🥭'
+      };
+      const newMsg = prompt('새로운 상태 메시지를 입력하세요:', myProfile.statusMsg || '');
+      if (newMsg !== null) {
+        onUpdateStatusMsg?.(activeProfileId, newMsg.trim());
+      }
+    };
+    return () => {
+      delete (window as any).editMyStatusMsg;
+    };
+  }, [friends, activeProfileId, onUpdateStatusMsg]);
 
   // ─── 1. 카카오맵 SDK 동적 로드 ──────────────────────────────────────────────
   useEffect(() => {
@@ -711,10 +733,16 @@ export default function MapComponent({
   useEffect(() => {
     if (!myGpsCoords || typeof myGpsCoords[0] !== 'number' || typeof myGpsCoords[1] !== 'number' || isNaN(myGpsCoords[0]) || isNaN(myGpsCoords[1])) return;
 
-    const myProfile = friends.find(f => f.id === activeProfileId) || {
+    const foundFriend = friends.find(f => f.id === activeProfileId);
+    const myProfile = foundFriend ? {
+      ...foundFriend,
+      avatar: localStorage.getItem('aemang_fruit') || foundFriend.avatar || '🍎',
+      statusMsg: foundFriend.statusMsg || localStorage.getItem('aemang_status') || ''
+    } : {
       avatar: localStorage.getItem('aemang_fruit') || '🍎',
       color: '#EF4444',
-      name: '나'
+      name: '나',
+      statusMsg: localStorage.getItem('aemang_status') || ''
     };
 
     if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {

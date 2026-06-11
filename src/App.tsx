@@ -1891,6 +1891,29 @@ export default function App() {
   };
 
   const handleStartCall = (friend: any, type: 'voice' | 'video') => {
+    const cleanPhone = (friend.phone || '').replace(/\D/g, '');
+    if (cleanPhone) {
+      const mode = window.confirm(
+        type === 'voice'
+          ? `📞 [전화 연결 방식 선택]\n\n- [확인 (OK)]: 스마트폰 자체 일반 통화(전화 앱)로 연결\n- [취소 (Cancel)]: 애플망고톡 내 모의 음성통화 시뮬레이션 실행`
+          : `📹 [화상전화 연결 방식 선택]\n\n- [확인 (OK)]: 스마트폰 자체 화상통화(FaceTime/기본 다이얼러)로 연결\n- [취소 (Cancel)]: 애플망고톡 내 모의 화상통화 시뮬레이션 실행`
+      );
+
+      if (mode) {
+        if (type === 'voice') {
+          window.open(`tel:${cleanPhone}`);
+        } else {
+          const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+          if (isIOS) {
+            window.open(`facetime:${cleanPhone}`);
+          } else {
+            window.open(`tel:${cleanPhone}`);
+          }
+        }
+        return;
+      }
+    }
+
     setCallingState({
       type,
       status: 'ringing',
@@ -2375,6 +2398,7 @@ export default function App() {
             myGpsCoords={myCoords ? [myCoords.lat, myCoords.lng] : null}
             centerOnMyGpsOnce={!hasCenteredOnGpsRef.current}
             onMyGpsCentered={() => { hasCenteredOnGpsRef.current = true; }}
+            onUpdateStatusMsg={handleUpdateStatusMsg}
           />
         )}
 
@@ -3148,7 +3172,39 @@ export default function App() {
                         const reader = new FileReader();
                         reader.onload = (event) => {
                           if (event.target?.result && typeof event.target.result === 'string') {
-                            setRegFruit(event.target.result); // Base64
+                            const img = new Image();
+                            img.src = event.target.result;
+                            img.onload = () => {
+                              const canvas = document.createElement('canvas');
+                              let width = img.width;
+                              let height = img.height;
+                              const maxDim = 256;
+                              if (width > height) {
+                                if (width > maxDim) {
+                                  height = Math.round((height * maxDim) / width);
+                                  width = maxDim;
+                                }
+                              } else {
+                                if (height > maxDim) {
+                                  width = Math.round((width * maxDim) / height);
+                                  height = maxDim;
+                                }
+                              }
+                              canvas.width = width;
+                              canvas.height = height;
+                              const ctx = canvas.getContext('2d');
+                              if (ctx) {
+                                ctx.drawImage(img, 0, 0, width, height);
+                                try {
+                                  const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+                                  setRegFruit(compressedBase64);
+                                } catch (e) {
+                                  setRegFruit(event.target.result as string);
+                                }
+                              } else {
+                                setRegFruit(event.target.result as string);
+                              }
+                            };
                           }
                         };
                         reader.readAsDataURL(file);
