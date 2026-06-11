@@ -13,7 +13,8 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote, TrendingUp, GraduationCap } from 'lucide-react';
+import LifeToolsPanel from './components/LifeToolsPanel';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
 import MusicPanel from './components/MusicPanel';
@@ -54,12 +55,12 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice' | 'parents' | 'students'>('rooms');
 
   // 2단계 내비게이션: 'lobby'(로비 = 앱 접속 첫 화면, 전체 공개 기능) / 'room'(특정 그룹방 내부, 멤버 전용 폐쇄 기능)
   // 로비 탭(전체 공개): 그룹방·연락처·알림·음악·맛집·책·게임방
   // 방 내부 탭(그룹 멤버 전용): 지도·채팅·약속·만보기
-  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice'] as const;
+  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice', 'parents', 'students'] as const;
   const ROOM_TABS = ['chat', 'map', 'appointments', 'pedometer', 'roomNotice'] as const;
   const [view, setView] = useState<'lobby' | 'room'>('lobby');
 
@@ -2670,6 +2671,10 @@ export default function App() {
             myName={friends.find(f => f.id === activeProfileId)?.name || regAlias || regRealName || '나'}
           />
         )}
+
+        {/* 부모·학생 생활 도구 (전체 공개) */}
+        {activeTab === 'parents' && <LifeToolsPanel audience="parents" />}
+        {activeTab === 'students' && <LifeToolsPanel audience="students" />}
       </div>
 
       {/* BIZ-CORE-8 ④: 보호자 SOS 알림 오버레이 (구 119 시뮬레이션 대체) */}
@@ -2804,6 +2809,28 @@ export default function App() {
                 onClick={onClick}
                 className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
                   activeTab === id ? 'text-indigo-600 bg-indigo-50 border border-indigo-150' : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50/30'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+              </button>
+            ))}
+
+            {/* 구분선: 생활 도구 그룹 (부모·학생) */}
+            <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
+
+            {([
+              { id: 'parents' as const, Icon: TrendingUp, label: '부모', onClick: () => setActiveTab('parents') },
+              { id: 'students' as const, Icon: GraduationCap, label: '학생', onClick: () => setActiveTab('students') },
+            ]).map(({ id, Icon, label, onClick }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={onClick}
+                className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
+                  activeTab === id
+                    ? (id === 'parents' ? 'text-emerald-600 bg-emerald-50 border border-emerald-100' : 'text-sky-600 bg-sky-50 border border-sky-100')
+                    : 'text-slate-400 hover:text-emerald-500 hover:bg-emerald-50/30'
                 }`}
               >
                 <Icon className="w-5 h-5" />
