@@ -13,7 +13,7 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft } from 'lucide-react';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
 import MusicPanel from './components/MusicPanel';
@@ -52,6 +52,39 @@ export default function App() {
 
   // Navigation active state
   const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts'>('rooms');
+
+  // 2단계 내비게이션: 'lobby'(로비 = 앱 접속 첫 화면, 전체 공개 기능) / 'room'(특정 그룹방 내부, 멤버 전용 폐쇄 기능)
+  // 로비 탭(전체 공개): 그룹방·연락처·알림·음악·맛집·책·게임방
+  // 방 내부 탭(그룹 멤버 전용): 지도·채팅·약속·만보기
+  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game'] as const;
+  const ROOM_TABS = ['chat', 'map', 'appointments', 'pedometer'] as const;
+  const [view, setView] = useState<'lobby' | 'room'>('lobby');
+
+  // 방 입장: 방을 선택하고 방 내부 뷰로 전환(기본 탭은 채팅)
+  const enterRoom = (roomId: string) => {
+    setActiveRoomId(roomId);
+    setSelectedFriendId(null);
+    setSelectedPromiseId(null);
+    setIsRoomEditMode(false);
+    setView('room');
+    setActiveTab('chat');
+  };
+
+  // 로비로 복귀
+  const exitToLobby = () => {
+    setView('lobby');
+    setActiveTab('rooms');
+    setSelectedFriendId(null);
+    setSelectedPromiseId(null);
+  };
+
+  // 일관성 보정: activeTab이 방 전용 탭이면 항상 방 뷰, 로비 탭이면 항상 로비 뷰.
+  // (게임 초대 수락, 위치 포커스 등 다른 코드 경로에서 setActiveTab을 직접 호출해도 뷰가 자동으로 맞춰짐)
+  useEffect(() => {
+    const isRoomTab = (ROOM_TABS as readonly string[]).includes(activeTab);
+    setView(isRoomTab ? 'room' : 'lobby');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
@@ -2298,42 +2331,55 @@ export default function App() {
             <button onClick={() => setIsRoomEditMode(false)} className="ml-auto text-rose-400 font-bold">✕</button>
           </div>
         )}
-        <div ref={roomNavRef} className="flex items-center gap-1.5 overflow-x-auto px-4 pb-3 scrollbar-none">
-          {rooms.map((room) => {
-            const isActive = activeRoomId === room.id;
-            const isOwner = room.ownerId === activeProfileId ||
-              ['room-friends', 'room-family', 'room-work', 'room-care'].includes(room.id);
-            return (
-              <div key={room.id} className="relative shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isRoomEditMode && isOwner) {
-                      handleDeleteRoom(room.id);
-                    } else {
-                      setActiveRoomId(room.id);
-                      setSelectedFriendId(null);
-                      setSelectedPromiseId(null);
-                      setIsRoomEditMode(false);
-                    }
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition ${
-                    isRoomEditMode && isOwner
-                      ? 'bg-rose-100 text-rose-600 border border-rose-300 animate-pulse'
-                      : isActive
-                        ? 'bg-gray-900 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  } ${isActive && !isRoomEditMode ? 'active-room' : ''}`}
-                >
-                  <span>{room.emoji}</span>
-                  <span>{room.name}</span>
-                  {room.isDisbanded && <span className="text-[8px] bg-red-500 text-white px-1 rounded-full">종료</span>}
-                  {isRoomEditMode && isOwner && <span className="text-[10px] ml-0.5">🗑</span>}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+        {/* 방 내부 뷰에서만: 로비 복귀 버튼 + 방 전환 칩 */}
+        {view === 'room' && (
+          <div ref={roomNavRef} className="flex items-center gap-1.5 overflow-x-auto px-4 pb-3 scrollbar-none">
+            <button
+              type="button"
+              onClick={exitToLobby}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold bg-rose-500 text-white hover:bg-rose-600 transition shrink-0 shadow-sm"
+              title="로비로 돌아가기"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>로비</span>
+            </button>
+            <div className="w-[1.5px] h-5 bg-gray-200 mx-0.5 shrink-0 self-center" />
+            {rooms.map((room) => {
+              const isActive = activeRoomId === room.id;
+              const isOwner = room.ownerId === activeProfileId ||
+                ['room-friends', 'room-family', 'room-work', 'room-care'].includes(room.id);
+              return (
+                <div key={room.id} className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isRoomEditMode && isOwner) {
+                        handleDeleteRoom(room.id);
+                      } else {
+                        setActiveRoomId(room.id);
+                        setSelectedFriendId(null);
+                        setSelectedPromiseId(null);
+                        setIsRoomEditMode(false);
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition ${
+                      isRoomEditMode && isOwner
+                        ? 'bg-rose-100 text-rose-600 border border-rose-300 animate-pulse'
+                        : isActive
+                          ? 'bg-gray-900 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    } ${isActive && !isRoomEditMode ? 'active-room' : ''}`}
+                  >
+                    <span>{room.emoji}</span>
+                    <span>{room.name}</span>
+                    {room.isDisbanded && <span className="text-[8px] bg-red-500 text-white px-1 rounded-full">종료</span>}
+                    {isRoomEditMode && isOwner && <span className="text-[10px] ml-0.5">🗑</span>}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* 개발용: 프로필 전환 (접기 가능) */}
         {import.meta.env.DEV && friends.length > 0 && (
@@ -2370,12 +2416,7 @@ export default function App() {
             activeRoomId={activeRoomId}
             activeProfileId={activeProfileId}
             messages={messages.map(m => ({ roomId: activeRoomId, text: m.text, timestamp: m.timestamp }))}
-            onSelectRoom={(roomId) => {
-              setActiveRoomId(roomId);
-              setSelectedFriendId(null);
-              setSelectedPromiseId(null);
-              setActiveTab('chat');
-            }}
+            onSelectRoom={(roomId) => enterRoom(roomId)}
             onCreateRoom={handleCreateRoom}
             onDeleteRoom={(roomId) => {
               setPendingDeleteRoomId(roomId);
@@ -2640,61 +2681,93 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. 하단 내비게이션 */}
-      <div className="bg-white border-t border-gray-100 px-1.5 flex items-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
-        {/* Core Services Group */}
-        {([
-          { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
-          { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
-          { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); } },
-          { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
-          { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
-          { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
-          { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
-        ]).map(({ id, Icon, label, onClick }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={onClick}
-            className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
-              activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <Icon className="w-5 h-5" />
-            <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
-            {id === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
-              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
-                {notifications.filter(n => !n.read).length}
-              </span>
-            )}
-            {id === 'appointments' && tempPromiseCoords && (
-              <span className="absolute top-1.5 right-2 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-            )}
-          </button>
-        ))}
+      {/* 3. 하단 내비게이션 — 2단계 구조 */}
+      <div className="bg-white border-t border-gray-100 px-1.5 flex items-center justify-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
+        {view === 'lobby' ? (
+          // ── 로비 내비게이션 (전체 공개 기능): 그룹방·연락처·알림 | 음악·맛집·책·게임방 ──
+          <>
+            {([
+              { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
+              { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
+              { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
+            ]).map(({ id, Icon, label, onClick }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={onClick}
+                className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
+                  activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+                {id === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                    {notifications.filter(n => !n.read).length}
+                  </span>
+                )}
+              </button>
+            ))}
 
-        {/* 세로 구분선 */}
-        <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
+            <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
 
-        {/* Leisure/Entertainment Group */}
-        {([
-          { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
-          { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
-          { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
-          { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
-        ]).map(({ id, Icon, label, onClick }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={onClick}
-            className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
-              activeTab === id ? 'text-indigo-600 bg-indigo-50 border border-indigo-150' : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50/30'
-            }`}
-          >
-            <Icon className="w-5 h-5" />
-            <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
-          </button>
-        ))}
+            {([
+              { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
+              { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
+              { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
+              { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
+            ]).map(({ id, Icon, label, onClick }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={onClick}
+                className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
+                  activeTab === id ? 'text-indigo-600 bg-indigo-50 border border-indigo-150' : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50/30'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+              </button>
+            ))}
+          </>
+        ) : (
+          // ── 방 내부 내비게이션 (그룹 멤버 전용 폐쇄 기능): 채팅·지도·약속·만보기 ──
+          <>
+            <button
+              type="button"
+              onClick={exitToLobby}
+              className="flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl text-gray-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
+              title="로비로"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="text-[9px] font-medium">로비</span>
+            </button>
+
+            <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
+
+            {([
+              { id: 'chat' as const, Icon: MessageSquare, label: '채팅', onClick: () => setActiveTab('chat') },
+              { id: 'map' as const, Icon: Map, label: '지도', onClick: () => { setActiveTab('map'); setSelectedFriendId(null); } },
+              { id: 'appointments' as const, Icon: Calendar, label: '약속', onClick: () => setActiveTab('appointments') },
+              { id: 'pedometer' as const, Icon: Footprints, label: '만보기', onClick: () => setActiveTab('pedometer') },
+            ]).map(({ id, Icon, label, onClick }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={onClick}
+                className={`relative flex flex-col items-center justify-center gap-0.5 w-[56px] shrink-0 h-12 rounded-xl transition-all ${
+                  activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+                {id === 'appointments' && tempPromiseCoords && (
+                  <span className="absolute top-1.5 right-2 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                )}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {/* C. 오프라인 대기열 모달 */}
