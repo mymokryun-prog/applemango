@@ -2300,15 +2300,6 @@ export default function App() {
             >
               <BookOpen className="w-4 h-4 text-indigo-500" />
             </button>
-            {/* 설정 버튼 */}
-            <button
-              type="button"
-              onClick={() => setShowSettingsModal(true)}
-              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base border border-gray-200"
-              title="설정"
-            >
-              <Settings className="w-4 h-4 text-gray-500" />
-            </button>
             <button
               type="button"
               onClick={() => setPersonalPanelMode('memo')}
@@ -2316,6 +2307,15 @@ export default function App() {
               title="메모"
             >
               <StickyNote className="w-4 h-4 text-emerald-500" />
+            </button>
+            {/* 설정 버튼 (메모 오른쪽) */}
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition text-base border border-gray-200"
+              title="설정"
+            >
+              <Settings className="w-4 h-4 text-gray-500" />
             </button>
 
           </div>
@@ -2769,75 +2769,40 @@ export default function App() {
       {/* 3. 하단 내비게이션 — 2단계 구조 */}
       <div className="bg-white border-t border-gray-100 px-1.5 flex items-center justify-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
         {view === 'lobby' ? (
-          // ── 로비 내비게이션 (전체 공개 기능): 그룹방·연락처·알림 | 음악·맛집·책·게임방 ──
-          <>
+          // ── 로비 내비게이션: 10개 탭을 5×2 격자로 모두 표시 (스크롤 없이 한눈에) ──
+          <div className="grid grid-cols-5 gap-1 w-full max-w-[440px] mx-auto">
             {([
-              { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', onClick: () => setActiveTab('rooms') },
-              { id: 'contacts' as const, Icon: Contact, label: '연락처', onClick: () => setActiveTab('contacts') },
-              { id: 'notifications' as const, Icon: Bell, label: '알림', onClick: () => setActiveTab('notifications') },
-            ]).map(({ id, Icon, label, onClick }) => (
+              // 1행: 핵심 기능 (로즈) + 문화 시작
+              { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', activeCls: 'text-rose-500 bg-rose-50 border border-rose-100', onClick: () => setActiveTab('rooms') },
+              { id: 'contacts' as const, Icon: Contact, label: '연락처', activeCls: 'text-rose-500 bg-rose-50 border border-rose-100', onClick: () => setActiveTab('contacts') },
+              { id: 'notifications' as const, Icon: Bell, label: '알림', activeCls: 'text-rose-500 bg-rose-50 border border-rose-100', onClick: () => setActiveTab('notifications') },
+              { id: 'music' as const, Icon: Music, label: '음악', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('music') },
+              { id: 'restaurant' as const, Icon: Utensils, label: '맛집', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('restaurant') },
+              // 2행: 문화 + 공지 + 생활 도구(부모·학생)
+              { id: 'book' as const, Icon: BookOpen, label: '책', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('book') },
+              { id: 'game' as const, Icon: Gamepad2, label: '게임방', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('game') },
+              { id: 'lobbyNotice' as const, Icon: Megaphone, label: '공지', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('lobbyNotice') },
+              { id: 'parents' as const, Icon: TrendingUp, label: '부모', activeCls: 'text-emerald-600 bg-emerald-50 border border-emerald-100', onClick: () => setActiveTab('parents') },
+              { id: 'students' as const, Icon: GraduationCap, label: '학생', activeCls: 'text-sky-600 bg-sky-50 border border-sky-100', onClick: () => setActiveTab('students') },
+            ]).map(({ id, Icon, label, activeCls, onClick }) => (
               <button
                 key={id}
                 type="button"
                 onClick={onClick}
-                className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
-                  activeTab === id ? 'text-rose-500 bg-rose-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                className={`relative flex flex-col items-center justify-center gap-0.5 w-full h-11 rounded-xl transition-all ${
+                  activeTab === id ? activeCls : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
                 }`}
               >
-                <Icon className="w-5 h-5" />
-                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
+                <Icon className="w-[18px] h-[18px]" />
+                <span className={`text-[9px] leading-none ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
                 {id === 'notifications' && notifications.filter(n => !n.read).length > 0 && (
-                  <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                  <span className="absolute top-1 right-2 min-w-[15px] h-[15px] bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
                     {notifications.filter(n => !n.read).length}
                   </span>
                 )}
               </button>
             ))}
-
-            <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
-
-            {([
-              { id: 'music' as const, Icon: Music, label: '음악', onClick: () => setActiveTab('music') },
-              { id: 'restaurant' as const, Icon: Utensils, label: '맛집', onClick: () => setActiveTab('restaurant') },
-              { id: 'book' as const, Icon: BookOpen, label: '책', onClick: () => setActiveTab('book') },
-              { id: 'game' as const, Icon: Gamepad2, label: '게임방', onClick: () => setActiveTab('game') },
-              { id: 'lobbyNotice' as const, Icon: Megaphone, label: '공지', onClick: () => setActiveTab('lobbyNotice') },
-            ]).map(({ id, Icon, label, onClick }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={onClick}
-                className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
-                  activeTab === id ? 'text-indigo-600 bg-indigo-50 border border-indigo-150' : 'text-slate-400 hover:text-indigo-500 hover:bg-indigo-50/30'
-                }`}
-              >
-                <Icon className="w-5 h-5" />
-                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
-              </button>
-            ))}
-
-            {/* 구분선: 생활 도구 그룹 (부모·학생) */}
-            <div className="w-[1.5px] h-7 bg-gray-200 mx-1 shrink-0 self-center" />
-
-            {([
-              { id: 'parents' as const, Icon: TrendingUp, label: '부모', onClick: () => setActiveTab('parents') },
-              { id: 'students' as const, Icon: GraduationCap, label: '학생', onClick: () => setActiveTab('students') },
-            ]).map(({ id, Icon, label, onClick }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={onClick}
-                className={`relative flex flex-col items-center justify-center gap-0.5 w-[52px] shrink-0 h-12 rounded-xl transition-all ${
-                  activeTab === id
-                    ? (id === 'parents' ? 'text-emerald-600 bg-emerald-50 border border-emerald-100' : 'text-sky-600 bg-sky-50 border border-sky-100')
-                    : 'text-slate-400 hover:text-emerald-500 hover:bg-emerald-50/30'
-                }`}
-              >
-                <Icon className="w-5 h-5" />
-                <span className={`text-[9px] ${activeTab === id ? 'font-bold' : 'font-medium'}`}>{label}</span>
-              </button>
-            ))}
-          </>
+          </div>
         ) : (
           // ── 방 내부 내비게이션 (그룹 멤버 전용 폐쇄 기능): 채팅·지도·약속·만보기 ──
           <>
