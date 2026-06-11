@@ -266,6 +266,43 @@ const requireAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
   next();
 };
 
+// ============= CLOSED-ROOMS: 그룹방 폐쇄성(멤버 전용 접근) =============
+// 정책:
+// - 시스템 기본방(단짝·가족·직장·효도): 공용 데모 공간 — 접근 허용 (기존 UX 유지)
+// - 커스텀 그룹방: 방 멤버(비대기) 또는 방장만 접근 가능. 빈 방은 부트스트랩용으로 허용.
+// - 음악·맛집·책 등 로비 항목은 전체 공개(별도 가드 없음) — 의도된 설계.
+const SYSTEM_ROOM_IDS = ['room-friends', 'room-family', 'room-work', 'room-care'];
+
+function canAccessRoom(room: any, userId?: string): boolean {
+  if (!room) return false;
+  if (SYSTEM_ROOM_IDS.includes(room.id)) return true; // 공용 데모 방
+  if (!userId) return false;
+  if (room.ownerId === userId) return true;
+  const member = room.friends?.[userId];
+  if (member && !member.isPendingInvite) return true;
+  // 빈 방 부트스트랩은 방장 정보조차 없는 레거시 방에만 허용 (방장 있는 빈 방은 방장 전용)
+  if (!room.ownerId && Object.keys(room.friends || {}).length === 0) return true;
+  return false;
+}
+
+// roomId(query/body/params 순서로 탐색)에 대한 멤버 전용 가드
+const requireRoomMember = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const roomId =
+    (req.query?.roomId as string) ||
+    (req.body && (req.body.roomId as string)) ||
+    (req.params && (req.params.roomId as string)) ||
+    'room-friends';
+  const room = dbRooms[roomId];
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  const userId = req.user?.userId || (req.headers['x-user-id'] as string);
+  if (!canAccessRoom(room, userId)) {
+    return res.status(403).json({ error: '이 그룹방의 멤버만 접근할 수 있습니다.' });
+  }
+  next();
+};
+
 // 간단 인메모리 속도 제한 (무차별 대입/남용 방지)
 const rateBuckets: Record<string, { count: number; reset: number }> = {};
 const rateLimit = (maxPerMin: number) => (req: Request, res: Response, next: NextFunction) => {
@@ -2034,14 +2071,14 @@ async function startServer() {
   });
 
   // 1. Chat Endpoints
-  app.get('/api/chat', (req, res) => {
+  app.get('/api/chat', requireRoomMember, (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId] || dbRooms['room-friends'];
     res.json(room.messages);
   });
 
   // 채팅 이미지 업로드 — dataURL을 별도 저장(30일 만료)하고 메시지에 이미지 ID만 보관
-  app.post('/api/chat/image', tryCatch(async (req: AuthRequest, res: Response) => {
+  app.post('/api/chat/image', requireRoomMember, tryCatch(async (req: AuthRequest, res: Response) => {
     const { senderId, senderName, senderAvatar, senderColor, image, roomId } = req.body;
     if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
       return res.status(400).json({ error: 'invalid image' });
@@ -2306,7 +2343,7 @@ async function startServer() {
     res.json(item);
   });
 
-  app.post('/api/chat', validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {
+  app.post('/api/chat', requireRoomMember, validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {
     const { senderId, senderName, senderAvatar, senderColor, text, locationShared, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
@@ -2382,7 +2419,7 @@ async function startServer() {
     }));
 
   // 2. Friends/Locations Endpoints
-  app.get('/api/friends', (req: AuthRequest, res) => {
+  app.get('/api/friends', requireRoomMember, (req: AuthRequest, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId];
     if (!room) {
@@ -2530,13 +2567,13 @@ async function startServer() {
   });
 
   // 3. Appointments / Schedules Endpoints
-  app.get('/api/appointments', (req, res) => {
+  app.get('/api/appointments', requireRoomMember, (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId] || dbRooms['room-friends'];
     res.json(room.appointments);
   });
 
-  app.post('/api/appointments', validateRequest(AppointmentSchema), (req: AuthRequest, res: Response) => {
+  app.post('/api/appointments', requireRoomMember, validateRequest(AppointmentSchema), (req: AuthRequest, res: Response) => {
     const { title, placeName, lat, lng, datetime, creatorName, roomId } = req.body;
     const activeRoomId = roomId || 'room-friends';
     const room = dbRooms[activeRoomId] || dbRooms['room-friends'];
@@ -2711,7 +2748,7 @@ async function startServer() {
   const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori'; roomId: string; timestamp: number }> = {};
 
   // POST /api/games/invite
-  app.post('/api/games/invite', (req: AuthRequest, res: Response) => {
+  app.post('/api/games/invite', requireRoomMember, (req: AuthRequest, res: Response) => {
     const { from, to, game, roomId } = req.body;
     if (!from || !to || !game || !roomId) {
       return res.status(400).json({ error: 'Missing required parameters' });
@@ -2994,7 +3031,7 @@ async function startServer() {
   });
 
   // ③ 이동 타임라인 조회 (날짜별 동선 + 요약)
-  app.get('/api/friends/timeline', (req, res) => {
+  app.get('/api/friends/timeline', requireRoomMember, (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const friendId = req.query.friendId as string;
     const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
@@ -3021,7 +3058,7 @@ async function startServer() {
   });
 
   // ① 무활동 감지 설정 (케어·가족방 멤버별)
-  app.post('/api/care/watch', requireAuth, (req: AuthRequest, res: Response) => {
+  app.post('/api/care/watch', requireAuth, requireRoomMember, (req: AuthRequest, res: Response) => {
     const { roomId, friendId, enabled, thresholdHours } = req.body;
     const room = dbRooms[roomId || 'room-care'];
     const friend = room?.friends?.[friendId];
@@ -3036,7 +3073,7 @@ async function startServer() {
   });
 
   // ⑤ 가족 걸음 챌린지 설정·현황
-  app.post('/api/rooms/challenge', requireAuth, (req: AuthRequest, res: Response) => {
+  app.post('/api/rooms/challenge', requireAuth, requireRoomMember, (req: AuthRequest, res: Response) => {
     const { roomId, goalSteps } = req.body;
     const room = dbRooms[roomId];
     if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -3056,7 +3093,7 @@ async function startServer() {
     res.json({ success: true, challenge: room.challenge || null });
   });
 
-  app.get('/api/rooms/challenge', (req, res) => {
+  app.get('/api/rooms/challenge', requireRoomMember, (req, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId];
     if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -3077,7 +3114,7 @@ async function startServer() {
   });
 
   // ⑧ 디지털 효도 리포트 — 최근 7일 활동을 따뜻한 문장으로 요약
-  app.get('/api/care/report', requireAuth, async (req: AuthRequest, res: Response) => {
+  app.get('/api/care/report', requireAuth, requireRoomMember, async (req: AuthRequest, res: Response) => {
     const roomId = (req.query.roomId as string) || 'room-care';
     const friendId = req.query.friendId as string;
     const room = dbRooms[roomId];
@@ -3121,7 +3158,7 @@ async function startServer() {
   });
 
   // ⑧ 효도 리포트를 방 채팅으로 공유
-  app.post('/api/care/report/send', requireAuth, (req: AuthRequest, res: Response) => {
+  app.post('/api/care/report/send', requireAuth, requireRoomMember, (req: AuthRequest, res: Response) => {
     const { roomId, report } = req.body;
     const room = dbRooms[roomId];
     if (!room || !report) return res.status(400).json({ error: 'roomId and report are required' });
@@ -3138,7 +3175,7 @@ async function startServer() {
   });
 
   // ⑬ 오늘의 가족 질문 수동 발송(테스트·즉시 발송용)
-  app.post('/api/rooms/daily-question', requireAuth, (req: AuthRequest, res: Response) => {
+  app.post('/api/rooms/daily-question', requireAuth, requireRoomMember, (req: AuthRequest, res: Response) => {
     const { roomId } = req.body;
     const room = dbRooms[roomId];
     if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -3560,6 +3597,15 @@ async function startServer() {
           return callback({ error: 'roomId and userId required' });
         }
 
+        // CLOSED-ROOMS: 커스텀 그룹방은 멤버·방장만 실시간 채널 참여 가능 (위치 브로드캐스트 보호)
+        const targetRoom = dbRooms[roomId];
+        if (!targetRoom) {
+          return callback({ error: 'Room not found' });
+        }
+        if (!canAccessRoom(targetRoom, userId)) {
+          return callback({ error: '이 그룹방의 멤버만 입장할 수 있습니다.' });
+        }
+
         const previous = socketUsers[socket.id];
         if (previous && previous.roomId !== roomId) {
           socket.leave(`room-${previous.roomId}`);
@@ -3605,6 +3651,11 @@ async function startServer() {
     socket.on('send-message', ({ roomId, message }, callback) => {
       try {
         const room = dbRooms[roomId] || dbRooms['room-friends'];
+        // CLOSED-ROOMS: join-room을 통과한(멤버 검증된) 소켓만 메시지 전송 가능
+        const senderInfo = socketUsers[socket.id];
+        if (!senderInfo || senderInfo.roomId !== (room?.id || roomId)) {
+          return callback({ error: '방에 입장한 멤버만 메시지를 보낼 수 있습니다.' });
+        }
         const newMsg = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           ...message,
