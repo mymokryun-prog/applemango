@@ -365,7 +365,7 @@ interface DroneCrashGameProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -1238,11 +1238,11 @@ function DroneCrashGame({
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center p-3 gap-2">
+      <div className="flex-1 flex flex-col items-center justify-start p-1.5 gap-1.5">
         {/* Turn indicator */}
         {!gameOverMsg ? (
-          <div 
-            className="text-xs font-extrabold px-4 py-1.5 rounded-full border shadow-sm uppercase animate-pulse flex items-center gap-1.5"
+          <div
+            className="text-xs font-extrabold px-4 py-1 rounded-full border shadow-sm uppercase animate-pulse flex items-center gap-1.5"
             style={{ 
               backgroundColor: `${activeColor}15`, 
               borderColor: activeColor,
@@ -1269,11 +1269,11 @@ function DroneCrashGame({
           </div>
         )}
 
-        {/* Canvas Game Stage */}
-        <div className="relative w-full max-w-[850px] aspect-[18/9.5] bg-slate-950 rounded-2xl border-2 border-slate-800 shadow-[0_0_20px_rgba(56,189,248,0.1)] overflow-hidden">
-          <canvas 
-            ref={canvasRef} 
-            width={1800} 
+        {/* Canvas Game Stage — 화면 폭 전체 사용 (여백 최소화) */}
+        <div className="relative w-full max-w-[1100px] aspect-[18/9.5] bg-slate-950 rounded-xl border border-slate-800 shadow-[0_0_20px_rgba(56,189,248,0.1)] overflow-hidden">
+          <canvas
+            ref={canvasRef}
+            width={1800}
             height={950}
             className="w-full h-full block bg-slate-950"
           />
@@ -1298,81 +1298,130 @@ function DroneCrashGame({
           </div>
         </div>
 
-        {/* Compact Game Controls Panel */}
-        <div className="w-full max-w-[850px] bg-slate-900/90 border border-slate-800 rounded-xl p-2 px-3.5 flex flex-wrap items-center justify-between gap-2.5 text-[11px] font-sans">
-          
-          {/* Mobile Movement buttons */}
-          <div className="flex gap-1 shrink-0">
-            <button 
+        {/* 대형 조작 패널 — 각도/파워 슬라이더 + 미세조정(±) 버튼, 터치 친화 크기 */}
+        <div className="w-full max-w-[1100px] bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col gap-2.5 text-sm font-sans">
+
+          {/* Angle Row: 슬라이더 + ±5/±1 스텝퍼 */}
+          <div className="flex items-center gap-2 w-full">
+            <span className="text-xs font-black text-slate-300 shrink-0 w-9">각도</span>
+            <button
+              onClick={() => handleAngleChange(Math.max(0, angle - 5))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-sky-900 disabled:bg-slate-950 disabled:text-slate-700 w-11 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >-5</button>
+            <button
+              onClick={() => handleAngleChange(Math.max(0, angle - 1))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-sky-900 disabled:bg-slate-950 disabled:text-slate-700 w-9 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >-1</button>
+            <input
+              type="range"
+              min="0"
+              max="180"
+              value={angle}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              onChange={e => handleAngleChange(parseInt(e.target.value))}
+              className="flex-1 accent-sky-400 bg-slate-800 h-2.5 rounded-lg appearance-none cursor-pointer min-w-[60px]"
+            />
+            <button
+              onClick={() => handleAngleChange(Math.min(180, angle + 1))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-sky-900 disabled:bg-slate-950 disabled:text-slate-700 w-9 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >+1</button>
+            <button
+              onClick={() => handleAngleChange(Math.min(180, angle + 5))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-sky-900 disabled:bg-slate-950 disabled:text-slate-700 w-11 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >+5</button>
+            <span className="text-sm font-black text-sky-400 font-mono w-12 text-right leading-none shrink-0">{angle}°</span>
+          </div>
+
+          {/* Power Row: 슬라이더 + ±5/±1 스텝퍼 */}
+          <div className="flex items-center gap-2 w-full">
+            <span className="text-xs font-black text-slate-300 shrink-0 w-9">파워</span>
+            <button
+              onClick={() => handlePowerChange(Math.max(20, power - 5))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-amber-900 disabled:bg-slate-950 disabled:text-slate-700 w-11 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >-5</button>
+            <button
+              onClick={() => handlePowerChange(Math.max(20, power - 1))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-amber-900 disabled:bg-slate-950 disabled:text-slate-700 w-9 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >-1</button>
+            <input
+              type="range"
+              min="20"
+              max="150"
+              value={power}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              onChange={e => handlePowerChange(parseInt(e.target.value))}
+              className="flex-1 accent-amber-400 bg-slate-800 h-2.5 rounded-lg appearance-none cursor-pointer min-w-[60px]"
+            />
+            <button
+              onClick={() => handlePowerChange(Math.min(150, power + 1))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-amber-900 disabled:bg-slate-950 disabled:text-slate-700 w-9 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >+1</button>
+            <button
+              onClick={() => handlePowerChange(Math.min(150, power + 5))}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg}
+              className="bg-slate-800 hover:bg-slate-700 active:bg-amber-900 disabled:bg-slate-950 disabled:text-slate-700 w-11 h-10 rounded-xl border border-slate-700 text-sm font-black shrink-0 cursor-pointer"
+            >+5</button>
+            <span className="text-sm font-black text-amber-400 font-mono w-12 text-right leading-none shrink-0">{power}</span>
+          </div>
+
+          {/* 이동 + 발사 Row */}
+          <div className="flex items-center gap-2 w-full">
+            <button
               onClick={() => triggerMobileMove('left')}
               disabled={!isMyTurn || isFiringState}
-              className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-700 px-2 py-1.5 rounded-lg border border-slate-700 text-[10px] font-bold"
+              className="bg-slate-800 hover:bg-slate-700 active:bg-indigo-900 disabled:bg-slate-950 disabled:text-slate-700 flex-1 h-12 rounded-xl border border-slate-700 text-lg font-black cursor-pointer"
               title="왼쪽 이동"
-            >
-              ◀
-            </button>
-            <button 
+            >◀ 이동</button>
+            <button
               onClick={() => triggerMobileMove('right')}
               disabled={!isMyTurn || isFiringState}
-              className="bg-slate-800 hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-700 px-2 py-1.5 rounded-lg border border-slate-700 text-[10px] font-bold"
+              className="bg-slate-800 hover:bg-slate-700 active:bg-indigo-900 disabled:bg-slate-950 disabled:text-slate-700 flex-1 h-12 rounded-xl border border-slate-700 text-lg font-black cursor-pointer"
               title="오른쪽 이동"
+            >이동 ▶</button>
+            <button
+              onClick={fire}
+              disabled={!isMyTurn || isFiringState || !!gameOverMsg || bullets[myPlayerIdx] <= 0}
+              className="bg-gradient-to-r from-sky-400 to-indigo-600 hover:from-sky-500 hover:to-indigo-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 text-white font-black flex-[1.4] h-12 rounded-xl text-base transition shadow-lg cursor-pointer"
             >
-              ▶
+              🚀 발사!
+            </button>
+            <button
+              onClick={() => {
+                setMatchScores([0, 0]);
+                initGame();
+              }}
+              title="매치 리셋 및 새 게임"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 w-12 h-12 rounded-xl border border-slate-700 transition cursor-pointer flex items-center justify-center shrink-0"
+            >
+              <RotateCcw className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Stacked Angle & Power Controls */}
-          <div className="flex flex-col gap-1.5 flex-1 min-w-[150px] max-w-[280px]">
-            {/* Angle Control */}
-            <div className="flex items-center gap-1.5 w-full">
-              <span className="text-[9px] font-bold text-slate-400 shrink-0 w-7">각도</span>
-              <input 
-                type="range" 
-                min="0" 
-                max="180" 
-                value={angle} 
-                disabled={!isMyTurn || isFiringState || !!gameOverMsg}
-                onChange={e => handleAngleChange(parseInt(e.target.value))}
-                className="flex-1 accent-sky-400 bg-slate-800 h-1 rounded-lg appearance-none cursor-pointer"
-              />
-              <span className="text-[9px] font-bold text-sky-400 font-mono w-7 text-right leading-none">{angle}°</span>
-            </div>
-            {/* Power Control */}
-            <div className="flex items-center gap-1.5 w-full">
-              <span className="text-[9px] font-bold text-slate-400 shrink-0 w-7">파워</span>
-              <input 
-                type="range" 
-                min="20" 
-                max="150" 
-                value={power} 
-                disabled={!isMyTurn || isFiringState || !!gameOverMsg}
-                onChange={e => handlePowerChange(parseInt(e.target.value))}
-                className="flex-1 accent-sky-400 bg-slate-800 h-1 rounded-lg appearance-none cursor-pointer"
-              />
-              <span className="text-[9px] font-bold text-sky-400 font-mono w-7 text-right leading-none">{power}</span>
-            </div>
-          </div>
-
-          {/* Skill Selector & Terrain Selector */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Skill Selector */}
-            <div className="flex items-center gap-1.5 bg-slate-950/60 rounded-lg px-2 py-1 border border-slate-850">
-              <input 
-                type="checkbox" 
+          {/* 보조 옵션 Row: 도탄 스킬 + 지형 선택 */}
+          <div className="flex flex-wrap items-center gap-2 w-full">
+            <div className="flex items-center gap-1.5 bg-slate-950/60 rounded-lg px-2.5 py-2 border border-slate-850">
+              <input
+                type="checkbox"
                 id="bounceSkill"
                 checked={useSkill}
                 disabled={!isMyTurn || skillCount <= 0 || isFiringState || !!gameOverMsg}
                 onChange={e => handleSkillToggle(e.target.checked)}
-                className="w-3 h-3 rounded text-sky-600 focus:ring-sky-500 border-slate-700 bg-slate-800 cursor-pointer"
+                className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-700 bg-slate-800 cursor-pointer"
               />
-              <label htmlFor="bounceSkill" className="text-[9px] font-black text-sky-400 cursor-pointer select-none leading-none">
+              <label htmlFor="bounceSkill" className="text-[11px] font-black text-sky-400 cursor-pointer select-none leading-none">
                 🎳 도탄({skillCount})
               </label>
             </div>
 
-            {/* 5종 지형 선택기 */}
-            <div className="flex items-center gap-0.5 bg-slate-950/60 rounded-lg p-1 border border-slate-850 shrink-0">
-              <span className="text-[9px] font-bold text-slate-400 px-1">지형</span>
+            <div className="flex items-center gap-0.5 bg-slate-950/60 rounded-lg p-1 border border-slate-850 flex-1 min-w-0 overflow-x-auto">
+              <span className="text-[10px] font-bold text-slate-400 px-1 shrink-0">지형</span>
               {[
                 { idx: 0, label: '랜덤' },
                 { idx: 1, label: '평지' },
@@ -1399,7 +1448,7 @@ function DroneCrashGame({
                     }
                   }}
                   disabled={isFiringState || (isMultiplayer && multiplayerConfig.role !== 'p1')}
-                  className={`text-[9.5px] font-black px-1.5 py-0.5 rounded transition ${
+                  className={`text-[10.5px] font-black px-2 py-1.5 rounded-lg transition shrink-0 ${
                     selectedTerrainIdx === t.idx
                       ? 'bg-sky-500 text-white font-extrabold shadow-sm'
                       : 'text-slate-400 hover:bg-slate-800'
@@ -1410,35 +1459,14 @@ function DroneCrashGame({
               ))}
             </div>
           </div>
-
-          {/* Actions */}
-          <div className="flex gap-1 shrink-0">
-            <button
-              onClick={fire}
-              disabled={!isMyTurn || isFiringState || !!gameOverMsg || bullets[myPlayerIdx] <= 0}
-              className="bg-gradient-to-r from-sky-400 to-indigo-600 hover:from-sky-500 hover:to-indigo-700 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-600 text-white font-extrabold px-3.5 py-1.5 rounded-lg text-[10px] transition shadow-lg cursor-pointer"
-            >
-              <span>발사!</span>
-            </button>
-            <button
-              onClick={() => {
-                setMatchScores([0, 0]);
-                initGame();
-              }}
-              title="매치 리셋 및 새 게임"
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 p-1.5 rounded-lg border border-slate-700 transition cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-          </div>
         </div>
 
         {/* Operating Guide footer */}
-        <div className="w-full max-w-[850px] bg-slate-900/40 rounded-xl p-2.5 text-slate-400 text-[9px] leading-tight flex items-start gap-2">
+        <div className="w-full max-w-[1100px] bg-slate-900/40 rounded-xl p-2.5 text-slate-400 text-[10px] leading-tight flex items-start gap-2">
           <HelpCircle className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
           <div className="text-left">
-            <p>1. 내 드론 조작: 내 차례일 때 키보드 [방향키 좌/우] 또는 좌측 [◀/▶] 터치 단추를 이용해 위치를 조정할 수 있습니다.</p>
-            <p>2. 드론은 공중에 부유하므로, 피격 판정이 지면보다 조금 높습니다. 프로펠러 회전 및 상하 둥둥 모션을 확인하세요.</p>
+            <p>1. 조작: 내 차례에 [-5/-1/+1/+5]로 각도·파워를 정밀 조정하고 🚀 발사! 키보드 [←/→]로 드론 이동도 가능합니다.</p>
+            <p>2. 📱 휴대폰을 가로로 돌리면 전장이 약 2배 크게 보입니다. 드론은 공중 부유 중이라 피격 판정이 지면보다 약간 높습니다.</p>
           </div>
         </div>
       </div>
@@ -1451,9 +1479,21 @@ function DroneCrashGame({
 // ==========================================
 interface TetrisGameProps {
   onBack: () => void;
+  friends?: any[];
+  activeProfileId?: string;
+  activeRoomId?: string;
+  multiplayerConfig?: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
+  onResetMultiplayer?: () => void;
 }
 
-function TetrisGame({ onBack }: TetrisGameProps) {
+function TetrisGame({
+  onBack,
+  friends = [],
+  activeProfileId = '',
+  activeRoomId = '',
+  multiplayerConfig = null,
+  onResetMultiplayer,
+}: TetrisGameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const synthRef = useRef<TetrisAudioSynth | null>(null);
 
@@ -1462,6 +1502,71 @@ function TetrisGame({ onBack }: TetrisGameProps) {
   const [level, setLevel] = useState(1);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+
+  // ===== 2인 대전 모드 (좌: 내 보드 / 우: 상대 보드 실시간 미러링) =====
+  const isMultiplayer = !!multiplayerConfig && multiplayerConfig.game === 'tetris';
+  const opponent = isMultiplayer ? friends.find(f => f.id === multiplayerConfig!.opponentId) : null;
+  const opponentName = opponent ? (opponent.alias || opponent.name || '상대방') : '상대방';
+  const opponentCanvasRef = useRef<HTMLCanvasElement>(null);
+  const opponentGridRef = useRef<(string | null)[][]>(
+    Array(20).fill(null).map(() => Array(10).fill(null))
+  );
+  const opponentPieceRef = useRef<{ matrix: number[][]; x: number; y: number; color: string } | null>(null);
+  const [opponentScore, setOpponentScore] = useState(0);
+  const [opponentLines, setOpponentLines] = useState(0);
+  const [opponentGameOver, setOpponentGameOver] = useState(false);
+  // 상태 미러 ref — 주기 송신 시 stale closure 방지
+  const scoreRef = useRef(0);
+  const linesRef = useRef(0);
+  const isGameOverRef = useRef(false);
+  useEffect(() => { scoreRef.current = score; }, [score]);
+  useEffect(() => { linesRef.current = lines; }, [lines]);
+  useEffect(() => { isGameOverRef.current = isGameOver; }, [isGameOver]);
+
+  // 내 보드 상태를 상대에게 송신 (400ms 주기 + 즉시 이벤트는 게임오버 시)
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const socket = getLocationSocket();
+    const sendState = () => {
+      socket.emit('game-relay', {
+        roomId: activeRoomId,
+        payload: {
+          type: 'sync-tetris',
+          from: activeProfileId,
+          grid: gridRef.current,
+          piece: isGameOverRef.current ? null : {
+            matrix: currentPieceRef.current.matrix,
+            x: currentPieceRef.current.x,
+            y: currentPieceRef.current.y,
+            color: currentPieceRef.current.color,
+          },
+          score: scoreRef.current,
+          lines: linesRef.current,
+          gameOver: isGameOverRef.current,
+        },
+      });
+    };
+    const timer = setInterval(sendState, 400);
+    sendState();
+    return () => clearInterval(timer);
+  }, [isMultiplayer, activeRoomId, activeProfileId]);
+
+  // 상대 보드 상태 수신
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const socket = getLocationSocket();
+    const handleTetrisSync = (payload: any) => {
+      if (payload?.type !== 'sync-tetris') return;
+      if (payload.from !== multiplayerConfig!.opponentId) return;
+      if (Array.isArray(payload.grid)) opponentGridRef.current = payload.grid;
+      opponentPieceRef.current = payload.piece || null;
+      if (typeof payload.score === 'number') setOpponentScore(payload.score);
+      if (typeof payload.lines === 'number') setOpponentLines(payload.lines);
+      if (payload.gameOver) setOpponentGameOver(true);
+    };
+    socket.on('game-relayed', handleTetrisSync);
+    return () => { socket.off('game-relayed', handleTetrisSync); };
+  }, [isMultiplayer, multiplayerConfig?.opponentId]);
 
   const gridRef = useRef<(string | null)[][]>(
     Array(20).fill(null).map(() => Array(10).fill(null))
@@ -1830,6 +1935,42 @@ function TetrisGame({ onBack }: TetrisGameProps) {
         return p.alpha > 0;
       });
 
+      // ===== 2인 대전: 상대 보드 미러 렌더링 =====
+      const oppCanvas = opponentCanvasRef.current;
+      if (oppCanvas) {
+        const octx = oppCanvas.getContext('2d');
+        if (octx) {
+          octx.fillStyle = '#020617';
+          octx.fillRect(0, 0, oppCanvas.width, oppCanvas.height);
+          const oBlock = oppCanvas.height / 20;
+          octx.strokeStyle = 'rgba(30, 41, 59, 0.5)';
+          octx.lineWidth = 0.5;
+          for (let c = 0; c <= 10; c++) {
+            octx.beginPath();
+            octx.moveTo(c * oBlock, 0);
+            octx.lineTo(c * oBlock, oppCanvas.height);
+            octx.stroke();
+          }
+          const oGrid = opponentGridRef.current;
+          for (let r = 0; r < 20; r++) {
+            for (let c = 0; c < 10; c++) {
+              const color = oGrid?.[r]?.[c];
+              if (color) drawNeonBlock(octx, c * oBlock, r * oBlock, oBlock, color);
+            }
+          }
+          const oPiece = opponentPieceRef.current;
+          if (oPiece && Array.isArray(oPiece.matrix)) {
+            for (let r = 0; r < oPiece.matrix.length; r++) {
+              for (let c = 0; c < oPiece.matrix[r].length; c++) {
+                if (oPiece.matrix[r][c] !== 0) {
+                  drawNeonBlock(octx, (oPiece.x + c) * oBlock, (oPiece.y + r) * oBlock, oBlock, oPiece.color, true);
+                }
+              }
+            }
+          }
+        }
+      }
+
       animationFrameId = requestAnimationFrame(gameTick);
     };
 
@@ -1857,7 +1998,7 @@ function TetrisGame({ onBack }: TetrisGameProps) {
     <div className="flex flex-col h-full bg-slate-950 text-white select-none overflow-y-auto">
       <div className="bg-gradient-to-r from-slate-950 to-pink-950 px-4 py-3 flex items-center justify-between border-b border-pink-900 shadow-md shrink-0">
         <button
-          onClick={onBack}
+          onClick={() => { if (isMultiplayer) onResetMultiplayer?.(); onBack(); }}
           className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -1873,17 +2014,17 @@ function TetrisGame({ onBack }: TetrisGameProps) {
             {isMuted ? <Music2 className="w-4 h-4" /> : <Music className="w-4 h-4" />}
           </button>
           <div className="text-right">
-            <h2 className="text-xs font-black text-pink-400">네온 테트리스</h2>
-            <p className="text-[9px] text-pink-300">클래식 낙하형 블록 퍼즐</p>
+            <h2 className="text-xs font-black text-pink-400">{isMultiplayer ? `네온 테트리스 대전 — VS ${opponentName}` : '네온 테트리스'}</h2>
+            <p className="text-[9px] text-pink-300">{isMultiplayer ? '실시간 1:1 경쟁전 (먼저 쌓이면 패배!)' : '클래식 낙하형 블록 퍼즐'}</p>
           </div>
         </div>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center p-2.5 gap-2.5">
         {/* Score Panel on Top */}
-        <div className="flex flex-row gap-2 justify-center w-full max-w-[280px] font-sans">
+        <div className={`flex flex-row gap-2 justify-center w-full font-sans ${isMultiplayer ? 'max-w-[360px]' : 'max-w-[280px]'}`}>
           <div className="bg-slate-900/95 border border-slate-800 rounded-xl px-3 py-1.5 text-center flex-1">
-            <p className="text-[8px] text-slate-400 font-bold uppercase leading-none">SCORE</p>
+            <p className="text-[8px] text-slate-400 font-bold uppercase leading-none">{isMultiplayer ? '내 점수' : 'SCORE'}</p>
             <p className="text-xs font-black text-rose-400 font-mono mt-0.5 leading-none">{score}</p>
           </div>
           <div className="bg-slate-900/95 border border-slate-800 rounded-xl px-3 py-1.5 text-center flex-1">
@@ -1894,27 +2035,73 @@ function TetrisGame({ onBack }: TetrisGameProps) {
             <p className="text-[8px] text-slate-400 font-bold uppercase leading-none">LEVEL</p>
             <p className="text-xs font-black text-rose-400 font-mono mt-0.5 leading-none">{level}</p>
           </div>
+          {isMultiplayer && (
+            <div className="bg-indigo-950/95 border border-indigo-800 rounded-xl px-3 py-1.5 text-center flex-1">
+              <p className="text-[8px] text-indigo-300 font-bold uppercase leading-none truncate">{opponentName}</p>
+              <p className="text-xs font-black text-indigo-400 font-mono mt-0.5 leading-none">{opponentScore}</p>
+            </div>
+          )}
         </div>
 
-        {/* Canvas Board in Middle */}
-        <div className="relative border-4 border-slate-800 bg-slate-900 rounded-2xl overflow-hidden w-[210px] h-[400px] shrink-0 shadow-lg">
-          <canvas
-            ref={canvasRef}
-            width={300}
-            height={600}
-            className="w-full h-full block"
-          />
+        {/* 보드 영역: 솔로 = 단일 / 대전 = 좌(나) + 우(상대 실시간) */}
+        <div className="flex flex-row items-start justify-center gap-2.5 w-full">
+          {/* 내 보드 */}
+          <div className="flex flex-col items-center gap-1">
+            {isMultiplayer && <p className="text-[9px] font-black text-rose-400">🙋 나 ({lines}줄)</p>}
+            <div className={`relative border-4 border-slate-800 bg-slate-900 rounded-2xl overflow-hidden shrink-0 shadow-lg ${isMultiplayer ? 'w-[190px] h-[380px] border-rose-900' : 'w-[210px] h-[400px]'}`}>
+              <canvas
+                ref={canvasRef}
+                width={300}
+                height={600}
+                className="w-full h-full block"
+              />
 
-          {isGameOver && (
-            <div className="absolute inset-0 bg-slate-950/85 flex flex-col items-center justify-center p-4 text-center font-sans z-10">
-              <p className="text-rose-500 font-black text-lg tracking-wider">GAME OVER</p>
-              <p className="text-xs text-slate-400 mt-1">최종 점수: {score}점</p>
-              <button
-                onClick={resetGame}
-                className="mt-4 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
-              >
-                다시 시작
-              </button>
+              {isGameOver && (
+                <div className="absolute inset-0 bg-slate-950/85 flex flex-col items-center justify-center p-4 text-center font-sans z-10">
+                  <p className="text-rose-500 font-black text-lg tracking-wider">
+                    {isMultiplayer ? (opponentGameOver ? '무승부!' : '😢 패배...') : 'GAME OVER'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">최종 점수: {score}점</p>
+                  {!isMultiplayer && (
+                    <button
+                      onClick={resetGame}
+                      className="mt-4 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                    >
+                      다시 시작
+                    </button>
+                  )}
+                  {isMultiplayer && (
+                    <button
+                      onClick={() => { onResetMultiplayer?.(); onBack(); }}
+                      className="mt-4 bg-slate-800 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                    >
+                      게임 목록으로
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 상대 보드 (실시간 미러) */}
+          {isMultiplayer && (
+            <div className="flex flex-col items-center gap-1">
+              <p className="text-[9px] font-black text-indigo-400 truncate max-w-[140px]">⚔️ {opponentName} ({opponentLines}줄)</p>
+              <div className="relative border-4 border-indigo-900 bg-slate-900 rounded-2xl overflow-hidden w-[140px] h-[280px] shrink-0 shadow-lg">
+                <canvas
+                  ref={opponentCanvasRef}
+                  width={200}
+                  height={400}
+                  className="w-full h-full block"
+                />
+                {opponentGameOver && (
+                  <div className="absolute inset-0 bg-slate-950/85 flex flex-col items-center justify-center p-2 text-center font-sans z-10">
+                    <p className="text-indigo-400 font-black text-sm tracking-wider">상대 탈락!</p>
+                    {!isGameOver && <p className="text-emerald-400 font-black text-base mt-1">🏆 승리!</p>}
+                  </div>
+                )}
+              </div>
+              <p className="text-[8px] text-slate-500">상대 화면 실시간 공유 중</p>
             </div>
           )}
         </div>
@@ -1970,7 +2157,7 @@ interface YutNoriGameProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -2817,7 +3004,7 @@ interface GamePanelProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -2877,7 +3064,7 @@ export default function GamePanel({
     }
   }, [multiplayerConfig]);
 
-  const sendGameInvite = async (friendId: string, gameType: 'drone_battle' | 'yut_nori') => {
+  const sendGameInvite = async (friendId: string, gameType: 'drone_battle' | 'yut_nori' | 'tetris') => {
     const socket = getLocationSocket();
     socket.emit('game-relay', {
       roomId: activeRoomId,
@@ -3009,13 +3196,19 @@ export default function GamePanel({
                       onClick={() => sendGameInvite(f.id, 'drone_battle')}
                       className="bg-indigo-650 hover:bg-indigo-700 text-white text-[9px] font-black px-2 py-1 rounded-lg transition cursor-pointer"
                     >
-                      🛸 드론초대
+                      🛸 드론
                     </button>
                     <button
                       onClick={() => sendGameInvite(f.id, 'yut_nori')}
                       className="bg-amber-600 hover:bg-amber-700 text-slate-950 text-[9px] font-black px-2 py-1 rounded-lg transition cursor-pointer"
                     >
-                      🎲 윷놀이초대
+                      🎲 윷놀이
+                    </button>
+                    <button
+                      onClick={() => sendGameInvite(f.id, 'tetris')}
+                      className="bg-pink-600 hover:bg-pink-700 text-white text-[9px] font-black px-2 py-1 rounded-lg transition cursor-pointer"
+                    >
+                      🧱 테트리스
                     </button>
                   </div>
                 </div>
@@ -3053,5 +3246,14 @@ export default function GamePanel({
     );
   }
 
-  return <TetrisGame onBack={() => setActiveGame(null)} />;
+  return (
+    <TetrisGame
+      onBack={() => setActiveGame(null)}
+      friends={friends}
+      activeProfileId={activeProfileId}
+      activeRoomId={activeRoomId}
+      multiplayerConfig={multiplayerConfig}
+      onResetMultiplayer={onResetMultiplayer}
+    />
+  );
 }

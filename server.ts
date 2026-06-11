@@ -2745,7 +2745,7 @@ async function startServer() {
   });
 
   // 1:1 Game Match Requests global registry
-  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori'; roomId: string; timestamp: number }> = {};
+  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori' | 'tetris'; roomId: string; timestamp: number }> = {};
 
   // POST /api/games/invite
   app.post('/api/games/invite', requireRoomMember, (req: AuthRequest, res: Response) => {
@@ -2765,7 +2765,7 @@ async function startServer() {
 
     const senderProfile = findUserProfile(from);
     const senderName = senderProfile ? (senderProfile.alias || senderProfile.realName || senderProfile.name) : '친구';
-    const gameLabel = game === 'drone_battle' ? '드론 전쟁' : '윷놀이';
+    const gameLabel = game === 'drone_battle' ? '드론 전쟁' : game === 'tetris' ? '테트리스 대전' : '윷놀이';
 
     // Add notification to room-friends for global exposure
     const defaultRoom = dbRooms['room-friends'] || dbRooms[roomId];

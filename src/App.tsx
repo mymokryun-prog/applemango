@@ -166,10 +166,10 @@ export default function App() {
   const [activeGameInvite, setActiveGameInvite] = useState<{
     from: string;
     fromName: string;
-    game: 'drone_battle' | 'yut_nori';
+    game: 'drone_battle' | 'yut_nori' | 'tetris';
   } | null>(null);
   const [multiplayerGameConfig, setMultiplayerGameConfig] = useState<{
-    game: 'drone_battle' | 'yut_nori';
+    game: 'drone_battle' | 'yut_nori' | 'tetris';
     opponentId: string;
     role: 'p1' | 'p2';
   } | null>(null);
@@ -3482,7 +3482,7 @@ export default function App() {
             <p className="text-xs text-slate-300 mt-2 leading-relaxed">
               <span className="font-bold text-white">[{activeGameInvite.fromName}]</span> 님이 <br />
               <span className="font-extrabold text-yellow-400">
-                {activeGameInvite.game === 'drone_battle' ? '드론 전쟁 🛸' : '전통 윷놀이 🎲'}
+                {activeGameInvite.game === 'drone_battle' ? '드론 전쟁 🛸' : activeGameInvite.game === 'tetris' ? '테트리스 대전 🧱' : '전통 윷놀이 🎲'}
               </span>
               에 초대하셨습니다!
             </p>
