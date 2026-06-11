@@ -43,6 +43,7 @@ import { getLocationSocket } from './realtime/socketClient';
 // 앱 로고 — ApmtLogo를 OnboardingScreen에서 재사용
 export { ApmtLogo as AppleMangoLogo };
 
+type TetrisTerrainKey = 'classic' | 'center_well' | 'side_walls' | 'stairway';
 
 export default function App() {
   // 온보딩 상태
@@ -167,11 +168,14 @@ export default function App() {
     from: string;
     fromName: string;
     game: 'drone_battle' | 'yut_nori' | 'tetris';
+    tetrisTerrain?: TetrisTerrainKey;
   } | null>(null);
   const [multiplayerGameConfig, setMultiplayerGameConfig] = useState<{
     game: 'drone_battle' | 'yut_nori' | 'tetris';
     opponentId: string;
     role: 'p1' | 'p2';
+    opponentName?: string;
+    tetrisTerrain?: TetrisTerrainKey;
   } | null>(null);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -537,6 +541,9 @@ export default function App() {
               ...(payload.speed !== undefined ? { speed: payload.speed } : {}),
               ...(payload.heading !== undefined ? { heading: payload.heading } : {}),
               ...(payload.battery !== undefined ? { battery: payload.battery } : {}),
+              ...(payload.name !== undefined ? { name: payload.name } : {}),
+              ...(payload.avatar !== undefined ? { avatar: payload.avatar } : {}),
+              ...(payload.color !== undefined ? { color: payload.color } : {}),
               ...(payload.heartRate !== undefined ? { heartRate: payload.heartRate } : {}),
               ...(payload.route !== undefined ? { route: payload.route } : {}),
               ...(payload.routeIndex !== undefined ? { routeIndex: payload.routeIndex } : {}),
@@ -561,7 +568,8 @@ export default function App() {
   } = useRealtimeLocation({
     roomId: activeRoomId,
     userId: activeProfileId,
-    enabled: !showOnboarding && shareLocation,
+    enabled: !showOnboarding,
+    shareLocation,
     privacyMode: locationPrivacyMode,
     onLocationUpdated: handleSocketLocationUpdated,
   });
@@ -874,14 +882,17 @@ export default function App() {
         const sender = friends.find(f => f.id === payload.from) || { name: '친구' };
         setActiveGameInvite({
           from: payload.from,
-          fromName: sender.alias || sender.name || '친구',
-          game: payload.game
+          fromName: payload.fromName || sender.alias || sender.name || '친구',
+          game: payload.game,
+          tetrisTerrain: payload.tetrisTerrain
         });
       } else if (payload.type === 'accept' && payload.to === activeProfileId) {
         setMultiplayerGameConfig({
           game: payload.game,
           opponentId: payload.from,
-          role: 'p1'
+          role: 'p1',
+          opponentName: payload.fromName,
+          tetrisTerrain: payload.tetrisTerrain
         });
         setActiveTab('game');
       } else if (payload.type === 'decline' && payload.to === activeProfileId) {
@@ -1181,7 +1192,9 @@ export default function App() {
           setMultiplayerGameConfig({
             game: data.game,
             opponentId: data.opponentId,
-            role: 'p2'
+            role: 'p2',
+            opponentName: data.opponentName,
+            tetrisTerrain: data.tetrisTerrain
           });
           setActiveTab('game');
         }
@@ -3568,8 +3581,10 @@ export default function App() {
                     payload: {
                       type: 'decline',
                       from: activeProfileId,
+                      fromName: regAlias || regRealName || activeProfile.name || '나',
                       to: activeGameInvite.from,
-                      game: activeGameInvite.game
+                      game: activeGameInvite.game,
+                      tetrisTerrain: activeGameInvite.tetrisTerrain
                     }
                   });
                   setActiveGameInvite(null);
@@ -3587,14 +3602,18 @@ export default function App() {
                     payload: {
                       type: 'accept',
                       from: activeProfileId,
+                      fromName: regAlias || regRealName || activeProfile.name || '나',
                       to: activeGameInvite.from,
-                      game: activeGameInvite.game
+                      game: activeGameInvite.game,
+                      tetrisTerrain: activeGameInvite.tetrisTerrain
                     }
                   });
                   setMultiplayerGameConfig({
                     game: activeGameInvite.game,
                     opponentId: activeGameInvite.from,
-                    role: 'p2'
+                    role: 'p2',
+                    opponentName: activeGameInvite.fromName,
+                    tetrisTerrain: activeGameInvite.tetrisTerrain
                   });
                   setActiveGameInvite(null);
                   setActiveTab('game');

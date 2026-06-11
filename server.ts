@@ -1015,6 +1015,15 @@ function applyFriendLocationUpdate(
   if (!room?.friends[friendId]) return null;
 
   const friend = room.friends[friendId];
+  const profile = dbUserProfiles[friendId];
+  if (profile) {
+    friend.name = profile.alias || profile.realName || profile.name || friend.name;
+    friend.realName = profile.realName || friend.realName;
+    friend.alias = profile.alias || friend.alias;
+    friend.avatar = profile.avatar || friend.avatar;
+    friend.color = profile.color || friend.color;
+    friend.phone = profile.phone || friend.phone;
+  }
   const now = Date.now();
   const posKey = `${roomId}:${friendId}`;
   const prev = lastGpsPosition[posKey];
@@ -1072,6 +1081,9 @@ function applyFriendLocationUpdate(
     speed: friend.speed,
     heading: friend.heading,
     battery: friend.battery,
+    name: friend.name,
+    avatar: friend.avatar,
+    color: friend.color,
     heartRate: friend.heartRate,
     route: friend.route,
     routeIndex: friend.routeIndex,
@@ -2745,11 +2757,11 @@ async function startServer() {
   });
 
   // 1:1 Game Match Requests global registry
-  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori' | 'tetris'; roomId: string; timestamp: number }> = {};
+  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori' | 'tetris'; roomId: string; timestamp: number; tetrisTerrain?: string }> = {};
 
   // POST /api/games/invite
   app.post('/api/games/invite', requireRoomMember, (req: AuthRequest, res: Response) => {
-    const { from, to, game, roomId } = req.body;
+    const { from, to, game, roomId, tetrisTerrain } = req.body;
     if (!from || !to || !game || !roomId) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
@@ -2760,7 +2772,8 @@ async function startServer() {
       to,
       game,
       roomId,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      tetrisTerrain
     };
 
     const senderProfile = findUserProfile(from);
@@ -2788,8 +2801,10 @@ async function startServer() {
     broadcastToRoom(roomId, 'game-relayed', {
       type: 'invite',
       from,
+      fromName: senderName,
       to,
-      game
+      game,
+      tetrisTerrain
     });
 
     res.json({ success: true, inviteId });
@@ -2807,14 +2822,20 @@ async function startServer() {
       return res.status(404).json({ error: 'Game invitation not found or expired' });
     }
 
-    const { from: senderId, to: receiverId, game, roomId } = invite;
+    const { from: senderId, to: receiverId, game, roomId, tetrisTerrain } = invite;
+    const senderProfile = findUserProfile(senderId);
+    const senderName = senderProfile ? (senderProfile.alias || senderProfile.realName || senderProfile.name) : '친구';
+    const receiverProfile = findUserProfile(receiverId);
+    const receiverName = receiverProfile ? (receiverProfile.alias || receiverProfile.realName || receiverProfile.name) : '친구';
 
     // Trigger Socket.IO real-time match accept broadcast to transition both clients
     broadcastToRoom(roomId, 'game-relayed', {
       type: 'accept',
       from: receiverId, // The receiver accepted it
+      fromName: receiverName,
       to: senderId,     // The sender should match
-      game
+      game,
+      tetrisTerrain
     });
 
     // Remove the notification from lists
@@ -2829,7 +2850,9 @@ async function startServer() {
       success: true,
       game,
       opponentId: senderId,
-      role: 'p2' // The receiver acts as Player 2
+      opponentName: senderName,
+      role: 'p2', // The receiver acts as Player 2
+      tetrisTerrain
     });
   });
 

@@ -68,6 +68,7 @@ export interface UseRealtimeLocationOptions {
   roomId: string;
   userId: string;
   enabled?: boolean;
+  shareLocation?: boolean;
   privacyMode?: 'precise' | 'approximate';
   onLocationUpdated?: (payload: LocationUpdatedPayload) => void;
 }
@@ -103,6 +104,7 @@ export function useRealtimeLocation({
   roomId,
   userId,
   enabled = true,
+  shareLocation = true,
   privacyMode = 'precise',
   onLocationUpdated,
 }: UseRealtimeLocationOptions): UseRealtimeLocationResult {
@@ -155,7 +157,7 @@ export function useRealtimeLocation({
   const emitLocation = useCallback(
     (lat: number, lng: number, accuracy?: number) => {
       const socket = getLocationSocket();
-      if (!roomId || !userId) return;
+      if (!roomId || !userId || !shareLocation) return;
       const shared = applyLocationPrivacy(lat, lng);
       // 웹: 소켓 필수 / 네이티브: 소켓 끊김 시 HTTP 폴백 허용
       if (!socket.connected && !isNativeApp()) return;
@@ -196,7 +198,7 @@ export function useRealtimeLocation({
         }
       );
     },
-    [roomId, userId, applyLocationPrivacy]
+    [roomId, userId, shareLocation, applyLocationPrivacy]
   );
 
   const handlePosition = useCallback(

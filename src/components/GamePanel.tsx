@@ -1542,7 +1542,7 @@ interface TetrisGameProps {
   friends?: any[];
   activeProfileId?: string;
   activeRoomId?: string;
-  multiplayerConfig?: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig?: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
   onResetMultiplayer?: () => void;
 }
 
@@ -1566,7 +1566,9 @@ function TetrisGame({
   // ===== 2인 대전 모드 (좌: 내 보드 / 우: 상대 보드 실시간 미러링) =====
   const isMultiplayer = !!multiplayerConfig && multiplayerConfig.game === 'tetris';
   const opponent = isMultiplayer ? friends.find(f => f.id === multiplayerConfig!.opponentId) : null;
-  const opponentName = opponent ? (opponent.alias || opponent.name || '상대방') : '상대방';
+  const opponentName = multiplayerConfig?.opponentName || (opponent ? (opponent.alias || opponent.name || '상대방') : '상대방');
+  const tetrisTerrain = multiplayerConfig?.tetrisTerrain || 'classic';
+  const tetrisTerrainLabel = TETRIS_TERRAINS.find(t => t.key === tetrisTerrain)?.label || '클래식';
 
   // ③ 걸음×게임 크로스: 상대보다 많이 걸은 사람(1,000보 이상)은 낙하 속도 15% 느려지는 혜택
   const mySteps = stepsTodayOf(friends, activeProfileId);
@@ -1596,10 +1598,14 @@ function TetrisGame({
   const [opponentScore, setOpponentScore] = useState(0);
   const [opponentLines, setOpponentLines] = useState(0);
   const [opponentGameOver, setOpponentGameOver] = useState(false);
+  const [mirrorTick, setMirrorTick] = useState(0);
+  const [matchResult, setMatchResult] = useState<'won' | 'lost' | 'draw' | null>(null);
   // 상태 미러 ref — 주기 송신 시 stale closure 방지
   const scoreRef = useRef(0);
   const linesRef = useRef(0);
   const isGameOverRef = useRef(false);
+  const matchStartedAtRef = useRef(Date.now());
+  const mySurvivalMsRef = useRef<number | null>(null);
   useEffect(() => { scoreRef.current = score; }, [score]);
   useEffect(() => { linesRef.current = lines; }, [lines]);
   useEffect(() => { isGameOverRef.current = isGameOver; }, [isGameOver]);
@@ -1624,6 +1630,9 @@ function TetrisGame({
           score: scoreRef.current,
           lines: linesRef.current,
           gameOver: isGameOverRef.current,
+          survivalMs: isGameOverRef.current ? (mySurvivalMsRef.current || Date.now() - matchStartedAtRef.current) : Date.now() - matchStartedAtRef.current,
+          terrain: tetrisTerrain,
+          playerName: friendDisplayName(friends, activeProfileId, '나'),
           elder: elderModeRef.current,
         },
       });
@@ -1631,7 +1640,7 @@ function TetrisGame({
     const timer = setInterval(sendState, 400);
     sendState();
     return () => clearInterval(timer);
-  }, [isMultiplayer, activeRoomId, activeProfileId]);
+  }, [isMultiplayer, activeRoomId, activeProfileId, tetrisTerrain, friends]);
 
   // 상대 보드 상태 수신
   useEffect(() => {
@@ -1652,25 +1661,34 @@ function TetrisGame({
       if (typeof payload.score === 'number') setOpponentScore(payload.score);
       if (typeof payload.lines === 'number') setOpponentLines(payload.lines);
       setOpponentElder(!!payload.elder);
+      setMirrorTick(t => t + 1);
       if (payload.gameOver) {
         setOpponentGameOver(true);
-        // ① 상대 탈락 + 나는 생존 → 내가 승자 → 리그 결과 신고 (1회)
-        if (!isGameOverRef.current && !reportedRef.current) {
-          reportedRef.current = true;
-          reportLeagueResult(
-            activeRoomId, 'tetris',
-            activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
-            multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
-          );
+        const opponentSurvivalMs = Number(payload.survivalMs) || 0;
+        const mySurvivalMs = mySurvivalMsRef.current || (Date.now() - matchStartedAtRef.current);
+        if (!isGameOverRef.current || mySurvivalMs > opponentSurvivalMs) {
+          setMatchResult('won');
+          if (!reportedRef.current) {
+            reportedRef.current = true;
+            reportLeagueResult(
+              activeRoomId, 'tetris',
+              activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+              multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+            );
+          }
+        } else if (mySurvivalMs < opponentSurvivalMs) {
+          setMatchResult('lost');
+        } else {
+          setMatchResult('draw');
         }
       }
     };
     socket.on('game-relayed', handleTetrisSync);
     return () => { socket.off('game-relayed', handleTetrisSync); };
-  }, [isMultiplayer, multiplayerConfig?.opponentId]);
+  }, [isMultiplayer, multiplayerConfig?.opponentId, activeRoomId, activeProfileId, friends]);
 
   const gridRef = useRef<(string | null)[][]>(
-    Array(20).fill(null).map(() => Array(10).fill(null))
+    createTetrisGrid(tetrisTerrain)
   );
 
   const currentPieceRef = useRef<{
@@ -1721,6 +1739,8 @@ function TetrisGame({
     };
 
     if (checkCollision(matrix, newPiece.x, newPiece.y)) {
+      if (!mySurvivalMsRef.current) mySurvivalMsRef.current = Date.now() - matchStartedAtRef.current;
+      if (isMultiplayer && !matchResult) setMatchResult(opponentGameOver ? 'draw' : 'lost');
       setIsGameOver(true);
       synthRef.current?.playGameOver();
       synthRef.current?.stop();
@@ -1762,7 +1782,7 @@ function TetrisGame({
   };
 
   const handleRotate = () => {
-    if (isGameOver) return;
+    if (isGameOver || matchResult === 'won' || matchResult === 'draw') return;
     const piece = currentPieceRef.current;
     const rotated = rotateMatrix(piece.matrix);
     if (!checkCollision(rotated, piece.x, piece.y)) {
@@ -1777,7 +1797,7 @@ function TetrisGame({
   };
 
   const handleMoveLeft = () => {
-    if (isGameOver) return;
+    if (isGameOver || matchResult === 'won' || matchResult === 'draw') return;
     const piece = currentPieceRef.current;
     if (!checkCollision(piece.matrix, piece.x - 1, piece.y)) {
       piece.x -= 1;
@@ -1785,7 +1805,7 @@ function TetrisGame({
   };
 
   const handleMoveRight = () => {
-    if (isGameOver) return;
+    if (isGameOver || matchResult === 'won' || matchResult === 'draw') return;
     const piece = currentPieceRef.current;
     if (!checkCollision(piece.matrix, piece.x + 1, piece.y)) {
       piece.x += 1;
@@ -1793,7 +1813,7 @@ function TetrisGame({
   };
 
   const handleSoftDrop = () => {
-    if (isGameOver) return;
+    if (isGameOver || matchResult === 'won' || matchResult === 'draw') return;
     const piece = currentPieceRef.current;
     if (!checkCollision(piece.matrix, piece.x, piece.y + 1)) {
       piece.y += 1;
@@ -1804,7 +1824,7 @@ function TetrisGame({
   };
 
   const handleHardDrop = () => {
-    if (isGameOver) return;
+    if (isGameOver || matchResult === 'won' || matchResult === 'draw') return;
     const piece = currentPieceRef.current;
     let dropDist = 0;
     while (!checkCollision(piece.matrix, piece.x, piece.y + 1)) {
@@ -1886,12 +1906,21 @@ function TetrisGame({
   };
 
   const resetGame = () => {
-    gridRef.current = Array(20).fill(null).map(() => Array(10).fill(null));
+    gridRef.current = createTetrisGrid(tetrisTerrain);
     particlesRef.current = [];
+    opponentGridRef.current = createTetrisGrid('classic');
+    opponentPieceRef.current = null;
     setScore(0);
     setLines(0);
     setLevel(1);
     setIsGameOver(false);
+    setOpponentGameOver(false);
+    setOpponentScore(0);
+    setOpponentLines(0);
+    setMatchResult(null);
+    reportedRef.current = false;
+    mySurvivalMsRef.current = null;
+    matchStartedAtRef.current = Date.now();
     
     if (synthRef.current) {
       synthRef.current.stop();
@@ -1902,7 +1931,7 @@ function TetrisGame({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isGameOver) return;
+      if (isGameOver || matchResult === 'won' || matchResult === 'draw') return;
       switch (e.key) {
         case 'ArrowLeft':
           handleMoveLeft();
@@ -1930,7 +1959,7 @@ function TetrisGame({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isGameOver]);
+  }, [isGameOver, matchResult]);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -1945,7 +1974,7 @@ function TetrisGame({
       const baseDelay = Math.max(80, 1000 - (level - 1) * 90);
       const dropDelay = baseDelay * (elderModeRef.current ? 1.6 : 1) * (hasStepAdvantage ? 1.15 : 1);
       
-      if (!isGameOver) {
+      if (!isGameOver && matchResult !== 'won' && matchResult !== 'draw') {
         const elapsed = timestamp - lastDropTimeRef.current;
         if (elapsed > dropDelay) {
           handleSoftDrop();
@@ -2095,7 +2124,7 @@ function TetrisGame({
 
     animationFrameId = requestAnimationFrame(gameTick);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [level, isGameOver]);
+  }, [level, isGameOver, mirrorTick, matchResult]);
 
   return (
     <div className="flex flex-col h-full bg-slate-950 text-white select-none overflow-y-auto">
@@ -2130,7 +2159,7 @@ function TetrisGame({
             <h2 className="text-xs font-black text-pink-400">{isMultiplayer ? `네온 테트리스 대전 — VS ${opponentName}` : '네온 테트리스'}</h2>
             <p className="text-[9px] text-pink-300">
               {isMultiplayer
-                ? (hasStepAdvantage ? '👣 걸음왕 혜택: 낙하 15% 느림!' : '실시간 1:1 경쟁전 (먼저 쌓이면 패배!)')
+                ? `${hasStepAdvantage ? '👣 걸음왕 혜택 · ' : ''}${tetrisTerrainLabel} 지형 · 더 오래 버티면 승리`
                 : '클래식 낙하형 블록 퍼즐'}
             </p>
           </div>
@@ -2184,12 +2213,22 @@ function TetrisGame({
                 className="w-full h-full block"
               />
 
-              {isGameOver && (
+              {(isGameOver || matchResult === 'won' || matchResult === 'draw') && (
                 <div className="absolute inset-0 bg-slate-950/85 flex flex-col items-center justify-center p-4 text-center font-sans z-10">
-                  <p className="text-rose-500 font-black text-lg tracking-wider">
-                    {isMultiplayer ? (opponentGameOver ? '무승부!' : '😢 패배...') : 'GAME OVER'}
+                  <p className={`font-black text-lg tracking-wider ${matchResult === 'won' ? 'text-emerald-400' : matchResult === 'draw' ? 'text-amber-300' : 'text-rose-500'}`}>
+                    {isMultiplayer
+                      ? matchResult === 'won'
+                        ? '🏆 승리!'
+                        : matchResult === 'draw'
+                          ? '무승부!'
+                          : '😢 패배...'
+                      : 'GAME OVER'}
                   </p>
-                  <p className="text-xs text-slate-400 mt-1">최종 점수: {score}점</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {isMultiplayer
+                      ? `버틴 시간: ${Math.round((mySurvivalMsRef.current || Date.now() - matchStartedAtRef.current) / 1000)}초 · 점수 ${score}점`
+                      : `최종 점수: ${score}점`}
+                  </p>
                   {!isMultiplayer && (
                     <button
                       onClick={resetGame}
@@ -2285,7 +2324,7 @@ interface YutNoriGameProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -2466,6 +2505,17 @@ function YutNoriGame({
   const isMultiplayer = !!multiplayerConfig;
   const myPlayerNum = isMultiplayer ? (multiplayerConfig.role === 'p1' ? 1 : 2) : 1;
   const isMyTurn = !yutWinner && (!isMultiplayer || yutTurn === myPlayerNum);
+  const yutP1Name = isMultiplayer
+      ? (multiplayerConfig.role === 'p1'
+      ? friendDisplayName(friends, activeProfileId, '나')
+      : (multiplayerConfig.opponentName || friendDisplayName(friends, multiplayerConfig.opponentId, '상대')))
+    : friendDisplayName(friends, activeProfileId, 'Player 1');
+  const yutP2Name = isMultiplayer
+    ? (multiplayerConfig.role === 'p2'
+      ? friendDisplayName(friends, activeProfileId, '나')
+      : (multiplayerConfig.opponentName || friendDisplayName(friends, multiplayerConfig.opponentId, '상대')))
+    : friendDisplayName(friends, friends.find(f => f.id !== activeProfileId)?.id || '', 'Player 2');
+  const yutTurnName = yutTurn === 1 ? yutP1Name : yutP2Name;
 
   const resetGame = () => {
     setYutTurn(1);
@@ -2971,8 +3021,10 @@ function YutNoriGame({
           <span>게임 목록</span>
         </button>
         <div className="text-right">
-          <h2 className="text-xs font-black text-amber-400">전통 윷놀이 (Yut Nori)</h2>
-          <p className="text-[9px] text-slate-400">동네 안심 윷 던지기 퍼즐</p>
+          <h2 className="text-xs font-black text-amber-400">
+            {isMultiplayer ? `윷놀이 대전 — ${yutP1Name} vs ${yutP2Name}` : '전통 윷놀이 (Yut Nori)'}
+          </h2>
+          <p className="text-[9px] text-slate-400">{isMultiplayer ? `${yutTurnName} 차례` : '동네 안심 윷 던지기 퍼즐'}</p>
         </div>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center p-2 gap-2">
@@ -2982,7 +3034,7 @@ function YutNoriGame({
               className="text-[10px] font-extrabold px-3 py-1 rounded-full border shadow-sm uppercase animate-pulse flex items-center gap-1"
               style={{ backgroundColor: yutTurn === 1 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)', borderColor: yutTurn === 1 ? '#3b82f6' : '#ef4444', color: yutTurn === 1 ? '#60a5fa' : '#f87171' }}
             >
-              <span>{yutTurn === 1 ? 'Player 1' : 'Player 2'} 차례! {isMultiplayer && (isMyTurn ? '(내 차례)' : '(대기)')}</span>
+              <span>{yutTurnName} 차례! {isMultiplayer && (isMyTurn ? '(내 차례)' : '(대기)')}</span>
             </div>
             {thrownResult && (
               <span className="text-[10px] bg-amber-500 text-slate-950 font-black px-2.5 py-0.5 rounded-full animate-bounce">결과: {thrownResult}</span>
@@ -2990,7 +3042,7 @@ function YutNoriGame({
           </div>
         ) : (
           <div className="bg-emerald-950/90 border border-emerald-500 text-emerald-300 font-black px-6 py-2 rounded-xl text-center shadow-lg text-xs">
-            <p>🏆 Player {yutWinner} 승리! 🏆</p>
+            <p>🏆 {yutWinner === 1 ? yutP1Name : yutP2Name} 승리! 🏆</p>
           </div>
         )}
         <div className="flex flex-col md:flex-row gap-2.5 items-center justify-center w-full max-w-[850px] shrink-0">
@@ -3132,7 +3184,7 @@ interface GamePanelProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -3175,6 +3227,33 @@ const TETRIS_COLORS = {
 };
 
 type ShapeType = keyof typeof TETRIS_SHAPES;
+type TetrisTerrainKey = 'classic' | 'center_well' | 'side_walls' | 'stairway';
+
+const TETRIS_TERRAINS: Array<{ key: TetrisTerrainKey; label: string; desc: string }> = [
+  { key: 'classic', label: '클래식', desc: '빈 보드에서 정면 승부' },
+  { key: 'center_well', label: '중앙 우물', desc: '가운데가 비어 콤보를 노리기 좋음' },
+  { key: 'side_walls', label: '양쪽 벽', desc: '좌우가 좁아져 빠른 판단 필요' },
+  { key: 'stairway', label: '계단 지형', desc: '초반부터 울퉁불퉁한 생존전' },
+];
+
+function createTetrisGrid(terrain: TetrisTerrainKey = 'classic'): (string | null)[][] {
+  const grid = Array(20).fill(null).map(() => Array(10).fill(null));
+  const block = '#64748b';
+  if (terrain === 'center_well') {
+    for (let r = 15; r < 20; r++) [0, 1, 2, 7, 8, 9].forEach(c => { grid[r][c] = block; });
+  } else if (terrain === 'side_walls') {
+    for (let r = 10; r < 20; r++) {
+      grid[r][0] = block;
+      grid[r][9] = block;
+    }
+  } else if (terrain === 'stairway') {
+    for (let r = 16; r < 20; r++) {
+      for (let c = 0; c < r - 15; c++) grid[r][c] = block;
+      for (let c = 9; c > 24 - r; c--) grid[r][c] = block;
+    }
+  }
+  return grid;
+}
 
 // ==========================================
 // GAME-SOCIAL ②: 테트리스 대전 관전 + 응원 뷰
@@ -3351,6 +3430,7 @@ export default function GamePanel({
   onResetMultiplayer
 }: GamePanelProps) {
   const [activeGame, setActiveGame] = useState<'drone_battle' | 'tetris' | 'yut_nori' | null>(null);
+  const [selectedTetrisTerrain, setSelectedTetrisTerrain] = useState<TetrisTerrainKey>('classic');
 
   // ===== GAME-SOCIAL ①: 주간 게임 리그 순위표 =====
   const [leagueStandings, setLeagueStandings] = useState<Array<{ id: string; name: string; wins: number; losses: number; points: number }>>([]);
@@ -3401,13 +3481,16 @@ export default function GamePanel({
 
   const sendGameInvite = async (friendId: string, gameType: 'drone_battle' | 'yut_nori' | 'tetris') => {
     const socket = getLocationSocket();
+    const tetrisTerrain = gameType === 'tetris' ? selectedTetrisTerrain : undefined;
     socket.emit('game-relay', {
       roomId: activeRoomId,
       payload: {
         type: 'invite',
         from: activeProfileId,
+        fromName: friendDisplayName(friends, activeProfileId, '나'),
         to: friendId,
-        game: gameType
+        game: gameType,
+        tetrisTerrain
       }
     });
     
@@ -3423,7 +3506,8 @@ export default function GamePanel({
           from: activeProfileId,
           to: friendId,
           game: gameType,
-          roomId: activeRoomId
+          roomId: activeRoomId,
+          tetrisTerrain
         })
       });
     } catch (err) {
@@ -3571,6 +3655,30 @@ export default function GamePanel({
           <p className="text-[9.5px] text-slate-400 leading-tight">
             현재 같은 모임 대화방에 들어와 있는 온라인 친구에게 초대를 보낼 수 있습니다.
           </p>
+
+          <div className="bg-slate-950 border border-pink-900/50 rounded-2xl p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-black text-pink-300">테트리스 초대 지형</p>
+              <span className="text-[8.5px] text-slate-500">초대한 사람이 선택</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {TETRIS_TERRAINS.map(terrain => (
+                <button
+                  key={terrain.key}
+                  type="button"
+                  onClick={() => setSelectedTetrisTerrain(terrain.key)}
+                  className={`text-left rounded-xl border px-2.5 py-2 transition ${
+                    selectedTetrisTerrain === terrain.key
+                      ? 'bg-pink-600 border-pink-400 text-white'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-pink-700'
+                  }`}
+                >
+                  <p className="text-[10px] font-black">{terrain.label}</p>
+                  <p className="text-[8px] opacity-80 leading-tight mt-0.5">{terrain.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="space-y-1.5 pt-2 max-h-[140px] overflow-y-auto">
             {onlineFriends.length === 0 ? (

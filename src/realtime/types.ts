@@ -20,6 +20,9 @@ export interface LocationUpdatedPayload {
   speed?: number;
   heading?: string;
   battery?: number;
+  name?: string;
+  avatar?: string;
+  color?: string;
   heartRate?: number;
   route?: Array<[number, number]>;
   routeIndex?: number;
