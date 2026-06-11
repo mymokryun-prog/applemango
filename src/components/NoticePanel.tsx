@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Lock, Megaphone, Plus, X } from 'lucide-react';
+import { Lock, Megaphone, Pencil, Plus, X } from 'lucide-react';
 import { getLocationSocket } from '../realtime/socketClient';
 
 interface Notice {
@@ -31,6 +31,7 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const isLobby = scope === 'lobby';
   const heading = isLobby ? '로비 공지사항' : '그룹방 공지';
@@ -60,10 +61,20 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
   }, [isLobby, activeRoomId]);
 
   const resetForm = () => {
+    setEditingId(null);
     setTitle('');
     setBody('');
     setPassword('');
     setError('');
+  };
+
+  const startEdit = (notice: Notice) => {
+    setEditingId(notice.id);
+    setTitle(notice.title);
+    setBody(notice.body);
+    setPassword('');
+    setError('');
+    setShowForm(true);
   };
 
   const handleSubmit = async () => {
@@ -81,9 +92,13 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
     setIsSaving(true);
     setError('');
     try {
-      const res = await authFetch(isLobby ? '/api/notices/lobby' : '/api/notices/room', {
+      const endpoint = editingId
+        ? (isLobby ? '/api/notices/lobby/update' : '/api/notices/room/update')
+        : (isLobby ? '/api/notices/lobby' : '/api/notices/room');
+      const res = await authFetch(endpoint, {
         method: 'POST',
         body: JSON.stringify({
+          id: editingId,
           roomId: activeRoomId,
           title: cleanTitle,
           body: cleanBody,
@@ -93,13 +108,13 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || '공지 등록에 실패했습니다.');
+        throw new Error(data.error || (editingId ? '공지 수정에 실패했습니다.' : '공지 등록에 실패했습니다.'));
       }
       resetForm();
       setShowForm(false);
       load();
     } catch (err: any) {
-      setError(err?.message || '공지 등록에 실패했습니다.');
+      setError(err?.message || (editingId ? '공지 수정에 실패했습니다.' : '공지 등록에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -134,7 +149,7 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
       <div className="flex-1 p-4 space-y-3">
         {showForm && (
           <div className="bg-white rounded-2xl p-4 border border-amber-100 shadow-sm space-y-2.5">
-            <p className="text-[13px] font-black text-amber-700">새 공지 작성</p>
+            <p className="text-[13px] font-black text-amber-700">{editingId ? '공지 수정' : '새 공지 작성'}</p>
             <input
               type="text"
               value={title}
@@ -156,7 +171,7 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="작성 비밀번호"
+                  placeholder={editingId ? '수정 비밀번호' : '작성 비밀번호'}
                   autoComplete="new-password"
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-amber-400"
                 />
@@ -169,7 +184,7 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
               disabled={isSaving}
               className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 text-white font-black py-2.5 rounded-xl text-sm transition"
             >
-              {isSaving ? '등록 중...' : '공지 올리기'}
+              {isSaving ? '저장 중...' : editingId ? '수정 저장' : '공지 올리기'}
             </button>
           </div>
         )}
@@ -183,7 +198,17 @@ export default function NoticePanel({ scope, authFetch, activeRoomId, activeRoom
           <article key={notice.id} className="bg-white rounded-2xl p-4 border border-amber-100 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-sm font-black text-gray-900 leading-snug">{notice.title}</h3>
-              <span className="text-[9px] text-gray-400 shrink-0">{formatTime(notice.timestamp)}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[9px] text-gray-400">{formatTime(notice.timestamp)}</span>
+                <button
+                  type="button"
+                  onClick={() => startEdit(notice)}
+                  className="w-7 h-7 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-600 flex items-center justify-center"
+                  title="공지 수정"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
             <p className="text-[12px] text-gray-600 leading-relaxed whitespace-pre-wrap mt-2">{notice.body}</p>
             <p className="text-[10px] text-amber-600 font-bold mt-3">{notice.authorName || '공지 작성자'}</p>

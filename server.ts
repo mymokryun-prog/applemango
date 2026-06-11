@@ -2395,6 +2395,27 @@ async function startServer() {
     res.json(notice);
   });
 
+  app.post('/api/notices/lobby/update', (req: AuthRequest, res: Response) => {
+    const { id, title, body, password } = req.body || {};
+    const passwordHash = CryptoJS.SHA256(String(password || '')).toString();
+    if (passwordHash !== NOTICE_ADMIN_PASSWORD_HASH) {
+      return res.status(403).json({ error: '비밀번호가 올바르지 않습니다.' });
+    }
+    const notice = dbLobbyNotices.find(n => n.id === id);
+    if (!notice) return res.status(404).json({ error: '공지사항을 찾을 수 없습니다.' });
+    const cleanTitle = String(title || '').trim().slice(0, 80);
+    const cleanBody = String(body || '').trim().slice(0, 1500);
+    if (!cleanTitle || !cleanBody) {
+      return res.status(400).json({ error: '제목과 내용을 입력해 주세요.' });
+    }
+    notice.title = cleanTitle;
+    notice.body = cleanBody;
+    notice.updatedAt = new Date().toISOString();
+    saveDatabaseDebounced();
+    io.emit('lobby-notices-updated');
+    res.json(notice);
+  });
+
   app.get('/api/notices/room', requireRoomMember, (req: AuthRequest, res) => {
     const roomId = (req.query.roomId as string) || 'room-friends';
     const room = dbRooms[roomId];
@@ -2438,6 +2459,75 @@ async function startServer() {
     saveDatabaseDebounced();
     if (broadcastRoomUpdate) broadcastRoomUpdate(room.id, 'room-refresh');
     res.json(notice);
+  });
+
+  app.post('/api/notices/room/update', requireRoomMember, (req: AuthRequest, res: Response) => {
+    const { roomId, id, title, body } = req.body || {};
+    const room = dbRooms[roomId || 'room-friends'];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    room.notices = Array.isArray(room.notices) ? room.notices : [];
+    const notice = room.notices.find((n: any) => n.id === id);
+    if (!notice) return res.status(404).json({ error: '공지사항을 찾을 수 없습니다.' });
+    const userId = req.user?.userId || 'guest';
+    if (notice.authorId && notice.authorId !== userId) {
+      return res.status(403).json({ error: '작성자만 수정할 수 있습니다.' });
+    }
+    const cleanTitle = String(title || '').trim().slice(0, 80);
+    const cleanBody = String(body || '').trim().slice(0, 1500);
+    if (!cleanTitle || !cleanBody) {
+      return res.status(400).json({ error: '제목과 내용을 입력해 주세요.' });
+    }
+    notice.title = cleanTitle;
+    notice.body = cleanBody;
+    notice.updatedAt = new Date().toISOString();
+    saveDatabaseDebounced();
+    if (broadcastRoomUpdate) broadcastRoomUpdate(room.id, 'room-refresh');
+    res.json(notice);
+  });
+
+  app.get('/api/personal/memo', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId || (req.headers['x-user-id'] as string);
+    if (!userId) return res.status(400).json({ error: 'no user' });
+    const profile = dbUserProfiles[userId] || {};
+    res.json({ memo: profile.privateMemo || '', updatedAt: profile.privateMemoUpdatedAt || null });
+  });
+
+  app.post('/api/personal/memo', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId || (req.headers['x-user-id'] as string);
+    if (!userId) return res.status(400).json({ error: 'no user' });
+    if (!dbUserProfiles[userId]) dbUserProfiles[userId] = { id: userId, name: '나', avatar: '🍎', color: '#EF4444' };
+    const memo = String(req.body?.memo || '').slice(0, 5000);
+    dbUserProfiles[userId].privateMemo = memo;
+    dbUserProfiles[userId].privateMemoUpdatedAt = new Date().toISOString();
+    saveDatabaseDebounced();
+    res.json({ memo, updatedAt: dbUserProfiles[userId].privateMemoUpdatedAt });
+  });
+
+  app.get('/api/personal/diary', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId || (req.headers['x-user-id'] as string);
+    if (!userId) return res.status(400).json({ error: 'no user' });
+    const profile = dbUserProfiles[userId] || {};
+    const diaries = profile.privateDiaries && typeof profile.privateDiaries === 'object' ? profile.privateDiaries : {};
+    res.json({ diaries });
+  });
+
+  app.post('/api/personal/diary', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId || (req.headers['x-user-id'] as string);
+    const { date, text } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'no user' });
+    const cleanDate = String(date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) return res.status(400).json({ error: '날짜가 올바르지 않습니다.' });
+    if (!dbUserProfiles[userId]) dbUserProfiles[userId] = { id: userId, name: '나', avatar: '🍎', color: '#EF4444' };
+    if (!dbUserProfiles[userId].privateDiaries || typeof dbUserProfiles[userId].privateDiaries !== 'object') {
+      dbUserProfiles[userId].privateDiaries = {};
+    }
+    dbUserProfiles[userId].privateDiaries[cleanDate] = {
+      date: cleanDate,
+      text: String(text || '').slice(0, 5000),
+      updatedAt: new Date().toISOString(),
+    };
+    saveDatabaseDebounced();
+    res.json(dbUserProfiles[userId].privateDiaries[cleanDate]);
   });
 
   app.post('/api/chat', requireRoomMember, validateRequest(MessageSchema), tryCatch(async (req: AuthRequest, res: Response) => {

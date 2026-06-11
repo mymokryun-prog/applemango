@@ -13,7 +13,7 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote } from 'lucide-react';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
 import MusicPanel from './components/MusicPanel';
@@ -21,6 +21,7 @@ import RestaurantPanel from './components/RestaurantPanel';
 import BookPanel from './components/BookPanel';
 import ContactsPanel from './components/ContactsPanel';
 import NoticePanel from './components/NoticePanel';
+import PersonalNotesPanel from './components/PersonalNotesPanel';
 
 import {
   queueOfflineAction,
@@ -180,6 +181,7 @@ export default function App() {
   } | null>(null);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [personalPanelMode, setPersonalPanelMode] = useState<'memo' | 'diary' | null>(null);
 
   // 앱 접속 비밀번호 (전화번호 계정에 연동 — 서버 확인)
   const [accountHasPassword, setAccountHasPassword] = useState(false);
@@ -2289,6 +2291,14 @@ export default function App() {
               </span>
               <span className="max-w-[75px] truncate leading-none">{regAlias || regRealName || '내 프로필'}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setPersonalPanelMode('diary')}
+              className="w-8 h-8 rounded-full hover:bg-indigo-50 flex items-center justify-center transition text-base border border-indigo-100"
+              title="일기"
+            >
+              <BookOpen className="w-4 h-4 text-indigo-500" />
+            </button>
             {/* 설정 버튼 */}
             <button
               type="button"
@@ -2297,6 +2307,14 @@ export default function App() {
               title="설정"
             >
               <Settings className="w-4 h-4 text-gray-500" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setPersonalPanelMode('memo')}
+              className="w-8 h-8 rounded-full hover:bg-emerald-50 flex items-center justify-center transition text-base border border-emerald-100"
+              title="메모"
+            >
+              <StickyNote className="w-4 h-4 text-emerald-500" />
             </button>
 
           </div>
@@ -2910,6 +2928,14 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {personalPanelMode && (
+        <PersonalNotesPanel
+          mode={personalPanelMode}
+          authFetch={authFetch}
+          onClose={() => setPersonalPanelMode(null)}
+        />
       )}
 
       {/* B. 설정 모달 */}
