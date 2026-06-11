@@ -193,6 +193,9 @@ export default function App() {
   const [shareLocation, setShareLocation] = useState(() => {
     return localStorage.getItem('aemang_share_location') !== 'false';
   });
+  const [locationPrivacyMode, setLocationPrivacyMode] = useState<'precise' | 'approximate'>(() => {
+    return localStorage.getItem('aemang_location_privacy_mode') === 'approximate' ? 'approximate' : 'precise';
+  });
   const [selectedSoundIdx, setSelectedSoundIdx] = useState<number>(() => {
     const saved = localStorage.getItem('aemang_sound_idx');
     return saved ? parseInt(saved, 10) : 0;
@@ -558,7 +561,8 @@ export default function App() {
   } = useRealtimeLocation({
     roomId: activeRoomId,
     userId: activeProfileId,
-    enabled: !showOnboarding,
+    enabled: !showOnboarding && shareLocation,
+    privacyMode: locationPrivacyMode,
     onLocationUpdated: handleSocketLocationUpdated,
   });
 
@@ -1442,6 +1446,30 @@ export default function App() {
     }
   };
 
+  const handleChangeLocationPrivacyMode = async (mode: 'precise' | 'approximate') => {
+    setLocationPrivacyMode(mode);
+    localStorage.setItem('aemang_location_privacy_mode', mode);
+    if (!shareLocation) return;
+    try {
+      await authFetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          senderId: activeProfileId,
+          senderName: regAlias || regRealName || '나',
+          senderAvatar: regFruit || '🍎',
+          senderColor: '#EC4899',
+          text: mode === 'approximate'
+            ? '🔒 위치 공유를 대략 모드로 바꿨어요. 이제 방에는 근처 위치만 보입니다.'
+            : '📍 위치 공유를 정확 모드로 바꿨어요. 약속 도착/이탈 알림이 더 정확해집니다.',
+          roomId: activeRoomId
+        })
+      });
+      fetchAllStates(activeRoomId);
+    } catch (err) {
+      console.warn('Location privacy notice failed:', err);
+    }
+  };
+
   // 접속 시: 서버에 현재 위치 공유 설정을 동기화 (다른 기기에서도 일관)
   useEffect(() => {
     if (showOnboarding || !activeProfileId) return;
@@ -2166,7 +2194,9 @@ export default function App() {
             <span className="flex-1">
               {gpsStatus === 'degraded'
                 ? (isSocketConnected ? '대략적 위치 공유 중 (Wi-Fi/IP)' : '위치 켜짐 · 서버 연결 중…')
-                : (isSocketConnected ? 'GPS 실시간 공유 중' : 'GPS 켜짐 · 서버 연결 중…')}
+                : (isSocketConnected
+                  ? (locationPrivacyMode === 'approximate' ? '근처 위치만 공유 중' : 'GPS 실시간 공유 중')
+                  : 'GPS 켜짐 · 서버 연결 중…')}
               {lastSentAt
                 ? ` · ${new Date(lastSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
                 : ''}
@@ -3043,7 +3073,9 @@ export default function App() {
                 <div>
                   <p className="text-sm font-semibold text-gray-800">📍 내 위치 공유</p>
                   <p className="text-[11px] text-gray-400">
-                    {shareLocation ? '켜짐 — 그룹 멤버에게 내 위치가 보입니다' : '꺼짐 — 앱은 쓰되 내 위치는 공유 안 됨'}
+                    {shareLocation
+                      ? `${locationPrivacyMode === 'approximate' ? '근처 위치만' : '정확한 위치'} — 현재 방 멤버 ${friends.filter(f => !f.isPendingInvite && f.id !== activeProfileId).length}명에게 보입니다`
+                      : '꺼짐 — 앱은 쓰되 내 위치는 공유 안 됨'}
                   </p>
                 </div>
                 <button
@@ -3054,6 +3086,46 @@ export default function App() {
                   <div className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-200 ${shareLocation ? 'translate-x-6' : 'translate-x-0'}`} />
                 </button>
               </div>
+
+              {shareLocation && (
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-black text-slate-800">위치 정확도</p>
+                      <p className="text-[10px] text-slate-400">자녀·친구 테스트 중 거부감을 낮추는 프라이버시 옵션입니다.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 bg-white border border-slate-200 rounded-xl p-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleChangeLocationPrivacyMode('precise')}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition ${locationPrivacyMode === 'precise' ? 'bg-rose-500 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                      >
+                        정확
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleChangeLocationPrivacyMode('approximate')}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition ${locationPrivacyMode === 'approximate' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                      >
+                        근처
+                      </button>
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-200 pt-2">
+                    <p className="text-[10px] font-bold text-slate-500 mb-1">현재 내 위치를 볼 수 있는 멤버</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {friends.filter(f => !f.isPendingInvite && f.id !== activeProfileId).slice(0, 8).map(f => (
+                        <span key={f.id} className="bg-white border border-slate-200 text-[10px] font-bold text-slate-700 px-2 py-1 rounded-full">
+                          {f.avatar} {(f.name || '').replace(' (합류)', '')}
+                        </span>
+                      ))}
+                      {friends.filter(f => !f.isPendingInvite && f.id !== activeProfileId).length === 0 && (
+                        <span className="text-[10px] text-slate-400">아직 공유 대상 멤버가 없습니다.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* 앱 접속 비밀번호 (전화번호 계정) */}
               <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-gray-100">

@@ -314,9 +314,90 @@ export default function SchedulePanel({
     });
   };
 
+  const distanceMeters = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+    const R = 6371000;
+    const dLat = ((bLat - aLat) * Math.PI) / 180;
+    const dLng = ((bLng - aLng) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos((aLat * Math.PI) / 180) *
+      Math.cos((bLat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const formatEta = (distM: number) => {
+    if (distM < 100) return '도착권';
+    const walkMin = Math.max(1, Math.round(distM / 80));
+    return walkMin < 60 ? `${walkMin}분` : `${Math.floor(walkMin / 60)}시간 ${walkMin % 60}분`;
+  };
+
+  const nextAppointment = appointments
+    .filter(app => parseAppDate(app.datetime) !== null)
+    .slice()
+    .sort((a, b) => {
+      const pa = parseAppDate(a.datetime);
+      const pb = parseAppDate(b.datetime);
+      if (!pa || !pb) return 0;
+      return new Date(pa.year, pa.month - 1, pa.day).getTime() - new Date(pb.year, pb.month - 1, pb.day).getTime();
+    })[0] || appointments[0];
+
+  const etaBriefing = nextAppointment
+    ? friends
+      .filter(f => !f.isPendingInvite && typeof f.lat === 'number' && typeof f.lng === 'number')
+      .map(f => {
+        const distM = distanceMeters(f.lat, f.lng, nextAppointment.lat, nextAppointment.lng);
+        return {
+          id: f.id,
+          name: (f.name || '').replace(' (합류)', '').replace(' (대기)', ''),
+          avatar: f.avatar,
+          isMe: f.id === activeProfileId,
+          distM,
+          eta: formatEta(distM),
+        };
+      })
+      .sort((a, b) => a.distM - b.distM)
+    : [];
+
 
   return (
     <div className="flex flex-col h-full bg-white overflow-y-auto schedule-panel-container">
+
+      {nextAppointment && (
+        <div className="mx-4 mt-3 mb-1.5 bg-slate-900 text-white rounded-3xl p-4 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black text-amber-300">약속 ETA 브리핑</p>
+              <h3 className="text-sm font-black truncate">{nextAppointment.title}</h3>
+              <p className="text-[10px] text-slate-300 truncate mt-0.5">📍 {nextAppointment.placeName}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSelectPromise ? onSelectPromise(nextAppointment.id, nextAppointment.lat, nextAppointment.lng) : onFocusLocation(nextAppointment.lat, nextAppointment.lng)}
+              className="bg-amber-400 text-slate-950 border border-black rounded-xl px-3 py-2 text-[10px] font-black shrink-0"
+            >
+              지도
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            {etaBriefing.slice(0, 4).map(item => (
+              <div key={item.id} className="bg-white/10 border border-white/10 rounded-2xl px-3 py-2 min-w-0">
+                <p className="text-[10px] font-bold text-slate-200 truncate">
+                  {item.avatar} {item.name}{item.isMe ? ' (나)' : ''}
+                </p>
+                <p className={`text-sm font-black mt-0.5 ${item.distM < 100 ? 'text-emerald-300' : 'text-white'}`}>
+                  {item.eta}
+                </p>
+                <p className="text-[9px] text-slate-400">
+                  {item.distM >= 1000 ? `${(item.distM / 1000).toFixed(1)}km` : `${Math.round(item.distM)}m`}
+                </p>
+              </div>
+            ))}
+          </div>
+          {etaBriefing.length === 0 && (
+            <p className="text-[10px] text-slate-400 mt-3">위치 공유 중인 멤버가 있으면 도착 예상 시간이 표시됩니다.</p>
+          )}
+        </div>
+      )}
 
       {/* 약속 만들기 카드 */}
       <div className="mx-4 mt-2.5 mb-1.5 bg-amber-50 border-2 border-black rounded-3xl overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] shrink-0">

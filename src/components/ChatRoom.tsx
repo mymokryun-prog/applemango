@@ -273,6 +273,22 @@ export default function ChatRoom({
     setInputText(prev => prev + '@애망봇 ');
   };
 
+  const sendSafetyCheckIn = (kind: 'safe' | 'departed' | 'arrived') => {
+    const me = friends.find(f => f.id === activeProfileId);
+    const placeName = kind === 'safe' ? '현재 위치' : kind === 'departed' ? '출발 위치' : '도착 위치';
+    const text = kind === 'safe'
+      ? '✅ 괜찮아요. 지금 위치를 함께 공유합니다.'
+      : kind === 'departed'
+        ? '🚶 출발했어요. 약속 장소로 이동 중입니다.'
+        : '📍 도착했어요. 걱정하지 마세요.';
+
+    if (me && typeof me.lat === 'number' && typeof me.lng === 'number') {
+      onSendMessage(text, { lat: me.lat, lng: me.lng, placeName });
+      return;
+    }
+    onSendMessage(text);
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white px-3 py-1.5 flex items-center justify-between border-b-2 border-black select-none shadow-sm font-sans">
@@ -357,6 +373,32 @@ export default function ChatRoom({
           </span>
         </button>
       </div>
+
+      {!isDisbanded && (
+        <div className="bg-white border-b border-slate-200 px-3 py-2 grid grid-cols-3 gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => sendSafetyCheckIn('safe')}
+            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl py-2 text-[10px] font-black transition"
+          >
+            ✅ 괜찮아요
+          </button>
+          <button
+            type="button"
+            onClick={() => sendSafetyCheckIn('departed')}
+            className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-xl py-2 text-[10px] font-black transition"
+          >
+            🚶 출발
+          </button>
+          <button
+            type="button"
+            onClick={() => sendSafetyCheckIn('arrived')}
+            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl py-2 text-[10px] font-black transition"
+          >
+            📍 도착
+          </button>
+        </div>
+      )}
 
 
       {/* Disbanded Status banner */}

@@ -68,6 +68,7 @@ export interface UseRealtimeLocationOptions {
   roomId: string;
   userId: string;
   enabled?: boolean;
+  privacyMode?: 'precise' | 'approximate';
   onLocationUpdated?: (payload: LocationUpdatedPayload) => void;
 }
 
@@ -102,6 +103,7 @@ export function useRealtimeLocation({
   roomId,
   userId,
   enabled = true,
+  privacyMode = 'precise',
   onLocationUpdated,
 }: UseRealtimeLocationOptions): UseRealtimeLocationResult {
   const [isSocketConnected, setIsSocketConnected] = useState(false);
@@ -138,10 +140,23 @@ export function useRealtimeLocation({
     onLocationUpdatedRef.current = onLocationUpdated;
   }, [onLocationUpdated]);
 
+  const applyLocationPrivacy = useCallback((lat: number, lng: number) => {
+    if (privacyMode !== 'approximate') return { lat, lng };
+
+    // 약 500m 단위 격자 중심으로 보정한다. 청소년/친구 테스트에서 "근처만 공유"를
+    // 체감할 수 있게 하되 도착/이탈 알림은 방 안의 정확 공유 모드에서 사용하도록 분리한다.
+    const grid = 0.0045;
+    return {
+      lat: Math.round(lat / grid) * grid,
+      lng: Math.round(lng / grid) * grid,
+    };
+  }, [privacyMode]);
+
   const emitLocation = useCallback(
     (lat: number, lng: number, accuracy?: number) => {
       const socket = getLocationSocket();
       if (!roomId || !userId) return;
+      const shared = applyLocationPrivacy(lat, lng);
       // 웹: 소켓 필수 / 네이티브: 소켓 끊김 시 HTTP 폴백 허용
       if (!socket.connected && !isNativeApp()) return;
 
@@ -162,14 +177,14 @@ export function useRealtimeLocation({
         fetch('/api/friends/move', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: userId, lat, lng, roomId }),
+          body: JSON.stringify({ id: userId, lat: shared.lat, lng: shared.lng, roomId }),
         }).then(() => setLastSentAt(new Date().toISOString())).catch(() => {});
         return;
       }
 
       socket.emit(
         'update-location',
-        { roomId, friendId: userId, lat, lng, accuracy },
+        { roomId, friendId: userId, lat: shared.lat, lng: shared.lng, accuracy },
         (response: { error?: string; success?: boolean }) => {
           if (response?.error) {
             console.warn('Location update rejected:', response.error);
@@ -181,7 +196,7 @@ export function useRealtimeLocation({
         }
       );
     },
-    [roomId, userId]
+    [roomId, userId, applyLocationPrivacy]
   );
 
   const handlePosition = useCallback(
