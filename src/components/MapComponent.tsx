@@ -368,13 +368,16 @@ export default function MapComponent({
       return `
         <div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif;pointer-events:none">
           <!-- Upper glowing capsule badge -->
-          <div class="neon-bus-badge" style="background:#1e293b;color:#fff;font-size:10px;font-weight:900;padding:4px 9px;border-radius:20px;border:1.5px solid #39FF14;white-space:nowrap;display:flex;align-items:center;gap:5px;">
-            <!-- Outer rotating container for arrow -->
-            <span style="transform:rotate(${rotation}deg);display:inline-block;flex-shrink:0;" class="neon-bus-arrow">
-              <span style="color:#39FF14;font-size:11px;text-shadow:0 0 4px #39FF14;display:block;line-height:1;">➔</span>
-            </span>
-            <!-- Modern SVG Bus Icon -->
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="#39FF14" style="filter:drop-shadow(0 0 2px #39FF14);flex-shrink:0;"><path d="M18 11H6V6h12v5zm0-7H6C4.9 4 4 4.9 4 6v12c0 1.66 1.34 3 3 3l-1 1v1h12v-1l-1-1c1.66 0 3-1.34 3-3V6c0-1.1-.9-2-2-2zM8.5 17c-.83 0-1.5-.67-1.5-1.5S7.67 14 8.5 14s1.5.67 1.5 1.5S9.33 17 8.5 17zm7 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+          <div class="neon-bus-badge" style="background:#1e293b;color:#fff;font-size:10px;font-weight:900;padding:4.5px 9px;border-radius:20px;border:1.5px solid #39FF14;white-space:nowrap;display:flex;align-items:center;gap:6px;">
+            <!-- Rotated container for bus icon and headlight -->
+            <div style="transform:rotate(${rotation}deg);display:flex;align-items:center;position:relative;flex-shrink:0;">
+              <!-- Side-facing Bus SVG -->
+              <svg viewBox="0 0 24 24" width="16" height="12" fill="#39FF14" style="filter:drop-shadow(0 0 2.5px #39FF14);flex-shrink:0;z-index:2;position:relative;">
+                <path d="M19 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h1c0 1.1.9 2 2 2s2-.9 2-2h6c0 1.1.9 2 2 2s2-.9 2-2h1c1.1 0 2-.9 2-2v-4.5c0-.8-.7-1.5-1.5-1.5H19V6zm-8 4H3V8h8v2zm7 0h-5V8h5v2z"/>
+              </svg>
+              <!-- Fluorescent Headlight Beam -->
+              <div style="width:22px;height:12px;background:linear-gradient(90deg, rgba(57,255,20,0.85) 0%, rgba(57,255,20,0.3) 40%, rgba(57,255,20,0) 100%);clip-path:polygon(0 35%, 100% 0, 100% 100%, 0 65%);margin-left:-2px;flex-shrink:0;z-index:1;filter:blur(0.5px);"></div>
+            </div>
             <span style="font-size:11px;font-family:'Space Grotesk',sans-serif;font-weight:900;letter-spacing:-0.2px;">${busTracking.routeNo}</span>
           </div>
           <!-- Lower destination / vehicle info plate -->
