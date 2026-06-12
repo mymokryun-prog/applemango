@@ -239,6 +239,17 @@ export default function MapComponent({
   const busKakaoOverlaysRef = useRef<any[]>([]);
   const busLeafletMarkersRef = useRef<L.Marker[]>([]);
 
+  // ─── 버스 정류소 관련 상태 ─────────────────────────────────────────────────
+  const [busTab, setBusTab] = useState<'route' | 'station'>('route');
+  const [busStationKeyword, setBusStationKeyword] = useState('');
+  const [busStations, setBusStations] = useState<Array<{ stationId: string; stationName: string; stationNo: string; lat: number; lng: number; cityCode: string; region?: string }>>([]);
+  const [busStationSearching, setBusStationSearching] = useState(false);
+  const [selectedStation, setSelectedStation] = useState<{ stationId: string; stationName: string; stationNo: string; lat: number; lng: number; cityCode: string } | null>(null);
+  const [busArrivals, setBusArrivals] = useState<Array<{ routeNo: string; predictTime: number; remainStations: number; msg: string }>>([]);
+  const [busArrivalLoading, setBusArrivalLoading] = useState(false);
+  const busStationKakaoOverlaysRef = useRef<any[]>([]);
+  const busStationLeafletMarkersRef = useRef<L.Marker[]>([]);
+
   // 최근 추적한 노선 (원탭 재추적) — 전체 노선 목록 로딩 대신 트래픽 효율적인 방식
   const [busRecent, setBusRecent] = useState<Array<{ cityCode: string; routeId: string; routeNo: string }>>(() => {
     try { return JSON.parse(localStorage.getItem('aemang_bus_recent') || '[]'); } catch { return []; }
@@ -350,6 +361,94 @@ export default function MapComponent({
     setBusTracking(null);
     setBusLocations([]);
     setBusRoutes([]);
+  };
+
+  // 선택 정류소의 버스 도착 정보 폴링 (30초)
+  useEffect(() => {
+    if (!selectedStation) {
+      setBusArrivals([]);
+      return;
+    }
+    let cancelled = false;
+    const loadArrivals = async () => {
+      setBusArrivalLoading(true);
+      try {
+        const res = await fetch(`/api/bus/arrivals?cityCode=${encodeURIComponent(selectedStation.cityCode)}&stationId=${encodeURIComponent(selectedStation.stationId)}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setBusError(data?.error || '버스 도착 정보 조회 실패'); return; }
+        setBusError(null);
+        setBusArrivals(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setBusError('버스 도착 정보 조회 실패 (네트워크)');
+      }
+      setBusArrivalLoading(false);
+    };
+    loadArrivals();
+    const timer = setInterval(loadArrivals, 30000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [selectedStation]);
+
+  // 선택 정류소 마커 렌더링 및 카메라 이동
+  useEffect(() => {
+    busStationKakaoOverlaysRef.current.forEach(o => { try { o.setMap(null); } catch {} });
+    busStationKakaoOverlaysRef.current = [];
+    busStationLeafletMarkersRef.current.forEach(m => { try { m.remove(); } catch {} });
+    busStationLeafletMarkersRef.current = [];
+
+    if (!selectedStation) return;
+
+    const stationHtml = `<div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif">
+      <div style="background:#10B981;color:#fff;font-size:10px;font-weight:900;padding:4px 8px;border-radius:10px;box-shadow:0 1.5px 5px rgba(0,0,0,0.4);white-space:nowrap">🏓 ${selectedStation.stationName}</div>
+    </div>`;
+
+    const latLng = { lat: selectedStation.lat, lng: selectedStation.lng };
+
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const moveLatlng = new window.kakao.maps.LatLng(latLng.lat, latLng.lng);
+      kakaoMapInstanceRef.current.setCenter(moveLatlng);
+      
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: moveLatlng,
+        content: stationHtml,
+        yAnchor: 0.5,
+        zIndex: 5,
+      });
+      overlay.setMap(kakaoMapInstanceRef.current);
+      busStationKakaoOverlaysRef.current.push(overlay);
+    } else if (leafletMapInstanceRef.current) {
+      leafletMapInstanceRef.current.setView([latLng.lat, latLng.lng], 16);
+      
+      const marker = L.marker([latLng.lat, latLng.lng], {
+        icon: L.divIcon({ className: '', html: stationHtml, iconSize: [0, 0] }),
+        interactive: false,
+      });
+      marker.addTo(leafletMapInstanceRef.current!);
+      busStationLeafletMarkersRef.current.push(marker);
+    }
+  }, [selectedStation, isKakaoReady, useFallbackMap]);
+
+  const handleBusStationSearch = async () => {
+    if (!busCityCode || !busStationKeyword.trim()) { setBusError('도시와 정류소 이름을 입력해 주세요.'); return; }
+    setBusStationSearching(true);
+    setBusError(null);
+    setBusStations([]);
+    try {
+      localStorage.setItem('aemang_bus_city', busCityCode);
+      const res = await fetch(`/api/bus/stations?cityCode=${encodeURIComponent(busCityCode)}&keyword=${encodeURIComponent(busStationKeyword.trim())}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '검색 실패');
+      if (!Array.isArray(data) || data.length === 0) setBusError('해당 이름의 정류소를 찾지 못했습니다.');
+      else setBusStations(data.slice(0, 15));
+    } catch (e: any) {
+      setBusError(e?.message || '정류소 검색에 실패했습니다.');
+    }
+    setBusStationSearching(false);
+  };
+
+  const stopBusStationTracking = () => {
+    setSelectedStation(null);
+    setBusArrivals([]);
   };
   // 지도 클릭 리스너는 1회만 등록되므로 최신 onMapClick을 ref로 참조(stale 클로저 방지)
   const onMapClickRef = useRef(onMapClick);
@@ -1139,27 +1238,36 @@ export default function MapComponent({
         <span>{placeSelectMode ? '지도를 터치해 장소를 지정하세요 (취소하려면 다시 탭)' : '📍 소집 장소 지정하기'}</span>
       </button>
 
-      {/* 🚌 실시간 버스 위치 버튼 (소집 장소 버튼 위) */}
+      {/* 🚌 실시간 버스 정보 버튼 (소집 장소 버튼 위) */}
       <button
         type="button"
         onClick={() => setBusPanelOpen(o => !o)}
         className={`absolute bottom-[68px] left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
-          busTracking ? 'bg-sky-500 text-white' : 'bg-white text-slate-800'
+          busTracking ? 'bg-sky-500 text-white' : selectedStation ? 'bg-emerald-500 text-white' : 'bg-white text-slate-800'
         }`}
       >
         <span>🚌</span>
-        <span>{busTracking ? `${busTracking.routeNo}번 추적 중 (${busLocations.length}대)` : '버스 위치 보기'}</span>
+        <span>
+          {busTracking
+            ? `${busTracking.routeNo}번 추적 중 (${busLocations.length}대)`
+            : selectedStation
+            ? `${selectedStation.stationName} 도착 정보`
+            : '버스 정보 보기'}
+        </span>
       </button>
 
-      {/* 🚌 버스 노선 선택 패널 */}
+      {/* 🚌 버스 정보 선택 및 도착 패널 */}
       {busPanelOpen && (
         <div className="absolute bottom-[116px] left-4 z-30 bg-white rounded-2xl shadow-xl p-4 w-[310px] max-w-[calc(100%-32px)] font-sans space-y-2.5">
           <div className="flex items-center justify-between">
-            <p className="text-[14px] font-black text-slate-800">🚌 실시간 버스 위치</p>
+            <p className="text-[14px] font-black text-slate-800">
+              🚌 {busTracking ? '버스 위치 추적' : selectedStation ? '정류소 도착 정보' : '실시간 버스 정보'}
+            </p>
             <button onClick={() => setBusPanelOpen(false)} className="text-slate-400 hover:text-slate-600 text-sm w-6 h-6">✕</button>
           </div>
 
           {busTracking ? (
+            // 1) 노선 추적 중일 때 UI
             <div className="space-y-2">
               <p className="text-[12px] text-slate-500">
                 <b className="text-sky-600">{busTracking.routeNo}번</b> 버스 <b>{busLocations.length}대</b> 표시 중 (15초마다 갱신)
@@ -1168,8 +1276,72 @@ export default function MapComponent({
                 추적 중지
               </button>
             </div>
+          ) : selectedStation ? (
+            // 2) 정류소 추적 중일 때 UI (실시간 도착 버스 목록)
+            <div className="space-y-2.5">
+              <div className="bg-emerald-50 rounded-xl p-2.5 text-left">
+                <p className="text-[13px] font-black text-emerald-800">{selectedStation.stationName}</p>
+                <p className="text-[10.5px] text-emerald-600 font-bold">{selectedStation.stationNo ? `정류소 번호: ${selectedStation.stationNo}` : '정류소 상세'}</p>
+              </div>
+              
+              <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-0.5">
+                {busArrivalLoading && busArrivals.length === 0 ? (
+                  <p className="text-[12px] text-slate-400 text-center py-4">도착 정보를 불러오는 중입니다…</p>
+                ) : busArrivals.length === 0 ? (
+                  <p className="text-[12px] text-slate-400 text-center py-4">도착 예정인 버스가 없습니다.</p>
+                ) : (
+                  busArrivals.map((a, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 text-left">
+                      <span className="text-[13px] font-black text-slate-800">{a.routeNo}번</span>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                        a.predictTime <= 3 ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {a.msg}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              <p className="text-[9.5px] text-slate-400 text-center">30초마다 자동으로 갱신됩니다.</p>
+              <div className="flex gap-1.5">
+                <button onClick={() => {
+                  // 수동 갱신 트리거
+                  const st = selectedStation;
+                  setSelectedStation(null);
+                  setTimeout(() => setSelectedStation(st), 50);
+                }} className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[12px] font-bold py-2 rounded-xl transition">
+                  새로고침
+                </button>
+                <button onClick={stopBusStationTracking} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[12px] font-bold py-2 rounded-xl transition">
+                  추적 중지
+                </button>
+              </div>
+            </div>
           ) : (
+            // 3) 검색 탭 UI (노선 검색 vs 정류소 검색)
             <>
+              {/* 탭 헤더 */}
+              <div className="flex border-b border-slate-100 pb-1.5 gap-2.5">
+                <button
+                  onClick={() => setBusTab('route')}
+                  className={`text-[12px] font-black pb-1.5 transition ${
+                    busTab === 'route' ? 'text-sky-600 border-b-2 border-sky-500' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  노선 번호로 검색
+                </button>
+                <button
+                  onClick={() => setBusTab('station')}
+                  className={`text-[12px] font-black pb-1.5 transition ${
+                    busTab === 'station' ? 'text-emerald-600 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  정류소명으로 검색
+                </button>
+              </div>
+
+              {/* 공통 도시 선택 드롭다운 */}
               <select
                 value={busCityCode}
                 onChange={e => setBusCityCode(e.target.value)}
@@ -1180,64 +1352,118 @@ export default function MapComponent({
                   <option key={c.cityCode} value={c.cityCode}>{c.cityName}</option>
                 ))}
               </select>
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={busRouteNo}
-                  onChange={e => setBusRouteNo(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleBusRouteSearch(); }}
-                  placeholder="버스 번호 (예: 102, M5107)"
-                  autoCapitalize="characters"
-                  className="flex-1 bg-slate-50 text-[13px] font-bold rounded-xl px-3 py-2.5 focus:outline-none min-w-0"
-                />
-                <button
-                  onClick={handleBusRouteSearch}
-                  disabled={busSearching}
-                  className="bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 text-white text-[13px] font-black px-4 rounded-xl transition shrink-0"
-                >
-                  {busSearching ? '…' : '검색'}
-                </button>
-              </div>
 
-              {busRoutes.length > 0 && (
-                <div className="space-y-1 max-h-[160px] overflow-y-auto">
-                  {busRoutes.map(r => (
+              {busTab === 'route' ? (
+                // 3-A) 노선 검색 탭 바디
+                <>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={busRouteNo}
+                      onChange={e => setBusRouteNo(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleBusRouteSearch(); }}
+                      placeholder="버스 번호 (예: 102, M5107)"
+                      autoCapitalize="characters"
+                      className="flex-1 bg-slate-50 text-[13px] font-bold rounded-xl px-3 py-2.5 focus:outline-none min-w-0"
+                    />
                     <button
-                      key={`${r.cityCode || busCityCode}-${r.routeId}`}
-                      onClick={() => startBusTracking({ cityCode: r.cityCode || busCityCode, routeId: r.routeId, routeNo: r.routeNo })}
-                      className="w-full bg-sky-50 hover:bg-sky-100 rounded-xl px-3 py-2 text-left transition"
+                      onClick={handleBusRouteSearch}
+                      disabled={busSearching}
+                      className="bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 text-white text-[13px] font-black px-4 rounded-xl transition shrink-0"
                     >
-                      <p className="text-[13px] font-black text-sky-700">
-                        {r.routeNo}번
-                        {r.region && <span className="ml-1 text-[9px] bg-white text-slate-500 font-bold px-1.5 py-0.5 rounded-full align-middle">{r.region}</span>}
-                        <span className="ml-1 text-[10px] text-slate-400 font-bold">{r.routeType}</span>
-                      </p>
-                      <p className="text-[10.5px] text-slate-500 truncate">{r.start} ↔ {r.end}</p>
+                      {busSearching ? '…' : '검색'}
                     </button>
-                  ))}
-                </div>
-              )}
-
-              {/* 최근 추적 노선 — 원탭 재추적 */}
-              {busRecent.length > 0 && busRoutes.length === 0 && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 mb-1">최근 노선</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {busRecent.map(r => (
-                      <button
-                        key={r.routeId}
-                        onClick={() => startBusTracking(r)}
-                        className="bg-sky-50 hover:bg-sky-100 text-sky-700 text-[12px] font-black px-3 py-1.5 rounded-full transition"
-                      >
-                        🚌 {r.routeNo}
-                      </button>
-                    ))}
                   </div>
-                </div>
+
+                  {busRoutes.length > 0 && (
+                    <div className="space-y-1 max-h-[160px] overflow-y-auto">
+                      {busRoutes.map(r => (
+                        <button
+                          key={`${r.cityCode || busCityCode}-${r.routeId}`}
+                          onClick={() => startBusTracking({ cityCode: r.cityCode || busCityCode, routeId: r.routeId, routeNo: r.routeNo })}
+                          className="w-full bg-sky-50 hover:bg-sky-100 rounded-xl px-3 py-2 text-left transition"
+                        >
+                          <p className="text-[13px] font-black text-sky-700">
+                            {r.routeNo}번
+                            {r.region && <span className="ml-1 text-[9px] bg-white text-slate-500 font-bold px-1.5 py-0.5 rounded-full align-middle">{r.region}</span>}
+                            <span className="ml-1 text-[10px] text-slate-400 font-bold">{r.routeType}</span>
+                          </p>
+                          <p className="text-[10.5px] text-slate-500 truncate">{r.start} ↔ {r.end}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 최근 추적 노선 */}
+                  {busRecent.length > 0 && busRoutes.length === 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 mb-1">최근 노선</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {busRecent.map(r => (
+                          <button
+                            key={r.routeId}
+                            onClick={() => startBusTracking(r)}
+                            className="bg-sky-50 hover:bg-sky-100 text-sky-700 text-[12px] font-black px-3 py-1.5 rounded-full transition"
+                          >
+                            🚌 {r.routeNo}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                // 3-B) 정류소 검색 탭 바디
+                <>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={busStationKeyword}
+                      onChange={e => setBusStationKeyword(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleBusStationSearch(); }}
+                      placeholder="정류소 이름 (예: 강남역, 수원역)"
+                      className="flex-1 bg-slate-50 text-[13px] font-bold rounded-xl px-3 py-2.5 focus:outline-none min-w-0"
+                    />
+                    <button
+                      onClick={handleBusStationSearch}
+                      disabled={busStationSearching}
+                      className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 text-white text-[13px] font-black px-4 rounded-xl transition shrink-0"
+                    >
+                      {busStationSearching ? '…' : '검색'}
+                    </button>
+                  </div>
+
+                  {busStations.length > 0 && (
+                    <div className="space-y-1 max-h-[160px] overflow-y-auto pr-0.5">
+                      {busStations.map(s => (
+                        <button
+                          key={`${s.cityCode}-${s.stationId}`}
+                          onClick={() => {
+                            setSelectedStation({
+                              stationId: s.stationId,
+                              stationName: s.stationName,
+                              stationNo: s.stationNo,
+                              lat: s.lat,
+                              lng: s.lng,
+                              cityCode: s.cityCode,
+                            });
+                          }}
+                          className="w-full bg-emerald-50 hover:bg-emerald-100 rounded-xl px-3 py-2 text-left transition"
+                        >
+                          <p className="text-[13px] font-black text-emerald-700">
+                            {s.stationName}
+                            {s.region && <span className="ml-1 text-[9px] bg-white text-slate-500 font-bold px-1.5 py-0.5 rounded-full align-middle">{s.region}</span>}
+                          </p>
+                          <p className="text-[10.5px] text-slate-500 truncate">{s.stationNo ? `정류소 번호: ${s.stationNo}` : '정류소 ID: ' + s.stationId}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
 
               <p className="text-[10px] text-slate-400 leading-tight">
-                서울·경기 포함 전국 지원. 경기 버스는 정류장 단위 위치로 표시됩니다.
+                서울·경기 포함 전국 지원. 버스 도착 예정 정보 조회를 위해서는 공공데이터포털 정류소 및 도착정보 관련 API의 사전 승인이 필요합니다.
               </p>
             </>
           )}
