@@ -3170,6 +3170,15 @@ async function startServer() {
   // 참고: TAGO는 전국 참여 지자체 통합이지만 서울(TOPIS)·경기(GBIS)는 별도 API라 v1에서는 미지원
   const BUS_API_KEY = process.env.BUS_API_KEY || '';
 
+  // 비정상 응답(plain text 등)을 친절한 메시지로 변환
+  function busApiTextError(text: string, serviceLabel: string): Error {
+    const t = text.trim().slice(0, 100);
+    if (/forbidden/i.test(t)) {
+      return new Error(`${serviceLabel} 권한 없음(Forbidden) — 공공데이터포털에서 해당 서비스 활용신청·승인이 필요합니다.`);
+    }
+    return new Error(`${serviceLabel} 응답 오류: ${t}`);
+  }
+
   async function tagoGet(servicePath: string, params: Record<string, string>): Promise<any[]> {
     if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
     const qs = new URLSearchParams({
@@ -3187,7 +3196,8 @@ async function startServer() {
       const errMsg = (text.match(/<returnAuthMsg>([^<]+)</) || text.match(/<errMsg>([^<]+)</))?.[1] || 'TAGO API 오류';
       throw new Error(errMsg);
     }
-    const data = JSON.parse(text);
+    let data: any;
+    try { data = JSON.parse(text); } catch { throw busApiTextError(text, '국토부 TAGO'); }
     const header = data?.response?.header;
     if (header && header.resultCode !== '00') {
       throw new Error(header.resultMsg || 'TAGO API 오류');
@@ -3207,7 +3217,8 @@ async function startServer() {
       const errMsg = (text.match(/<headerMsg>([^<]+)</) || text.match(/<returnAuthMsg>([^<]+)</))?.[1] || '서울 버스 API 오류 (활용신청 승인 여부 확인)';
       throw new Error(errMsg);
     }
-    const data = JSON.parse(text);
+    let data: any;
+    try { data = JSON.parse(text); } catch { throw busApiTextError(text, '서울 버스 API'); }
     const cd = String(data?.msgHeader?.headerCd ?? '');
     if (cd === '4' || cd === '8') return []; // 결과 없음
     if (cd !== '0') throw new Error(data?.msgHeader?.headerMsg || '서울 버스 API 오류');
@@ -3226,7 +3237,8 @@ async function startServer() {
       const errMsg = (text.match(/<returnAuthMsg>([^<]+)</) || text.match(/<resultMessage>([^<]+)</))?.[1] || '경기 버스 API 오류 (활용신청 승인 여부 확인)';
       throw new Error(errMsg);
     }
-    const data = JSON.parse(text);
+    let data: any;
+    try { data = JSON.parse(text); } catch { throw busApiTextError(text, '경기 버스 API'); }
     const code = String(data?.response?.msgHeader?.resultCode ?? '');
     if (code === '4') return []; // 결과 없음
     if (code !== '0') throw new Error(data?.response?.msgHeader?.resultMessage || '경기 버스 API 오류');
@@ -3288,37 +3300,59 @@ async function startServer() {
     }
   });
 
+  // 공급자별 노선 검색 헬퍼
+  async function searchSeoulRoutes(routeNo: string) {
+    const items = await seoulGet('busRouteInfo/getBusRouteList', { strSrch: routeNo });
+    return items.map((i: any) => ({
+      routeId: String(i.busRouteId),
+      routeNo: String(i.busRouteNm),
+      routeType: SEOUL_ROUTE_TYPES[String(i.routeType)] || '',
+      start: String(i.stStationNm || ''),
+      end: String(i.edStationNm || ''),
+      cityCode: 'SEOUL',
+      region: '서울',
+    }));
+  }
+  async function searchGgRoutes(routeNo: string) {
+    const items = await ggGet('busrouteservice/v2/getBusRouteListv2', { keyword: routeNo }, 'busRouteList');
+    return items.map((i: any) => ({
+      routeId: String(i.routeId),
+      routeNo: String(i.routeName),
+      routeType: String(i.routeTypeName || ''),
+      start: String(i.startStationName || ''),
+      end: String(i.endStationName || ''),
+      cityCode: 'GG',
+      region: '경기',
+    }));
+  }
+
   // 노선번호로 노선 검색 — 도시코드에 따라 서울/경기/TAGO 자동 분기
+  // cityCode=AUTO: 서울+경기를 병렬 검색 (수도권은 도시 선택 없이 번호만 입력)
   app.get('/api/bus/routes', rateLimit(30), async (req: Request, res: Response) => {
     const cityCode = String(req.query.cityCode || '');
     const routeNo = String(req.query.routeNo || '').trim();
     if (!cityCode || !routeNo) return res.status(400).json({ error: 'cityCode, routeNo가 필요합니다.' });
 
     try {
+      if (cityCode === 'AUTO') {
+        const [se, gg] = await Promise.allSettled([searchSeoulRoutes(routeNo), searchGgRoutes(routeNo)]);
+        const out: any[] = [];
+        if (se.status === 'fulfilled') out.push(...se.value);
+        if (gg.status === 'fulfilled') out.push(...gg.value);
+        if (out.length === 0 && se.status === 'rejected' && gg.status === 'rejected') {
+          throw new Error(`서울: ${(se.reason as Error)?.message} / 경기: ${(gg.reason as Error)?.message}`);
+        }
+        return res.json(out);
+      }
+
       const provider = busProvider(cityCode);
 
       if (provider === 'SEOUL') {
-        // 서울특별시_노선정보조회 서비스
-        const items = await seoulGet('busRouteInfo/getBusRouteList', { strSrch: routeNo });
-        return res.json(items.map((i: any) => ({
-          routeId: String(i.busRouteId),
-          routeNo: String(i.busRouteNm),
-          routeType: SEOUL_ROUTE_TYPES[String(i.routeType)] || '',
-          start: String(i.stStationNm || ''),
-          end: String(i.edStationNm || ''),
-        })));
+        return res.json(await searchSeoulRoutes(routeNo));
       }
 
       if (provider === 'GG') {
-        // 경기도_버스노선조회 v2 (용인 등 경기 시군 포함)
-        const items = await ggGet('busrouteservice/v2/getBusRouteListv2', { keyword: routeNo }, 'busRouteList');
-        return res.json(items.map((i: any) => ({
-          routeId: String(i.routeId),
-          routeNo: String(i.routeName),
-          routeType: String(i.routeTypeName || ''),
-          start: String(i.startStationName || ''),
-          end: String(i.endStationName || ''),
-        })));
+        return res.json(await searchGgRoutes(routeNo));
       }
 
       const items = await tagoGet('BusRouteInfoInqireService/getRouteNoList', { cityCode, routeNo });
@@ -3328,6 +3362,8 @@ async function startServer() {
         routeType: String(i.routetp || ''),
         start: String(i.startnodenm || ''),
         end: String(i.endnodenm || ''),
+        cityCode,
+        region: '',
       })));
     } catch (e) {
       busErrorReply(res, e);

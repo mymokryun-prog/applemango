@@ -228,12 +228,12 @@ export default function MapComponent({
   const [busPanelOpen, setBusPanelOpen] = useState(false);
   const [busCities, setBusCities] = useState<Array<{ cityCode: string; cityName: string }>>([]);
   const [busCityCode, setBusCityCode] = useState<string>(() => {
-    try { return localStorage.getItem('aemang_bus_city') || ''; } catch { return ''; }
+    try { return localStorage.getItem('aemang_bus_city') || 'AUTO'; } catch { return 'AUTO'; }
   });
   const [busRouteNo, setBusRouteNo] = useState('');
-  const [busRoutes, setBusRoutes] = useState<Array<{ routeId: string; routeNo: string; routeType: string; start: string; end: string }>>([]);
+  const [busRoutes, setBusRoutes] = useState<Array<{ routeId: string; routeNo: string; routeType: string; start: string; end: string; cityCode?: string; region?: string }>>([]);
   const [busSearching, setBusSearching] = useState(false);
-  const [busTracking, setBusTracking] = useState<{ routeId: string; routeNo: string } | null>(null);
+  const [busTracking, setBusTracking] = useState<{ routeId: string; routeNo: string; cityCode: string } | null>(null);
   const [busLocations, setBusLocations] = useState<Array<{ lat: number; lng: number; vehicleNo: string; nodeName: string }>>([]);
   const [busError, setBusError] = useState<string | null>(null);
   const busKakaoOverlaysRef = useRef<any[]>([]);
@@ -251,10 +251,8 @@ export default function MapComponent({
     });
   };
   const startBusTracking = (entry: { cityCode: string; routeId: string; routeNo: string }) => {
-    if (entry.cityCode !== busCityCode) setBusCityCode(entry.cityCode);
-    try { localStorage.setItem('aemang_bus_city', entry.cityCode); } catch {}
     saveBusRecent(entry);
-    setBusTracking({ routeId: entry.routeId, routeNo: entry.routeNo });
+    setBusTracking({ routeId: entry.routeId, routeNo: entry.routeNo, cityCode: entry.cityCode });
     setBusPanelOpen(false);
   };
 
@@ -288,13 +286,13 @@ export default function MapComponent({
     setBusSearching(false);
   };
 
-  // 선택 노선 실시간 위치 폴링 (15초)
+  // 선택 노선 실시간 위치 폴링 (15초) — 노선이 속한 공급자(cityCode)를 사용
   useEffect(() => {
-    if (!busTracking || !busCityCode) return;
+    if (!busTracking) return;
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch(`/api/bus/locations?cityCode=${encodeURIComponent(busCityCode)}&routeId=${encodeURIComponent(busTracking.routeId)}`);
+        const res = await fetch(`/api/bus/locations?cityCode=${encodeURIComponent(busTracking.cityCode)}&routeId=${encodeURIComponent(busTracking.routeId)}`);
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) { setBusError(data?.error || '버스 위치 조회 실패'); return; }
@@ -307,7 +305,7 @@ export default function MapComponent({
     load();
     const timer = setInterval(load, 15000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [busTracking, busCityCode]);
+  }, [busTracking]);
 
   // 버스 마커 렌더링 (카카오/Leaflet 양쪽 지원)
   useEffect(() => {
@@ -1177,7 +1175,7 @@ export default function MapComponent({
                 onChange={e => setBusCityCode(e.target.value)}
                 className="w-full bg-slate-50 text-[13px] font-bold rounded-xl px-3 py-2.5 focus:outline-none"
               >
-                <option value="">도시 선택</option>
+                <option value="AUTO">🔍 자동 검색 (서울+경기 동시)</option>
                 {busCities.map(c => (
                   <option key={c.cityCode} value={c.cityCode}>{c.cityName}</option>
                 ))}
@@ -1205,11 +1203,15 @@ export default function MapComponent({
                 <div className="space-y-1 max-h-[160px] overflow-y-auto">
                   {busRoutes.map(r => (
                     <button
-                      key={r.routeId}
-                      onClick={() => startBusTracking({ cityCode: busCityCode, routeId: r.routeId, routeNo: r.routeNo })}
+                      key={`${r.cityCode || busCityCode}-${r.routeId}`}
+                      onClick={() => startBusTracking({ cityCode: r.cityCode || busCityCode, routeId: r.routeId, routeNo: r.routeNo })}
                       className="w-full bg-sky-50 hover:bg-sky-100 rounded-xl px-3 py-2 text-left transition"
                     >
-                      <p className="text-[13px] font-black text-sky-700">{r.routeNo}번 <span className="text-[10px] text-slate-400 font-bold">{r.routeType}</span></p>
+                      <p className="text-[13px] font-black text-sky-700">
+                        {r.routeNo}번
+                        {r.region && <span className="ml-1 text-[9px] bg-white text-slate-500 font-bold px-1.5 py-0.5 rounded-full align-middle">{r.region}</span>}
+                        <span className="ml-1 text-[10px] text-slate-400 font-bold">{r.routeType}</span>
+                      </p>
                       <p className="text-[10.5px] text-slate-500 truncate">{r.start} ↔ {r.end}</p>
                     </button>
                   ))}
