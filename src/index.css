@@ -74,3 +74,39 @@ html, body { height: 100%; margin: 0; }
   background: rgba(0, 0, 0, 0.45);
 }
 
+/* Neon Bus Pin Animations */
+@keyframes neonPulse {
+  0% {
+    box-shadow: 0 0 5px rgba(57, 255, 20, 0.6), 0 0 8px rgba(57, 255, 20, 0.4);
+    border-color: #39FF14;
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(57, 255, 20, 0.9), 0 0 18px rgba(57, 255, 20, 0.6);
+    border-color: #00FF7F;
+  }
+  100% {
+    box-shadow: 0 0 5px rgba(57, 255, 20, 0.6), 0 0 8px rgba(57, 255, 20, 0.4);
+    border-color: #39FF14;
+  }
+}
+
+@keyframes arrowMove {
+  0% {
+    transform: translateX(-1.5px);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateX(1.5px);
+    opacity: 1;
+  }
+}
+
+.neon-bus-badge {
+  animation: neonPulse 2s infinite ease-in-out;
+}
+
+.neon-bus-arrow {
+  display: inline-block;
+  animation: arrowMove 0.6s infinite alternate ease-in-out;
+}
+

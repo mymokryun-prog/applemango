@@ -3393,9 +3393,15 @@ async function startServer() {
         ]);
         return res.json(locations.map((i: any) => {
           const seq = Number(i.sectOrd || 0);
-          const stName = stations[String(seq)];
-          const nextStName = stations[String(seq + 1)];
-          const directionMsg = nextStName ? `→ ${nextStName}` : stName ? `${stName} 종점` : '';
+          const st = stations[String(seq)];
+          const nextSt = stations[String(seq + 1)];
+          const directionMsg = (st && nextSt)
+            ? `${st.name} → ${nextSt.name}`
+            : nextSt
+            ? `→ ${nextSt.name}`
+            : st
+            ? `${st.name} 종점`
+            : '';
           return {
             lat: Number(i.gpsY),
             lng: Number(i.gpsX),
@@ -3403,6 +3409,8 @@ async function startServer() {
             nodeName: directionMsg,
             nodeOrder: seq,
             routeNo: '',
+            nextLat: nextSt ? nextSt.lat : null,
+            nextLng: nextSt ? nextSt.lng : null,
           };
         }).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng) && b.lat > 30 && b.lng > 120));
       }
@@ -3417,7 +3425,13 @@ async function startServer() {
           const seq = Number(i.stationSeq || 0);
           const st = stations[String(seq)];
           const nextSt = stations[String(seq + 1)];
-          const directionMsg = nextSt ? `→ ${nextSt.name}` : st ? `${st.name} 종점` : '';
+          const directionMsg = (st && nextSt)
+            ? `${st.name} → ${nextSt.name}`
+            : nextSt
+            ? `→ ${nextSt.name}`
+            : st
+            ? `${st.name} 종점`
+            : '';
           return st ? {
             lat: st.lat,
             lng: st.lng,
@@ -3425,19 +3439,40 @@ async function startServer() {
             nodeName: directionMsg,
             nodeOrder: seq,
             routeNo: '',
+            nextLat: nextSt ? nextSt.lat : null,
+            nextLng: nextSt ? nextSt.lng : null,
           } : null;
         }).filter((b: any) => b && !isNaN(b.lat) && !isNaN(b.lng)));
       }
 
-      const items = await tagoGet('BusLcInfoInqireService/getRouteAcctoBusLcList', { cityCode, routeId });
-      res.json(items.map((i: any) => ({
-        lat: Number(i.gpslati),
-        lng: Number(i.gpslong),
-        vehicleNo: String(i.vehicleno || ''),
-        nodeName: i.nodenm ? `→ ${i.nodenm}` : '',
-        nodeOrder: Number(i.nodeord || 0),
-        routeNo: String(i.routenm || ''),
-      })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng)));
+      const [locations, stations] = await Promise.all([
+        tagoGet('BusLcInfoInqireService/getRouteAcctoBusLcList', { cityCode, routeId }),
+        tagoRouteStations(cityCode, routeId),
+      ]);
+      res.json(locations.map((i: any) => {
+        const seq = Number(i.nodeord || 0);
+        const st = stations[String(seq)];
+        const nextSt = stations[String(seq + 1)];
+        const directionMsg = (st && nextSt)
+          ? `${st.name} → ${nextSt.name}`
+          : nextSt
+          ? `→ ${nextSt.name}`
+          : st
+          ? `${st.name} 종점`
+          : i.nodenm
+          ? `→ ${i.nodenm}`
+          : '';
+        return {
+          lat: Number(i.gpslati),
+          lng: Number(i.gpslong),
+          vehicleNo: String(i.vehicleno || ''),
+          nodeName: directionMsg || i.nodenm || '',
+          nodeOrder: seq,
+          routeNo: String(i.routenm || ''),
+          nextLat: nextSt ? nextSt.lat : null,
+          nextLng: nextSt ? nextSt.lng : null,
+        };
+      }).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng)));
     } catch (e) {
       busErrorReply(res, e);
     }
@@ -3465,16 +3500,20 @@ async function startServer() {
     return { routeName: '알 수 없음', routeTypeName: '' };
   }
 
-  // ── 서울: 노선 ID -> 노선의 정류소 순번별 명칭 캐시
-  const seoulRouteStationsCache: Record<string, { at: number; bySeq: Record<string, string> }> = {};
-  async function seoulRouteStations(routeId: string): Promise<Record<string, string>> {
+  // ── 서울: 노선 ID -> 노선의 정류소 순번별 명칭 및 좌표 캐시
+  const seoulRouteStationsCache: Record<string, { at: number; bySeq: Record<string, { lat: number; lng: number; name: string }> }> = {};
+  async function seoulRouteStations(routeId: string): Promise<Record<string, { lat: number; lng: number; name: string }>> {
     const cached = seoulRouteStationsCache[routeId];
     if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.bySeq;
     try {
       const items = await seoulGet('busRouteInfo/getStaionsByRoute', { busRouteId: routeId });
-      const bySeq: Record<string, string> = {};
+      const bySeq: Record<string, { lat: number; lng: number; name: string }> = {};
       items.forEach((s: any) => {
-        bySeq[String(s.seq)] = String(s.stationNm || '');
+        bySeq[String(s.seq)] = {
+          lat: Number(s.gpsY || 0),
+          lng: Number(s.gpsX || 0),
+          name: String(s.stationNm || ''),
+        };
       });
       seoulRouteStationsCache[routeId] = { at: Date.now(), bySeq };
       return bySeq;
@@ -3483,6 +3522,31 @@ async function startServer() {
       return {};
     }
   }
+
+  // ── 국토부 TAGO: 노선 ID -> 노선의 정류소 순번별 명칭 및 좌표 캐시
+  const tagoRouteStationsCache: Record<string, { at: number; bySeq: Record<string, { lat: number; lng: number; name: string }> }> = {};
+  async function tagoRouteStations(cityCode: string, routeId: string): Promise<Record<string, { lat: number; lng: number; name: string }>> {
+    const key = `${cityCode}_${routeId}`;
+    const cached = tagoRouteStationsCache[key];
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.bySeq;
+    try {
+      const items = await tagoGet('BusRouteInfoInqireService/getRouteAcctoSptSttnList', { cityCode, routeId, numOfRows: '999' });
+      const bySeq: Record<string, { lat: number; lng: number; name: string }> = {};
+      items.forEach((s: any) => {
+        bySeq[String(s.nodeord)] = {
+          lat: Number(s.gpslati || 0),
+          lng: Number(s.gpslong || 0),
+          name: String(s.nodenm || ''),
+        };
+      });
+      tagoRouteStationsCache[key] = { at: Date.now(), bySeq };
+      return bySeq;
+    } catch (e) {
+      console.error(`Failed to get TAGO route stations for ${cityCode}/${routeId}:`, e);
+      return {};
+    }
+  }
+
 
   // ── 정류소 검색 헬퍼들 ──
   async function searchSeoulStations(keyword: string) {

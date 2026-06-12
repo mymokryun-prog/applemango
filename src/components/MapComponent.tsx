@@ -242,7 +242,7 @@ export default function MapComponent({
   const [busRoutes, setBusRoutes] = useState<Array<{ routeId: string; routeNo: string; routeType: string; start: string; end: string; cityCode?: string; region?: string }>>([]);
   const [busSearching, setBusSearching] = useState(false);
   const [busTracking, setBusTracking] = useState<{ routeId: string; routeNo: string; cityCode: string } | null>(null);
-  const [busLocations, setBusLocations] = useState<Array<{ lat: number; lng: number; vehicleNo: string; nodeName: string }>>([]);
+  const [busLocations, setBusLocations] = useState<Array<{ lat: number; lng: number; vehicleNo: string; nodeName: string; nextLat?: number | null; nextLng?: number | null }>>([]);
   const [busError, setBusError] = useState<string | null>(null);
   const busKakaoOverlaysRef = useRef<any[]>([]);
   const busLeafletMarkersRef = useRef<L.Marker[]>([]);
@@ -336,11 +336,55 @@ export default function MapComponent({
 
     if (!busTracking || busLocations.length === 0) return;
 
-    const busHtml = (b: { vehicleNo: string; nodeName: string }) =>
-      `<div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif">
-        <div style="background:#0EA5E9;color:#fff;font-size:10px;font-weight:900;padding:2px 6px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.35);white-space:nowrap">🚌 ${busTracking.routeNo}</div>
-        <div style="background:#fff;color:#334155;font-size:8px;font-weight:700;padding:1px 4px;border-radius:4px;margin-top:2px;box-shadow:0 1px 2px rgba(0,0,0,0.2);white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis">${b.nodeName || b.vehicleNo}</div>
-      </div>`;
+    const busHtml = (b: typeof busLocations[0]) => {
+      let rotation = 0;
+      if (b.nextLat && b.nextLng) {
+        const dy = b.nextLat - b.lat;
+        const dx = Math.cos(Math.PI / 180 * b.lat) * (b.nextLng - b.lng);
+        const bearingAngle = Math.atan2(dx, dy) * 180 / Math.PI;
+        rotation = bearingAngle - 90;
+      }
+
+      const parts = b.nodeName.split('→');
+      let flowHtml = '';
+      if (parts.length >= 2) {
+        const fromSt = parts[0].trim();
+        const toSt = parts[1].trim();
+        flowHtml = `
+          <div style="display:flex;align-items:center;justify-content:center;gap:3px;font-weight:700;width:100%;">
+            <span style="color:#64748b;font-size:8px;max-width:55px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fromSt}">${fromSt}</span>
+            <span style="color:#10b981;font-size:7px;font-weight:bold;flex-shrink:0;">➔</span>
+            <span style="color:#0f172a;font-size:9px;max-width:65px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:900" title="${toSt}">${toSt}</span>
+          </div>
+        `;
+      } else {
+        flowHtml = `
+          <div style="color:#0f172a;font-size:8.5px;font-weight:800;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${b.nodeName}">
+            ${b.nodeName || b.vehicleNo}
+          </div>
+        `;
+      }
+
+      return `
+        <div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif;pointer-events:none">
+          <!-- Upper glowing capsule badge -->
+          <div class="neon-bus-badge" style="background:#1e293b;color:#fff;font-size:10px;font-weight:900;padding:4px 9px;border-radius:20px;border:1.5px solid #39FF14;white-space:nowrap;display:flex;align-items:center;gap:5px;">
+            <!-- Outer rotating container for arrow -->
+            <span style="transform:rotate(${rotation}deg);display:inline-block;flex-shrink:0;" class="neon-bus-arrow">
+              <span style="color:#39FF14;font-size:11px;text-shadow:0 0 4px #39FF14;display:block;line-height:1;">➔</span>
+            </span>
+            <!-- Modern SVG Bus Icon -->
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="#39FF14" style="filter:drop-shadow(0 0 2px #39FF14);flex-shrink:0;"><path d="M18 11H6V6h12v5zm0-7H6C4.9 4 4 4.9 4 6v12c0 1.66 1.34 3 3 3l-1 1v1h12v-1l-1-1c1.66 0 3-1.34 3-3V6c0-1.1-.9-2-2-2zM8.5 17c-.83 0-1.5-.67-1.5-1.5S7.67 14 8.5 14s1.5.67 1.5 1.5S9.33 17 8.5 17zm7 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+            <span style="font-size:11px;font-family:'Space Grotesk',sans-serif;font-weight:900;letter-spacing:-0.2px;">${busTracking.routeNo}</span>
+          </div>
+          <!-- Lower destination / vehicle info plate -->
+          <div style="background:rgba(255, 255, 255, 0.98);color:#1e293b;font-size:8px;font-weight:700;padding:3.5px 7px;border-radius:6px;margin-top:4px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:110px;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2.5px;border:1px solid rgba(226, 232, 240, 0.9);">
+            ${flowHtml}
+            <div style="color:#64748b;font-size:7px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
+          </div>
+        </div>
+      `;
+    };
 
     if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
       busLocations.forEach(b => {
