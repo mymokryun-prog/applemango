@@ -3387,15 +3387,24 @@ async function startServer() {
 
       if (provider === 'SEOUL') {
         // 서울특별시_버스위치정보조회: gpsY=위도, gpsX=경도 (WGS84)
-        const items = await seoulGet('buspos/getBusPosByRtid', { busRouteId: routeId });
-        return res.json(items.map((i: any) => ({
-          lat: Number(i.gpsY),
-          lng: Number(i.gpsX),
-          vehicleNo: String(i.plainNo || ''),
-          nodeName: '',
-          nodeOrder: Number(i.sectOrd || 0),
-          routeNo: '',
-        })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng) && b.lat > 30 && b.lng > 120));
+        const [locations, stations] = await Promise.all([
+          seoulGet('buspos/getBusPosByRtid', { busRouteId: routeId }),
+          seoulRouteStations(routeId),
+        ]);
+        return res.json(locations.map((i: any) => {
+          const seq = Number(i.sectOrd || 0);
+          const stName = stations[String(seq)];
+          const nextStName = stations[String(seq + 1)];
+          const directionMsg = nextStName ? `→ ${nextStName}` : stName ? `${stName} 종점` : '';
+          return {
+            lat: Number(i.gpsY),
+            lng: Number(i.gpsX),
+            vehicleNo: String(i.plainNo || ''),
+            nodeName: directionMsg,
+            nodeOrder: seq,
+            routeNo: '',
+          };
+        }).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng) && b.lat > 30 && b.lng > 120));
       }
 
       if (provider === 'GG') {
@@ -3405,13 +3414,16 @@ async function startServer() {
           ggRouteStations(routeId),
         ]);
         return res.json(locations.map((i: any) => {
-          const st = stations[String(i.stationSeq)];
+          const seq = Number(i.stationSeq || 0);
+          const st = stations[String(seq)];
+          const nextSt = stations[String(seq + 1)];
+          const directionMsg = nextSt ? `→ ${nextSt.name}` : st ? `${st.name} 종점` : '';
           return st ? {
             lat: st.lat,
             lng: st.lng,
             vehicleNo: String(i.plateNo || ''),
-            nodeName: st.name,
-            nodeOrder: Number(i.stationSeq || 0),
+            nodeName: directionMsg,
+            nodeOrder: seq,
             routeNo: '',
           } : null;
         }).filter((b: any) => b && !isNaN(b.lat) && !isNaN(b.lng)));
@@ -3422,7 +3434,7 @@ async function startServer() {
         lat: Number(i.gpslati),
         lng: Number(i.gpslong),
         vehicleNo: String(i.vehicleno || ''),
-        nodeName: String(i.nodenm || ''),
+        nodeName: i.nodenm ? `→ ${i.nodenm}` : '',
         nodeOrder: Number(i.nodeord || 0),
         routeNo: String(i.routenm || ''),
       })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng)));
@@ -3453,6 +3465,25 @@ async function startServer() {
     return { routeName: '알 수 없음', routeTypeName: '' };
   }
 
+  // ── 서울: 노선 ID -> 노선의 정류소 순번별 명칭 캐시
+  const seoulRouteStationsCache: Record<string, { at: number; bySeq: Record<string, string> }> = {};
+  async function seoulRouteStations(routeId: string): Promise<Record<string, string>> {
+    const cached = seoulRouteStationsCache[routeId];
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.bySeq;
+    try {
+      const items = await seoulGet('busRouteInfo/getStaionsByRoute', { busRouteId: routeId });
+      const bySeq: Record<string, string> = {};
+      items.forEach((s: any) => {
+        bySeq[String(s.seq)] = String(s.stationNm || '');
+      });
+      seoulRouteStationsCache[routeId] = { at: Date.now(), bySeq };
+      return bySeq;
+    } catch (e) {
+      console.error(`Failed to get Seoul route stations for ${routeId}:`, e);
+      return {};
+    }
+  }
+
   // ── 정류소 검색 헬퍼들 ──
   async function searchSeoulStations(keyword: string) {
     const items = await seoulGet('stationinfo/getStationByName', { stSrch: keyword });
@@ -3470,16 +3501,32 @@ async function startServer() {
 
   async function searchGgStations(keyword: string) {
     const items = await ggGet('busstationservice/v2/getBusStationListv2', { keyword }, 'busStationList');
-    return items.map((i: any) => ({
-      stationId: String(i.stationId || ''),
-      stationName: String(i.stationName || ''),
-      stationNo: String(i.mobileNo || ''),
-      nextStationName: String(i.nextStationName || ''),
-      lat: Number(i.y || 0),
-      lng: Number(i.x || 0),
-      cityCode: 'GG',
-      region: '경기',
-    })).filter((s: any) => s.stationId && !isNaN(s.lat) && !isNaN(s.lng));
+    const results = await Promise.all(items.map(async (i: any) => {
+      const stationId = String(i.stationId || '');
+      let nextStationName = '';
+      try {
+        const routes = await ggGet('busstationservice/v2/getBusStationViaRouteListv2', { stationId }, 'busRouteList');
+        if (routes && routes.length > 0) {
+          const dests = Array.from(new Set(routes.map((r: any) => String(r.routeDestName || '')).filter(Boolean)));
+          if (dests.length > 0) {
+            nextStationName = dests.slice(0, 2).join(', ') + ' 방면';
+          }
+        }
+      } catch (err) {
+        // 일부 API 에러 등은 빈 방면으로 복귀
+      }
+      return {
+        stationId,
+        stationName: String(i.stationName || ''),
+        stationNo: String(i.mobileNo || ''),
+        nextStationName,
+        lat: Number(i.y || 0),
+        lng: Number(i.x || 0),
+        cityCode: 'GG',
+        region: '경기',
+      };
+    }));
+    return results.filter((s: any) => s.stationId && !isNaN(s.lat) && !isNaN(s.lng));
   }
 
   async function searchTagoStations(cityCode: string, keyword: string) {
