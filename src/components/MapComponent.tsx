@@ -1197,7 +1197,7 @@ export default function MapComponent({
               )}
 
               <p className="text-[8.5px] text-slate-400 leading-tight">
-                전국 대부분 도시 지원 (TAGO). 서울·경기 노선은 별도 API 연동 예정입니다.
+                서울·경기 포함 전국 지원. 경기 버스는 정류장 단위 위치로 표시됩니다.
               </p>
             </>
           )}
