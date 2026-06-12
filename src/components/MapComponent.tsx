@@ -29,6 +29,7 @@ interface MapComponentProps {
   onMyGpsCentered?: () => void;
   onUpdateStatusMsg?: (id: string, text: string) => void;
   isLobbyBusMode?: boolean;
+  isLobbySubwayMode?: boolean;
 }
 
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
@@ -194,6 +195,7 @@ export default function MapComponent({
   myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered = () => {},
   onUpdateStatusMsg = () => {},
   isLobbyBusMode = false,
+  isLobbySubwayMode = false,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   // 지도 검색 결과 '보기'용 좌표 — 컴포넌트가 지도 탭 진입마다 새로 마운트되어 자동 초기화됨(약속 연동 아님)
@@ -274,6 +276,156 @@ export default function MapComponent({
     setBusTracking({ routeId: entry.routeId, routeNo: entry.routeNo, cityCode: entry.cityCode });
     setBusPanelOpen(false);
   };
+
+  // ===== 🚇 실시간 지하철 위치 및 도착 정보 레이어 =====
+  const [subwayPanelOpen, setSubwayPanelOpen] = useState(false);
+  useEffect(() => {
+    if (isLobbySubwayMode) {
+      setSubwayPanelOpen(true);
+    }
+  }, [isLobbySubwayMode]);
+
+  const [subwayKeyword, setSubwayKeyword] = useState('');
+  const [subwayStations, setSubwayStations] = useState<Array<{ stationId: string; stationName: string; lat: number; lng: number }>>([]);
+  const [subwaySearching, setSubwaySearching] = useState(false);
+  const [selectedSubwayStation, setSelectedSubwayStation] = useState<{ stationId: string; stationName: string; lat: number; lng: number } | null>(null);
+  const [subwayArrivals, setSubwayArrivals] = useState<Array<{ subwayId: string; updnLine: string; trainLineNm: string; arvlMsg2: string; arvlMsg3: string; barvlDt: number; trainNo: string; statnNm: string }>>([]);
+  const [subwayArrivalLoading, setSubwayArrivalLoading] = useState(false);
+  const [subwayError, setSubwayError] = useState<string | null>(null);
+  const subwayKakaoOverlaysRef = useRef<any[]>([]);
+  const subwayLeafletMarkersRef = useRef<L.Marker[]>([]);
+
+  const stopSubwayTracking = () => {
+    setSelectedSubwayStation(null);
+    setSubwayArrivals([]);
+    setSubwayStations([]);
+    setSubwayKeyword('');
+  };
+
+  // 선택 지하철역 실시간 도착 정보 조회 및 폴링 (15초)
+  useEffect(() => {
+    if (!selectedSubwayStation) {
+      setSubwayArrivals([]);
+      return;
+    }
+    let cancelled = false;
+    const loadSubwayArrivals = async () => {
+      setSubwayArrivalLoading(true);
+      try {
+        const res = await fetch(`/api/subway/arrivals?stationName=${encodeURIComponent(selectedSubwayStation.stationName)}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setSubwayError(data?.error || '지하철 도착 정보 조회 실패'); return; }
+        setSubwayError(null);
+        setSubwayArrivals(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setSubwayError('지하철 도착 정보 조회 실패 (네트워크)');
+      }
+      setSubwayArrivalLoading(false);
+    };
+    loadSubwayArrivals();
+    const timer = setInterval(loadSubwayArrivals, 15000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [selectedSubwayStation]);
+
+  // 선택 지하철역 마커 렌더링 및 카메라 이동
+  useEffect(() => {
+    subwayKakaoOverlaysRef.current.forEach(o => { try { o.setMap(null); } catch {} });
+    subwayKakaoOverlaysRef.current = [];
+    subwayLeafletMarkersRef.current.forEach(m => { try { m.remove(); } catch {} });
+    subwayLeafletMarkersRef.current = [];
+
+    if (!selectedSubwayStation) return;
+
+    const stationHtml = `
+      <div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif;pointer-events:none">
+        <div style="background:#10B981;color:#fff;font-size:11px;font-weight:900;padding:4.5px 9px;border-radius:20px;border:1.5px solid #39FF14;box-shadow:0 0 8px rgba(57,255,20,0.8);white-space:nowrap;display:flex;align-items:center;gap:4px">
+          <span>🚇</span> <span>${selectedSubwayStation.stationName}</span>
+        </div>
+      </div>
+    `;
+
+    const latLng = { lat: selectedSubwayStation.lat, lng: selectedSubwayStation.lng };
+
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      const moveLatlng = new window.kakao.maps.LatLng(latLng.lat, latLng.lng);
+      kakaoMapInstanceRef.current.setCenter(moveLatlng);
+      
+      const overlay = new window.kakao.maps.CustomOverlay({
+        position: moveLatlng,
+        content: stationHtml,
+        yAnchor: 0.5,
+        zIndex: 5,
+      });
+      overlay.setMap(kakaoMapInstanceRef.current);
+      subwayKakaoOverlaysRef.current.push(overlay);
+    } else if (leafletMapInstanceRef.current) {
+      leafletMapInstanceRef.current.setView([latLng.lat, latLng.lng], 16);
+      
+      const marker = L.marker([latLng.lat, latLng.lng], {
+        icon: L.divIcon({ className: '', html: stationHtml, iconSize: [0, 0] }),
+        interactive: false,
+      });
+      marker.addTo(leafletMapInstanceRef.current!);
+      subwayLeafletMarkersRef.current.push(marker);
+    }
+  }, [selectedSubwayStation, isKakaoReady, useFallbackMap]);
+
+  const handleSubwayStationSearch = async () => {
+    if (!subwayKeyword.trim()) { setSubwayError('지하철역 이름을 입력해 주세요.'); return; }
+    setSubwaySearching(true);
+    setSubwayError(null);
+    setSubwayStations([]);
+    
+    const query = subwayKeyword.trim();
+
+    if (isKakaoReady && !useFallbackMap && window.kakao?.maps?.services) {
+      try {
+        const ps = new window.kakao.maps.services.Places();
+        ps.keywordSearch(query, (data: any, status: any) => {
+          setSubwaySearching(false);
+          if (status === window.kakao.maps.services.Status.OK) {
+            const filtered = data.filter((item: any) => item.category_group_code === 'SW8' || item.place_name.endsWith('역'));
+            if (filtered.length > 0) {
+              setSubwayStations(filtered.map((item: any) => ({
+                stationId: item.id,
+                stationName: item.place_name,
+                lat: parseFloat(item.y),
+                lng: parseFloat(item.x),
+              })));
+            } else {
+              setSubwayError('검색어에 매칭되는 지하철역을 찾지 못했습니다.');
+            }
+          } else {
+            setSubwayError('지하철역 검색 결과가 없습니다.');
+          }
+        });
+      } catch (err) {
+        setSubwaySearching(false);
+        setSubwayError('지하철역 검색 중 오류가 발생했습니다.');
+      }
+    } else {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + '역')}`);
+        const data = await res.json();
+        setSubwaySearching(false);
+        if (Array.isArray(data) && data.length > 0) {
+          setSubwayStations(data.slice(0, 8).map((item: any) => ({
+            stationId: String(item.place_id),
+            stationName: item.display_name.split(',')[0],
+            lat: parseFloat(item.lat),
+            lng: parseFloat(item.lon),
+          })));
+        } else {
+          setSubwayError('지하철역 검색 결과가 없습니다.');
+        }
+      } catch {
+        setSubwaySearching(false);
+        setSubwayError('지하철역 검색 중 오류가 발생했습니다. (네트워크)');
+      }
+    }
+  };
+
 
   // 도시 목록 로드 (패널 처음 열 때)
   useEffect(() => {
@@ -1296,7 +1448,7 @@ export default function MapComponent({
       )}
 
       {/* 소집 장소 지정 버튼 / 모드 안내 */}
-      {!isLobbyBusMode && (
+      {!isLobbyBusMode && !isLobbySubwayMode && (
         <button
           type="button"
           onClick={() => setPlaceSelectMode(m => !m)}
@@ -1309,28 +1461,30 @@ export default function MapComponent({
         </button>
       )}
 
-      {/* 🚌 실시간 버스 정보 버튼 (소집 장소 버튼 위) */}
-      <button
-        type="button"
-        onClick={() => setBusPanelOpen(o => !o)}
-        className={`absolute left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
-          isLobbyBusMode ? 'bottom-4' : 'bottom-[68px]'
-        } ${
-          busTracking ? 'bg-sky-500 text-white' : selectedStation ? 'bg-emerald-500 text-white' : 'bg-white text-slate-800'
-        }`}
-      >
-        <span>🚌</span>
-        <span>
-          {busTracking
-            ? `${busTracking.routeNo}번 추적 중 (${busLocations.length}대)`
-            : selectedStation
-            ? `${selectedStation.stationName} 도착 정보`
-            : '버스 정보 보기'}
-        </span>
-      </button>
+      {/* 🚌 실시간 버스 정보 버튼 */}
+      {!isLobbySubwayMode && (
+        <button
+          type="button"
+          onClick={() => setBusPanelOpen(o => !o)}
+          className={`absolute left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+            isLobbyBusMode ? 'bottom-4' : 'bottom-[68px]'
+          } ${
+            busTracking ? 'bg-sky-500 text-white' : selectedStation ? 'bg-emerald-500 text-white' : 'bg-white text-slate-800'
+          }`}
+        >
+          <span>🚌</span>
+          <span>
+            {busTracking
+              ? `${busTracking.routeNo}번 추적 중 (${busLocations.length}대)`
+              : selectedStation
+              ? `${selectedStation.stationName} 도착 정보`
+              : '버스 정보 보기'}
+          </span>
+        </button>
+      )}
 
       {/* 🚌 버스 정보 선택 및 도착 패널 */}
-      {busPanelOpen && (
+      {busPanelOpen && !isLobbySubwayMode && (
         <div className={`absolute left-4 z-30 bg-white rounded-2xl shadow-xl p-4 w-[310px] max-w-[calc(100%-32px)] font-sans space-y-2.5 ${
           isLobbyBusMode ? 'bottom-[60px]' : 'bottom-[116px]'
         }`}>
@@ -1342,9 +1496,15 @@ export default function MapComponent({
           </div>
 
           {busTracking ? (
-            // 1) 노선 추적 중일 때 UI
-            <div className="space-y-2">
-              <p className="text-[12px] text-slate-500">
+            // 1) 노선 추적 중일 때 UI (추적 취소 버튼)
+            <div className="space-y-2.5">
+              <div className="bg-sky-50 rounded-xl p-2.5 text-left">
+                <p className="text-[13px] font-black text-sky-800">
+                  {busTracking.routeNo}번 버스 위치 추적 중
+                </p>
+                <p className="text-[10px] text-sky-600 font-bold">실시간 차량 정보</p>
+              </div>
+              <p className="text-[11px] text-slate-500 font-bold leading-normal text-left pl-1">
                 <b className="text-sky-600">{busTracking.routeNo}번</b> 버스 <b>{busLocations.length}대</b> 표시 중 (15초마다 갱신)
               </p>
               <button onClick={stopBusTracking} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-black py-2.5 rounded-xl transition">
@@ -1388,7 +1548,6 @@ export default function MapComponent({
               <p className="text-[9.5px] text-slate-400 text-center">30초마다 자동으로 갱신됩니다.</p>
               <div className="flex gap-1.5">
                 <button onClick={() => {
-                  // 수동 갱신 트리거
                   const st = selectedStation;
                   setSelectedStation(null);
                   setTimeout(() => setSelectedStation(st), 50);
@@ -1550,14 +1709,263 @@ export default function MapComponent({
                 </>
               )}
 
-              <p className="text-[10px] text-slate-400 leading-tight">
+              <p className="text-[10px] text-slate-400 leading-tight text-left">
                 서울·경기 포함 전국 지원. 버스 도착 예정 정보 조회를 위해서는 공공데이터포털 정류소 및 도착정보 관련 API의 사전 승인이 필요합니다.
               </p>
             </>
           )}
-          {busError && <p className="text-[11px] text-rose-500 font-bold leading-tight">⚠️ {busError}</p>}
+          {busError && <p className="text-[11px] text-rose-500 font-bold leading-tight text-left">⚠️ {busError}</p>}
+        </div>
+      )}
+
+      {/* 🚇 실시간 지하철 정보 버튼 */}
+      {!isLobbyBusMode && (
+        <button
+          type="button"
+          onClick={() => setSubwayPanelOpen(o => !o)}
+          className={`absolute left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+            isLobbySubwayMode ? 'bottom-4' : 'bottom-[120px]'
+          } ${
+            selectedSubwayStation ? 'bg-emerald-500 text-white' : 'bg-white text-slate-800'
+          }`}
+        >
+          <span>🚇</span>
+          <span>
+            {selectedSubwayStation
+              ? `${selectedSubwayStation.stationName} 도착 정보`
+              : '지하철 정보 보기'}
+          </span>
+        </button>
+      )}
+
+      {/* 🚇 지하철 정보 선택 및 도착 패널 */}
+      {subwayPanelOpen && !isLobbyBusMode && (
+        <div className={`absolute left-4 z-30 bg-white rounded-2xl shadow-xl p-4 w-[310px] max-w-[calc(100%-32px)] font-sans space-y-2.5 ${
+          isLobbySubwayMode ? 'bottom-[60px]' : 'bottom-[176px]'
+        }`}>
+          <div className="flex items-center justify-between">
+            <p className="text-[14px] font-black text-slate-800">
+              🚇 {selectedSubwayStation ? '지하철 도착 정보' : '실시간 지하철 정보'}
+            </p>
+            <button onClick={() => setSubwayPanelOpen(false)} className="text-slate-400 hover:text-slate-600 text-sm w-6 h-6">✕</button>
+          </div>
+
+          {subwayError && (
+            <div className="bg-rose-50 text-rose-600 text-[11px] font-bold p-2.5 rounded-xl text-left">
+              ⚠️ {subwayError}
+            </div>
+          )}
+
+          {selectedSubwayStation ? (
+            // 지하철 도착 예정 정보 출력
+            <div className="space-y-2.5">
+              <div className="bg-emerald-50 rounded-xl p-2.5 text-left">
+                <p className="text-[13px] font-black text-emerald-800">
+                  {selectedSubwayStation.stationName}
+                </p>
+                <p className="text-[10px] text-emerald-600 font-bold">실시간 도착 안내</p>
+              </div>
+
+              <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-0.5">
+                {subwayArrivalLoading && subwayArrivals.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 text-center py-4">도착 정보를 불러오는 중입니다…</p>
+                ) : subwayArrivals.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 text-center py-4">도착 예정인 열차가 없습니다.</p>
+                ) : (
+                  // Group arrivals by subwayId (line)
+                  Array.from(new Set(subwayArrivals.map(a => a.subwayId))).map((lineId: string) => {
+                    const lineArrivals = subwayArrivals.filter(a => a.subwayId === lineId);
+                    const lineName = getSubwayLineName(lineId);
+                    const lineColor = getSubwayLineColor(lineId);
+                    return (
+                      <div key={lineId} className="border border-slate-100 rounded-xl p-2 space-y-1.5 bg-slate-50/50">
+                        <div className="flex items-center gap-1.5 text-left">
+                          <span style={{ backgroundColor: lineColor }} className="w-2.5 h-2.5 rounded-full inline-block"></span>
+                          <span className="text-[11px] font-black text-slate-700">{lineName}</span>
+                        </div>
+                        <div className="space-y-1">
+                          {lineArrivals.map((a, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-white border border-slate-100 rounded-lg px-2.5 py-1.5 text-left">
+                              <div className="flex flex-col">
+                                <span className="text-[11.5px] font-extrabold text-slate-800">{a.trainLineNm}</span>
+                                <span className="text-[8.5px] text-slate-400 font-bold">열차번호 {a.trainNo} ({a.updnLine})</span>
+                              </div>
+                              <span className={`text-[10.5px] font-black px-2 py-0.5 rounded-full ${
+                                a.arvlMsg2.includes('진입') || a.arvlMsg2.includes('도착') || a.arvlMsg2.includes('전역')
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {a.arvlMsg2}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* 지하철 편의성/해맴방지 팁 (화장실 위치 등) */}
+              {getRestroomTip(selectedSubwayStation.stationName) && (
+                <div className="bg-sky-50 text-sky-800 text-[10px] font-bold p-2.5 rounded-xl text-left border border-sky-100 leading-relaxed">
+                  <span className="font-extrabold text-sky-900 block mb-0.5">💡 해맴 방지 지하철 꿀팁!</span>
+                  <span>{getRestroomTip(selectedSubwayStation.stationName)}</span>
+                </div>
+              )}
+
+              <p className="text-[9.5px] text-slate-400 text-center">15초마다 자동으로 갱신됩니다.</p>
+              <div className="flex gap-1.5">
+                <button onClick={() => {
+                  const st = selectedSubwayStation;
+                  setSelectedSubwayStation(null);
+                  setTimeout(() => setSelectedSubwayStation(st), 50);
+                }} className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[12px] font-bold py-2 rounded-xl transition">
+                  새로고침
+                </button>
+                <button onClick={stopSubwayTracking} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[12px] font-bold py-2 rounded-xl transition">
+                  추적 중지
+                </button>
+              </div>
+            </div>
+          ) : (
+            // 지하철역 검색 UI
+            <>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={subwayKeyword}
+                  onChange={e => setSubwayKeyword(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSubwayStationSearch(); }}
+                  placeholder="지하철역 이름 (예: 강남, 신도림)"
+                  className="flex-1 bg-slate-50 text-[13px] font-bold rounded-xl px-3 py-2.5 focus:outline-none min-w-0"
+                />
+                <button
+                  onClick={handleSubwayStationSearch}
+                  disabled={subwaySearching}
+                  className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 text-white text-[13px] font-black px-4 rounded-xl transition shrink-0"
+                >
+                  {subwaySearching ? '…' : '검색'}
+                </button>
+              </div>
+
+              {subwayStations.length > 0 && (
+                <div className="space-y-1 max-h-[180px] overflow-y-auto pr-0.5">
+                  {subwayStations.map(s => (
+                    <button
+                      key={s.stationId}
+                      onClick={() => {
+                        setSelectedSubwayStation(s);
+                        setSearchFocusCoords([s.lat, s.lng]);
+                      }}
+                      className="w-full bg-emerald-50 hover:bg-emerald-100 rounded-xl px-3 py-2 text-left transition"
+                    >
+                      <p className="text-[13px] font-black text-emerald-800">
+                        🚇 {s.stationName}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
+
+// ===== 🚇 지하철 실시간 정보 보조 헬퍼 함수 =====
+const getSubwayLineName = (subwayId: string): string => {
+  switch (subwayId) {
+    case '1001': return '1호선';
+    case '1002': return '2호선';
+    case '1003': return '3호선';
+    case '1004': return '4호선';
+    case '1005': return '5호선';
+    case '1006': return '6호선';
+    case '1007': return '7호선';
+    case '1008': return '8호선';
+    case '1009': return '9호선';
+    case '1061': return '경의중앙선';
+    case '1063': return '경의선';
+    case '1065': return '공항철도';
+    case '1067': return '경춘선';
+    case '1075': return '수인분당선';
+    case '1077': return '신분당선';
+    case '1092': return '우이신설선';
+    case '1093': return '서해선';
+    case '1081': return '경강선';
+    case '1032': return 'GTX-A';
+    default: return '지하철';
+  }
+};
+
+const getSubwayLineColor = (subwayId: string): string => {
+  switch (subwayId) {
+    case '1001': return '#0052A4';
+    case '1002': return '#00A84D';
+    case '1003': return '#EF7C1C';
+    case '1004': return '#00A5DE';
+    case '1005': return '#996CAC';
+    case '1006': return '#CD7C2F';
+    case '1007': return '#747F00';
+    case '1008': return '#E6186C';
+    case '1009': return '#BDB092';
+    case '1061':
+    case '1063': return '#77C4A3';
+    case '1065': return '#0090D2';
+    case '1067': return '#0C8E72';
+    case '1075': return '#F5A200';
+    case '1077': return '#D4003B';
+    case '1092': return '#B7C452';
+    case '1093': return '#81A914';
+    case '1081': return '#003DA5';
+    case '1032': return '#9B1B30';
+    default: return '#475569';
+  }
+};
+
+const getRestroomTip = (stationName: string): string => {
+  const name = stationName.replace(/역$/, '').trim();
+  if (name.includes('강남')) {
+    return '개찰구 내부(안쪽) 지하 1층 2호선 승강장 및 7/8번 출구 근처에 화장실이 있습니다.';
+  }
+  if (name.includes('신도림')) {
+    return '1호선 승강장 내부 및 2호선 개찰구 밖(1, 5번 출구 지하 광장)에 화장실이 있어 편리합니다.';
+  }
+  if (name.includes('서울')) {
+    return '공항철도 지하 2층 개찰구 안쪽, 1/4호선 지하 대합실 개찰구 바깥 대합실 중앙(공항철도 연결통로 부근)에 위치해 있습니다.';
+  }
+  if (name.includes('홍대입구')) {
+    return '2호선 개찰구 바깥(8/9번 출구 방향) 및 공항철도/경의중앙선 환승통로 부근(개찰구 내부)에 있습니다.';
+  }
+  if (name.includes('고속터미널')) {
+    return '3/7/9호선 환승 통로 개찰구 내부와 7호선 대합실 개찰구 밖(3/4번 출구 방향)에 화장실이 있습니다.';
+  }
+  if (name.includes('사당')) {
+    return '2/4호선 환승 통로(개찰구 내부) 및 4호선 지하 대합실 개찰구 바깥(13/14번 출구 방향)에 있습니다.';
+  }
+  if (name.includes('신촌')) {
+    return '2호선 개찰구 바깥(7/8번 출구 방향) 대합실 쪽에 화장실이 있습니다.';
+  }
+  if (name.includes('혜화')) {
+    return '4호선 개찰구 안쪽 승강장 화장실이 없으므로, 개찰구 밖 대합실 중앙 화장실을 이용해 주세요.';
+  }
+  if (name.includes('건대입구')) {
+    return '2호선 개찰구 안(승강장 연결통로) 및 7호선 지하 대합실 개찰구 밖(3/4번 출구 방향)에 있습니다.';
+  }
+  if (name.includes('잠실')) {
+    return '2호선 개찰구 안(대합실 내부) 및 8호선 개찰구 밖(9/10번 출구 방향 지하상가)에 화장실이 있습니다.';
+  }
+  if (name.includes('여의도')) {
+    return '5/9호선 지하 2층 환승 통로(개찰구 내부) 및 5호선 대합실 개찰구 밖(3/4번 출구 쪽)에 있습니다.';
+  }
+  if (name.includes('명동')) {
+    return '4호선 지하 대합실 개찰구 바깥(1~10번 출구 방향 대합실 남단)에 화장실이 있습니다.';
+  }
+  if (name.includes('동대문역사문화공원')) {
+    return '2호선 개찰구 밖(1/2/14번 출구 방향) 및 4/5호선 환승통로(개찰구 내부)에 있습니다.';
+  }
+  return '역내 대합실(개찰구 주변) 또는 개찰구 안팎 연결 통로의 이정표를 따라 이동하시면 화장실을 이용할 수 있습니다.';
+};

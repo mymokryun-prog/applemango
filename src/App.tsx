@@ -13,7 +13,7 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote, TrendingUp, GraduationCap, Bus } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote, TrendingUp, GraduationCap, Bus, Train } from 'lucide-react';
 import { App as CapacitorApp } from '@capacitor/app';
 import LifeToolsPanel from './components/LifeToolsPanel';
 import GamePanel from './components/GamePanel';
@@ -56,12 +56,12 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice' | 'parents' | 'students' | 'bus'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice' | 'parents' | 'students' | 'bus' | 'subway'>('rooms');
 
   // 2단계 내비게이션: 'lobby'(로비 = 앱 접속 첫 화면, 전체 공개 기능) / 'room'(특정 그룹방 내부, 멤버 전용 폐쇄 기능)
   // 로비 탭(전체 공개): 그룹방·연락처·알림·음악·맛집·책·게임방
   // 방 내부 탭(그룹 멤버 전용): 지도·채팅·약속·만보기
-  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice', 'parents', 'students', 'bus'] as const;
+  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice', 'parents', 'students', 'bus', 'subway'] as const;
   const ROOM_TABS = ['chat', 'map', 'appointments', 'pedometer', 'roomNotice'] as const;
   const [view, setView] = useState<'lobby' | 'room'>('lobby');
 
@@ -2771,6 +2771,17 @@ export default function App() {
             isLobbyBusMode={true}
           />
         )}
+
+        {activeTab === 'subway' && (
+          <MapComponent
+            friends={[]}
+            appointments={[]}
+            activeProfileId={activeProfileId}
+            myGpsCoords={myCoords ? [myCoords.lat, myCoords.lng] : null}
+            centerOnMyGpsOnce={true}
+            isLobbySubwayMode={true}
+          />
+        )}
       </div>
 
       {/* BIZ-CORE-8 ④: 보호자 SOS 알림 오버레이 (구 119 시뮬레이션 대체) */}
@@ -2881,6 +2892,7 @@ export default function App() {
               { id: 'parents' as const, Icon: TrendingUp, label: '부모', activeCls: 'text-emerald-600 bg-emerald-50 border border-emerald-100', onClick: () => setActiveTab('parents') },
               { id: 'students' as const, Icon: GraduationCap, label: '학생', activeCls: 'text-sky-600 bg-sky-50 border border-sky-100', onClick: () => setActiveTab('students') },
               { id: 'bus' as const, Icon: Bus, label: '버스', activeCls: 'text-sky-500 bg-sky-50 border border-sky-100', onClick: () => setActiveTab('bus') },
+              { id: 'subway' as const, Icon: Train, label: '지하철', activeCls: 'text-emerald-500 bg-emerald-50 border border-emerald-100', onClick: () => setActiveTab('subway') },
             ]).map(({ id, Icon, label, activeCls, onClick }) => (
               <button
                 key={id}

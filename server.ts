@@ -3478,6 +3478,50 @@ async function startServer() {
     }
   });
 
+  // 지하철 실시간 도착 정보 조회
+  app.get('/api/subway/arrivals', rateLimit(60), async (req: Request, res: Response) => {
+    const stationName = String(req.query.stationName || '').trim();
+    if (!stationName) return res.status(400).json({ error: 'stationName이 필요합니다.' });
+
+    try {
+      const key = process.env.SUBWAY_API_KEY || 'sample';
+      const isSample = key === 'sample';
+      const startIndex = 1;
+      const endIndex = isSample ? 5 : 50;
+      
+      let cleanName = stationName.replace(/역$/, '').trim();
+      const finalName = cleanName === '서울' ? '서울역' : cleanName;
+
+      const url = `http://swopenapi.seoul.go.kr/api/subway/${key}/json/realtimeStationArrival/${startIndex}/${endIndex}/${encodeURIComponent(finalName)}`;
+      const resp = await fetch(url);
+      const text = await resp.text();
+
+      if (text.trim().startsWith('<') || text.trim().startsWith('{') === false) {
+        throw new Error('지하철 API 응답 오류 (인증키 권한 제한 또는 네트워크 일시 장애)');
+      }
+
+      const data = JSON.parse(text);
+      if (data?.errorMessage?.status === 200 || data?.realtimeArrivalList) {
+        const list = data.realtimeArrivalList || [];
+        return res.json(list.map((i: any) => ({
+          subwayId: String(i.subwayId || ''),
+          updnLine: String(i.updnLine || ''),
+          trainLineNm: String(i.trainLineNm || ''),
+          arvlMsg2: String(i.arvlMsg2 || ''),
+          arvlMsg3: String(i.arvlMsg3 || ''),
+          barvlDt: Number(i.barvlDt || 0),
+          trainNo: String(i.trainNo || ''),
+          statnNm: String(i.statnNm || ''),
+        })));
+      } else {
+        return res.json([]);
+      }
+    } catch (e: any) {
+      console.error('Subway API Error:', e);
+      res.status(500).json({ error: e?.message || '지하철 도착 정보 조회 실패' });
+    }
+  });
+
   // ── 경기: 노선 ID -> 노선 정보(노선번호 등) 캐시
   const ggRouteInfoCache: Record<string, { routeName: string; routeTypeName: string }> = {};
   async function getGgRouteInfo(routeId: string): Promise<{ routeName: string; routeTypeName: string }> {
