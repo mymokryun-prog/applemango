@@ -2623,11 +2623,15 @@ async function startServer() {
     //  - 위치공유 OFF(프라이버시) / 로그아웃 / 아직 실제 위치를 한 번도 공유 안 함(located 아님)
     //  ※ 단순 앱 종료(offline)는 숨기지 않음 → 마지막 위치를 계속 정상 표시
     const list = Object.values(room.friends).map((f: any) => {
-      const locationHidden = f.shareLocation === false || f.loggedOut === true || !f.located;
+      // 프로필 사진 동기화: 전역 프로필에 등록된 최신 아바타(사진 포함)가 있으면 우선 사용
+      // (방 가입 시점의 이모지가 굳어 있어 사진이 안 보이던 문제 해결)
+      const profileAvatar = dbUserProfiles[f.id]?.avatar;
+      const merged = profileAvatar && profileAvatar !== f.avatar ? { ...f, avatar: profileAvatar } : f;
+      const locationHidden = merged.shareLocation === false || merged.loggedOut === true || !merged.located;
       if (locationHidden) {
-        return { ...f, lat: null, lng: null, route: [], locationHidden: true };
+        return { ...merged, lat: null, lng: null, route: [], locationHidden: true };
       }
-      return f;
+      return merged;
     });
     res.json(list);
   });

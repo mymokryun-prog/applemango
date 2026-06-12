@@ -65,6 +65,8 @@ export default function PedometerPanel({
   const [careWatchStates, setCareWatchStates] = useState<Record<string, boolean>>({});
   // ③ 오늘 이동 타임라인 요약
   const [timelineSummary, setTimelineSummary] = useState<{ distanceM: number; pointCount: number } | null>(null);
+  // 친구 일별 걸음 기록 모달
+  const [historyFriend, setHistoryFriend] = useState<Friend | null>(null);
 
   // 챌린지 현황 로드
   const loadChallenge = async () => {
@@ -481,20 +483,88 @@ export default function PedometerPanel({
             return (
               <div className="space-y-2">
                 {ranked.map((f, idx) => (
-                  <div key={f.id} className={`flex items-center gap-2.5 ${f.isMe ? 'bg-rose-50 -mx-2 px-2 py-1.5 rounded-xl' : ''}`}>
+                  <button
+                    type="button"
+                    key={f.id}
+                    onClick={() => {
+                      const target = friends.find(fr => fr.id === f.id);
+                      if (target) setHistoryFriend(target);
+                    }}
+                    title="탭하면 일별 기록 보기"
+                    className={`w-full flex items-center gap-2.5 text-left rounded-xl transition hover:bg-slate-50 cursor-pointer ${f.isMe ? 'bg-rose-50 -mx-2 px-2 py-1.5' : 'px-0 py-0.5'}`}
+                  >
                     <span className="text-[11px] font-black text-gray-400 w-4 text-center shrink-0">{idx + 1}</span>
-                    <span className="text-base shrink-0">{f.avatar || '🙂'}</span>
+                    <span className="text-base shrink-0">{(f.avatar || '🙂').startsWith('data:image/') ? <img src={f.avatar} alt="" className="w-5 h-5 rounded-full object-cover inline-block" /> : (f.avatar || '🙂')}</span>
                     <span className="text-xs font-bold text-gray-800 flex-1 truncate">
                       {f.name}{f.isMe && <span className="text-rose-500"> (나)</span>}
                     </span>
                     <span className="text-xs font-extrabold text-gray-900 font-mono">{f.steps.toLocaleString()}</span>
-                    <span className="text-[10px] text-gray-400">걸음</span>
-                  </div>
+                    <span className="text-[10px] text-gray-400">걸음 ▸</span>
+                  </button>
                 ))}
               </div>
             );
           })()}
         </div>
+
+        {/* 친구 일별 걸음 기록 모달 */}
+        {historyFriend && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 font-sans" onClick={() => setHistoryFriend(null)}>
+            <div className="bg-white rounded-3xl p-5 w-full max-w-[330px] max-h-[80%] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+                  <span className="text-lg">{(historyFriend.avatar || '🙂').startsWith('data:image/') ? <img src={historyFriend.avatar} alt="" className="w-6 h-6 rounded-full object-cover inline-block" /> : historyFriend.avatar}</span>
+                  <span>{(historyFriend.name || '').replace(' (대기)', '').replace(' (합류)', '')} 님의 걸음 기록</span>
+                </h4>
+                <button onClick={() => setHistoryFriend(null)} className="w-7 h-7 rounded-full hover:bg-gray-100 text-gray-400">✕</button>
+              </div>
+              {(() => {
+                const hist = (historyFriend as any).stepsHistory || {};
+                const todayStr = getTodayString();
+                const todaySteps = (historyFriend as any).stepsTodayDate === todayStr ? ((historyFriend as any).stepsToday || 0) : 0;
+                const merged: Record<string, number> = { ...hist };
+                merged[todayStr] = Math.max(merged[todayStr] || 0, todaySteps);
+                const days = Object.entries(merged)
+                  .map(([date, steps]) => ({ date, steps: Number(steps) || 0 }))
+                  .sort((a, b) => b.date.localeCompare(a.date))
+                  .slice(0, 14);
+                if (days.length === 0) {
+                  return <p className="text-[11px] text-gray-400 text-center py-6">아직 공유된 걸음 기록이 없습니다.<br/>친구가 만보기를 켜면 자동으로 쌓입니다.</p>;
+                }
+                const maxSteps = Math.max(...days.map(d => d.steps), 1);
+                const graphDays = [...days].reverse();
+                return (
+                  <>
+                    {/* 막대 그래프 (최근 14일) */}
+                    <div className="flex gap-1.5 items-end h-28 overflow-x-auto py-2 px-1">
+                      {graphDays.map(d => (
+                        <div key={d.date} className="flex flex-col items-center shrink-0 w-9 gap-1">
+                          <span className="text-[8px] font-black text-slate-600 font-mono">{d.steps >= 1000 ? `${(d.steps / 1000).toFixed(1)}k` : d.steps}</span>
+                          <div className="w-6 bg-slate-50 rounded-t-md h-16 flex items-end border border-slate-100">
+                            <div
+                              className={`w-full rounded-t-md ${d.date === todayStr ? 'bg-gradient-to-t from-rose-500 to-rose-400' : 'bg-gradient-to-t from-sky-500 to-sky-300'}`}
+                              style={{ height: `${Math.max(6, Math.round((d.steps / maxSteps) * 100))}%` }}
+                            />
+                          </div>
+                          <span className={`text-[8px] font-bold ${d.date === todayStr ? 'text-rose-600' : 'text-slate-400'}`}>{d.date === todayStr ? '오늘' : d.date.slice(5).replace('-', '.')}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {/* 일별 리스트 */}
+                    <div className="divide-y divide-gray-50 max-h-40 overflow-y-auto mt-1">
+                      {days.map(d => (
+                        <div key={d.date} className="flex items-center justify-between py-2">
+                          <span className="text-[11px] font-bold text-gray-700">{d.date}{d.date === todayStr && <span className="text-rose-500 font-black"> [오늘]</span>}</span>
+                          <span className="text-xs font-extrabold text-gray-900 font-mono">{d.steps.toLocaleString()} 걸음</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
 
         {/* BIZ-CORE-8 ⑤: 가족 걸음 챌린지 */}
         <div className="bg-white rounded-3xl p-5 border border-amber-100 shadow-sm space-y-3">

@@ -4024,7 +4024,9 @@ function BaseballGame({ onBack, friends, activeProfileId, activeRoomId, multipla
   const [winner, setWinner] = useState<'me' | 'opp' | null>(null);
   const mySecretRef = useRef(mySecret);
   const reportedRef = useRef(false);
+  const myReadyRef = useRef(myReady);
   useEffect(() => { mySecretRef.current = mySecret; }, [mySecret]);
+  useEffect(() => { myReadyRef.current = myReady; }, [myReady]);
 
   // 멀티플레이 수신
   useEffect(() => {
@@ -4035,6 +4037,14 @@ function BaseballGame({ onBack, friends, activeProfileId, activeRoomId, multipla
       if (payload.from !== multiplayerConfig!.opponentId) return;
       if (payload.kind === 'ready') {
         setOppReady(true);
+        // 에코 응답: 내가 이미 준비됐다면 내 ready를 즉시 재전송
+        // (상대가 내 최초 ready를 놓친 경우 — 재대결·늦은 입장 레이스 해결)
+        if (myReadyRef.current) {
+          socket.emit('game-relay', {
+            roomId: activeRoomId,
+            payload: { type: 'sync-bb', kind: 'ready', from: activeProfileId },
+          });
+        }
         return;
       }
       if (payload.kind === 'guess' && typeof payload.guess === 'string') {
@@ -4082,6 +4092,19 @@ function BaseballGame({ onBack, friends, activeProfileId, activeRoomId, multipla
   useEffect(() => {
     if (isMultiplayer && phase === 'secret' && myReady && oppReady) setPhase('play');
   }, [isMultiplayer, phase, myReady, oppReady]);
+
+  // ready 재전송(3초 간격): 상대가 내 ready 신호를 놓친 레이스 상황 자동 복구
+  useEffect(() => {
+    if (!isMultiplayer || !myReady || oppReady) return;
+    const socket = getLocationSocket();
+    const timer = setInterval(() => {
+      socket.emit('game-relay', {
+        roomId: activeRoomId,
+        payload: { type: 'sync-bb', kind: 'ready', from: activeProfileId },
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [isMultiplayer, myReady, oppReady, activeRoomId, activeProfileId]);
 
   const handleSetSecret = () => {
     if (!bbValid(secretInput)) { alert('서로 다른 숫자 3자리를 입력해 주세요. (예: 372)'); return; }

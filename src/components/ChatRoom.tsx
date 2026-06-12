@@ -485,11 +485,15 @@ export default function ChatRoom({
                   title={`${msg.senderName} 위치 보기`}
                   className="w-8.5 h-8.5 rounded-full flex items-center justify-center text-base bg-white shrink-0 font-sans cursor-pointer active:scale-95 transition overflow-hidden border border-gray-200"
                 >
-                  {msg.senderAvatar.startsWith('data:image/') ? (
-                    <img src={msg.senderAvatar} alt="" className="w-full h-full rounded-full object-cover" />
-                  ) : (
-                    msg.senderAvatar
-                  )}
+                  {(() => {
+                    // 보낸 시점의 아바타 대신 현재 프로필 아바타(사진 포함)를 우선 표시
+                    const liveAvatar = friends.find(fr => fr.id === msg.senderId)?.avatar || msg.senderAvatar;
+                    return liveAvatar.startsWith('data:image/') ? (
+                      <img src={liveAvatar} alt="" className="w-full h-full rounded-full object-cover" />
+                    ) : (
+                      liveAvatar
+                    );
+                  })()}
                 </button>
               )}
 

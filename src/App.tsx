@@ -14,6 +14,7 @@ import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
 import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote, TrendingUp, GraduationCap } from 'lucide-react';
+import { App as CapacitorApp } from '@capacitor/app';
 import LifeToolsPanel from './components/LifeToolsPanel';
 import GamePanel from './components/GamePanel';
 import PedometerPanel from './components/PedometerPanel';
@@ -89,6 +90,29 @@ export default function App() {
     setView(isRoomTab ? 'room' : 'lobby');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // 안드로이드 시스템 뒤로가기: 로비 첫 화면(그룹방 탭)에서는 앱 닫기(최소화),
+  // 그 외 모든 화면에서는 로비로 복귀
+  const viewRef = useRef(view);
+  const activeTabBackRef = useRef(activeTab);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  useEffect(() => { activeTabBackRef.current = activeTab; }, [activeTab]);
+  useEffect(() => {
+    let handle: { remove: () => void } | null = null;
+    CapacitorApp.addListener('backButton', () => {
+      if (viewRef.current === 'lobby' && activeTabBackRef.current === 'rooms') {
+        CapacitorApp.minimizeApp(); // 로비 첫 화면 → 앱 닫기
+      } else {
+        // 방 내부·게임·다른 탭 어디서든 → 로비로
+        setView('lobby');
+        setActiveTab('rooms');
+        setSelectedFriendId(null);
+        setSelectedPromiseId(null);
+      }
+    }).then(h => { handle = h; }).catch(() => { /* 웹에서는 미지원 — 무시 */ });
+    return () => { try { handle?.remove(); } catch { /* 무시 */ } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // 전화번호 기반 사용자 ID (로컬 저장)
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
