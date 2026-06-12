@@ -3214,7 +3214,10 @@ async function startServer() {
     const resp = await fetch(`http://ws.bus.go.kr/api/rest/${path}?${qs.toString()}`);
     const text = await resp.text();
     if (text.trim().startsWith('<')) {
-      const errMsg = (text.match(/<headerMsg>([^<]+)</) || text.match(/<returnAuthMsg>([^<]+)</))?.[1] || '서울 버스 API 오류 (활용신청 승인 여부 확인)';
+      let errMsg = (text.match(/<headerMsg>([^<]+)</) || text.match(/<returnAuthMsg>([^<]+)</))?.[1] || '서울 버스 API 오류 (활용신청 승인 여부 확인)';
+      if (errMsg.includes('SERVICE KEY IS NOT REGISTERED')) {
+        errMsg = '서울 버스 API 인증키 미등록 에러 (공공데이터포털 승인 후 서울시 시스템 동기화에 최대 24시간 소요)';
+      }
       throw new Error(errMsg);
     }
     let data: any;
@@ -3234,7 +3237,10 @@ async function startServer() {
     const resp = await fetch(`http://apis.data.go.kr/6410000/${path}?${qs.toString()}`);
     const text = await resp.text();
     if (text.trim().startsWith('<')) {
-      const errMsg = (text.match(/<returnAuthMsg>([^<]+)</) || text.match(/<resultMessage>([^<]+)</))?.[1] || '경기 버스 API 오류 (활용신청 승인 여부 확인)';
+      let errMsg = (text.match(/<returnAuthMsg>([^<]+)</) || text.match(/<resultMessage>([^<]+)</))?.[1] || '경기 버스 API 오류 (활용신청 승인 여부 확인)';
+      if (errMsg.includes('SERVICE KEY IS NOT REGISTERED') || errMsg.includes('LIMITED NUMBER OF SERVICE') || /forbidden/i.test(errMsg)) {
+        errMsg = '경기 버스 API 인증키 미등록 에러 (공공데이터포털 승인 후 경기도 시스템 동기화에 최대 24시간 소요)';
+      }
       throw new Error(errMsg);
     }
     let data: any;
