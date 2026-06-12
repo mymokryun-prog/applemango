@@ -2932,7 +2932,7 @@ async function startServer() {
   });
 
   // 1:1 Game Match Requests global registry
-  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori' | 'tetris'; roomId: string; timestamp: number; tetrisTerrain?: string }> = {};
+  const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; roomId: string; timestamp: number; tetrisTerrain?: string }> = {};
 
   // POST /api/games/invite
   app.post('/api/games/invite', requireRoomMember, (req: AuthRequest, res: Response) => {
@@ -2953,7 +2953,8 @@ async function startServer() {
 
     const senderProfile = findUserProfile(from);
     const senderName = senderProfile ? (senderProfile.alias || senderProfile.realName || senderProfile.name) : '친구';
-    const gameLabel = game === 'drone_battle' ? '드론 전쟁' : game === 'tetris' ? '테트리스 대전' : '윷놀이';
+    const GAME_LABELS: Record<string, string> = { drone_battle: '드론 전쟁', tetris: '테트리스 대전', yut_nori: '윷놀이', rps: '가위바위보', omok: '오목', baseball: '숫자야구' };
+    const gameLabel = GAME_LABELS[game] || '게임';
 
     // Add notification to room-friends for global exposure
     const defaultRoom = dbRooms['room-friends'] || dbRooms[roomId];
@@ -3016,7 +3017,8 @@ async function startServer() {
     // GAME-SOCIAL ②: 매치 시작을 방 채팅에 공지 → 다른 멤버들의 관전 유도
     const matchRoom = dbRooms[roomId];
     if (matchRoom) {
-      const gName = game === 'drone_battle' ? '🛸 드론 전쟁' : game === 'tetris' ? '🧱 테트리스 대전' : '🎲 윷놀이';
+      const MATCH_NAMES: Record<string, string> = { drone_battle: '🛸 드론 전쟁', tetris: '🧱 테트리스 대전', yut_nori: '🎲 윷놀이', rps: '✌️ 가위바위보', omok: '⚫ 오목', baseball: '⚾ 숫자야구' };
+      const gName = MATCH_NAMES[game] || '🎮 게임';
       matchRoom.messages.push({
         id: `msg-match-${Date.now()}`,
         senderId: 'system', senderName: '게임 리그', senderAvatar: '🎮', senderColor: '#8B5CF6',
@@ -3053,8 +3055,8 @@ async function startServer() {
     const monday = new Date(now.getTime() - day * 86400000);
     return monday.toISOString().slice(0, 10);
   };
-  const GAME_EMOJI: Record<string, string> = { drone_battle: '🛸', tetris: '🧱', yut_nori: '🎲' };
-  const GAME_NAME: Record<string, string> = { drone_battle: '드론 전쟁', tetris: '테트리스 대전', yut_nori: '윷놀이' };
+  const GAME_EMOJI: Record<string, string> = { drone_battle: '🛸', tetris: '🧱', yut_nori: '🎲', rps: '✌️', omok: '⚫', baseball: '⚾' };
+  const GAME_NAME: Record<string, string> = { drone_battle: '드론 전쟁', tetris: '테트리스 대전', yut_nori: '윷놀이', rps: '가위바위보', omok: '오목', baseball: '숫자야구' };
   const recentResultKeys: Record<string, number> = {}; // 중복 신고 방지 (10초)
 
   app.post('/api/games/result', requireRoomMember, (req: AuthRequest, res: Response) => {
@@ -3113,6 +3115,27 @@ async function startServer() {
     if (broadcastRoomUpdate) broadcastRoomUpdate(roomId, 'room-refresh');
     saveDatabaseDebounced();
     res.json({ success: true, league: room.gameLeague });
+  });
+
+  // 내 위치를 볼 수 있는 전체 멤버 — 내가 속한 모든 방의 멤버를 방 이름과 함께 반환
+  app.get('/api/friends/all-viewers', (req: AuthRequest, res: Response) => {
+    const userId = req.user?.userId || (req.headers['x-user-id'] as string);
+    if (!userId) return res.json([]);
+    const viewers: Record<string, { id: string; name: string; avatar: string; rooms: string[] }> = {};
+    Object.values(dbRooms).forEach((room: any) => {
+      if (room.isDisbanded) return;
+      const me = room.friends?.[userId];
+      const isMember = (me && !me.isPendingInvite) || room.ownerId === userId;
+      if (!isMember) return;
+      Object.values(room.friends || {}).forEach((f: any) => {
+        if (!f || f.id === userId || f.isPendingInvite) return;
+        if (!viewers[f.id]) {
+          viewers[f.id] = { id: f.id, name: f.alias || f.name || '멤버', avatar: f.avatar || '👤', rooms: [] };
+        }
+        if (!viewers[f.id].rooms.includes(room.name)) viewers[f.id].rooms.push(room.name);
+      });
+    });
+    res.json(Object.values(viewers));
   });
 
   // 그룹방 이미지(이모지)·이름 변경 — 방장(또는 시스템방 멤버)만 가능

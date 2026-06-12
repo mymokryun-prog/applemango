@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Footprints, Calendar, TrendingUp, Users, Trophy, HeartHandshake, ShieldAlert, Route, Send } from 'lucide-react';
+import { pedometerHistoryKey, rolloverIfNeeded, loadStepHistory, archiveStepRecord, saveTodaySteps } from '../pedometerRollover';
 import { Friend } from '../types';
 
 // BIZ-CORE-8: 가족 걸음 챌린지 현황 타입
@@ -42,7 +43,8 @@ export default function PedometerPanel({
 }: PedometerPanelProps) {
   // 전화번호 포맷(하이픈 등)이 달라도 같은 키를 쓰도록 숫자만 사용 → 데이터 유실 방지
   const phoneDigits = (phone || '').replace(/\D/g, '') || 'guest';
-  const historyKey = `aemang_pedometer_history_${phoneDigits}`;
+  // 히스토리 키는 롤오버 유틸과 동일한 키를 사용 (저장·조회 불일치로 인한 기록 유실 방지)
+  const historyKey = pedometerHistoryKey();
   const goalKey = `aemang_pedometer_goal_${phoneDigits}`;
 
   const [stepsToday, setStepsToday] = useState<number>(0);
@@ -160,108 +162,56 @@ export default function PedometerPanel({
   };
 
   // 로컬스토리지에서 데이터 로드
+  // (주의) 과거에 있던 "데모 데이터 자동 생성" 블록은 실제 어제 기록과 충돌해
+  // 기록 유실처럼 보이는 버그를 만들었으므로 제거되었습니다.
   useEffect(() => {
     const todayStr = getTodayString();
-    
+
     // 목표 걸음 수 로드
     const storedGoal = localStorage.getItem(goalKey);
     if (storedGoal) {
       setStepGoal(parseInt(storedGoal) || 10000);
     }
 
-    // 기록 로드
-    const storedHistory = localStorage.getItem(historyKey);
-    let historyList: StepRecord[] = [];
-    if (storedHistory) {
-      try {
-        historyList = JSON.parse(storedHistory);
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    // 자정 롤오버 처리(어제 기록을 히스토리에 보존) — 유틸로 일원화
+    const { steps: rolledTodaySteps } = rolloverIfNeeded();
 
-    // 오늘 걸음수는 실측 영속 키(aemang_steps_today)를 우선 사용 → 원/그래프 일치
-    let todaySteps = 0;
-    let archivedSomething = false;
-    try {
-      const raw = localStorage.getItem('aemang_steps_today');
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (d && d.date) {
-          if (d.date === todayStr) {
-            todaySteps = Number(d.steps) || 0;
-          } else {
-            // 과거 날짜 데이터임 → 히스토리로 아카이빙
-            const found = historyList.find(r => r.date === d.date);
-            if (!found) {
-              historyList.push({ date: d.date, steps: Number(d.steps) || 0 });
-              archivedSomething = true;
-            }
-            // 오늘 날짜로 0걸음 초기화
-            localStorage.setItem('aemang_steps_today', JSON.stringify({ date: todayStr, steps: 0 }));
-          }
-        }
-      }
-    } catch {}
+    // 히스토리 로드 (중복 날짜는 max-merge로 자동 정리됨)
+    const historyList = loadStepHistory();
 
-    // 만약 히스토리가 비어있거나 오늘 기록뿐이면, 과거 10일 치 데모 데이터를 자동 생성(그래프 시각화 및 터치 탐색 테스트용)
-    if (historyList.length <= 1) {
-      const seededHistory: StepRecord[] = [];
-      for (let i = 10; i >= 1; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        const dateStr = `${yyyy}-${mm}-${dd}`;
-        const steps = Math.floor(Math.random() * 8000) + 4000;
-        seededHistory.push({ date: dateStr, steps });
-      }
-      historyList = [...seededHistory, ...historyList];
-      archivedSomething = true;
-    }
-
+    let todaySteps = rolledTodaySteps;
     const todayRecord = historyList.find(r => r.date === todayStr);
     if (todayRecord && todayRecord.steps > todaySteps) todaySteps = todayRecord.steps;
     setStepsToday(todaySteps);
-
-    // 날짜 역순 정렬 후 최대 365개 아카이빙 제한
-    historyList.sort((a, b) => b.date.localeCompare(a.date));
-    if (historyList.length > 365) {
-      historyList = historyList.slice(0, 365);
-      archivedSomething = true;
-    }
-    
-    if (archivedSomething) {
-      localStorage.setItem(historyKey, JSON.stringify(historyList));
-    }
     setHistory(historyList);
-    
+
     // 기본 선택 날짜를 오늘로 설정
     setSelectedDay(historyList.find(r => r.date === todayStr) || { date: todayStr, steps: todaySteps });
   }, [phone]);
 
+  // 패널이 열려 있는 동안에도 자정을 감시(1분 주기) — 날짜가 바뀌면 즉시 그래프 갱신
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const { rolled } = rolloverIfNeeded();
+      if (rolled) {
+        setStepsToday(0);
+        setHistory(loadStepHistory());
+      }
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // 걸음 수 업데이트
   const updateSteps = (newSteps: number) => {
     const todayStr = getTodayString();
+    // 혹시 자정이 지났다면 어제 기록을 먼저 보존
+    rolloverIfNeeded();
     setStepsToday(newSteps);
 
-    // 역사 업데이트
-    const updatedHistory = [...history];
-    const idx = updatedHistory.findIndex(r => r.date === todayStr);
-    if (idx >= 0) {
-      updatedHistory[idx].steps = newSteps;
-    } else {
-      updatedHistory.push({ date: todayStr, steps: newSteps });
-    }
-
-    // 날짜 역순 정렬 후 365일 크기 제한
-    updatedHistory.sort((a, b) => b.date.localeCompare(a.date));
-    if (updatedHistory.length > 365) {
-      updatedHistory.length = 365;
-    }
-    setHistory(updatedHistory);
-    localStorage.setItem(historyKey, JSON.stringify(updatedHistory));
+    // 히스토리에 오늘 기록 반영(max-merge) 후 다시 로드 — 저장·표시 항상 일치
+    archiveStepRecord(todayStr, newSteps);
+    saveTodaySteps(newSteps);
+    setHistory(loadStepHistory());
 
     // 오늘 날짜가 선택된 상태라면 선택된 데이터도 실시간 동기화
     if (selectedDay && selectedDay.date === todayStr) {

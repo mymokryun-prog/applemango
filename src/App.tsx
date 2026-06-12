@@ -170,11 +170,11 @@ export default function App() {
   const [activeGameInvite, setActiveGameInvite] = useState<{
     from: string;
     fromName: string;
-    game: 'drone_battle' | 'yut_nori' | 'tetris';
+    game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball';
     tetrisTerrain?: TetrisTerrainKey;
   } | null>(null);
   const [multiplayerGameConfig, setMultiplayerGameConfig] = useState<{
-    game: 'drone_battle' | 'yut_nori' | 'tetris';
+    game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball';
     opponentId: string;
     role: 'p1' | 'p2';
     opponentName?: string;
@@ -182,6 +182,17 @@ export default function App() {
   } | null>(null);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // 설정: 내 위치를 볼 수 있는 멤버 — 내가 속한 "모든 방" 기준 (방 이름 포함)
+  const [allLocationViewers, setAllLocationViewers] = useState<Array<{ id: string; name: string; avatar: string; rooms: string[] }>>([]);
+  useEffect(() => {
+    if (!showSettingsModal) return;
+    authFetch('/api/friends/all-viewers')
+      .then(r => r.json())
+      .then(data => setAllLocationViewers(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettingsModal]);
   const [personalPanelMode, setPersonalPanelMode] = useState<'memo' | 'diary' | null>(null);
 
   // 앱 접속 비밀번호 (전화번호 계정에 연동 — 서버 확인)
@@ -3187,14 +3198,15 @@ export default function App() {
                     </div>
                   </div>
                   <div className="border-t border-slate-200 pt-2">
-                    <p className="text-[10px] font-bold text-slate-500 mb-1">현재 내 위치를 볼 수 있는 멤버</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {friends.filter(f => !f.isPendingInvite && f.id !== activeProfileId).slice(0, 8).map(f => (
-                        <span key={f.id} className="bg-white border border-slate-200 text-[10px] font-bold text-slate-700 px-2 py-1 rounded-full">
-                          {f.avatar} {(f.name || '').replace(' (합류)', '')}
+                    <p className="text-[10px] font-bold text-slate-500 mb-1">현재 내 위치를 볼 수 있는 멤버 (모든 방 기준 {allLocationViewers.length}명)</p>
+                    <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
+                      {allLocationViewers.map(v => (
+                        <span key={v.id} className="bg-white border border-slate-200 text-[10px] font-bold text-slate-700 px-2 py-1 rounded-full" title={v.rooms.join(', ')}>
+                          {v.avatar} {(v.name || '').replace(' (합류)', '')}
+                          <span className="text-slate-400 font-medium"> · {v.rooms.length > 1 ? `${v.rooms[0]} 외 ${v.rooms.length - 1}` : v.rooms[0]}</span>
                         </span>
                       ))}
-                      {friends.filter(f => !f.isPendingInvite && f.id !== activeProfileId).length === 0 && (
+                      {allLocationViewers.length === 0 && (
                         <span className="text-[10px] text-slate-400">아직 공유 대상 멤버가 없습니다.</span>
                       )}
                     </div>
@@ -3629,7 +3641,7 @@ export default function App() {
             <p className="text-xs text-slate-300 mt-2 leading-relaxed">
               <span className="font-bold text-white">[{activeGameInvite.fromName}]</span> 님이 <br />
               <span className="font-extrabold text-yellow-400">
-                {activeGameInvite.game === 'drone_battle' ? '드론 전쟁 🛸' : activeGameInvite.game === 'tetris' ? '테트리스 대전 🧱' : '전통 윷놀이 🎲'}
+                {({ drone_battle: '드론 전쟁 🛸', tetris: '테트리스 대전 🧱', yut_nori: '전통 윷놀이 🎲', rps: '가위바위보 ✌️', omok: '오목 ⚫', baseball: '숫자야구 ⚾' } as Record<string, string>)[activeGameInvite.game] || '게임 🎮'}
               </span>
               에 초대하셨습니다!
             </p>

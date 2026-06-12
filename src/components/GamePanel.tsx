@@ -364,7 +364,7 @@ class TetrisAudioSynth {
 // ① 게임 리그: 승자 클라이언트가 결과를 서버에 신고 → 채팅 카드 + 주간 승점 반영
 async function reportLeagueResult(
   roomId: string,
-  game: 'drone_battle' | 'tetris' | 'yut_nori',
+  game: 'drone_battle' | 'tetris' | 'yut_nori' | 'rps' | 'omok' | 'baseball',
   winnerId: string,
   winnerName: string,
   loserId: string,
@@ -402,7 +402,7 @@ interface DroneCrashGameProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2' } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; opponentId: string; role: 'p1' | 'p2' } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -3450,6 +3450,624 @@ function TetrisSpectateView({
   );
 }
 
+// ==========================================
+// 간단 게임 3종 공용 타입
+// ==========================================
+interface MiniGameProps {
+  onBack: () => void;
+  friends: any[];
+  activeProfileId: string;
+  activeRoomId: string;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; opponentId: string; role: 'p1' | 'p2' } | null;
+  onResetMultiplayer: () => void;
+}
+
+function MiniGameHeader({ title, subtitle, onExit, color }: { title: string; subtitle: string; onExit: () => void; color: string }) {
+  return (
+    <div className={`px-4 py-3 flex items-center justify-between border-b shadow-sm shrink-0 bg-white ${color}`}>
+      <button
+        onClick={onExit}
+        className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        <span>게임 목록</span>
+      </button>
+      <div className="text-right">
+        <h2 className="text-sm font-black text-slate-900">{title}</h2>
+        <p className="text-[10px] text-slate-400">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 4. 가위바위보 (RPS) — 3판 2선승 1:1 / 혼자(AI)
+// ==========================================
+type RpsPick = 'rock' | 'scissors' | 'paper';
+const RPS_EMOJI: Record<RpsPick, string> = { rock: '✊', scissors: '✌️', paper: '🖐' };
+const RPS_LABEL: Record<RpsPick, string> = { rock: '바위', scissors: '가위', paper: '보' };
+function rpsBeats(a: RpsPick, b: RpsPick): boolean {
+  return (a === 'rock' && b === 'scissors') || (a === 'scissors' && b === 'paper') || (a === 'paper' && b === 'rock');
+}
+
+function RpsGame({ onBack, friends, activeProfileId, activeRoomId, multiplayerConfig, onResetMultiplayer }: MiniGameProps) {
+  const isMultiplayer = !!multiplayerConfig && multiplayerConfig.game === 'rps';
+  const opponentName = isMultiplayer ? friendDisplayName(friends, multiplayerConfig!.opponentId, '상대') : '컴퓨터';
+
+  const [round, setRound] = useState(1);
+  const [myPick, setMyPick] = useState<RpsPick | null>(null);
+  const [oppPick, setOppPick] = useState<RpsPick | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [myScore, setMyScore] = useState(0);
+  const [oppScore, setOppScore] = useState(0);
+  const [roundMsg, setRoundMsg] = useState('');
+  const [matchWinner, setMatchWinner] = useState<'me' | 'opp' | null>(null);
+  const roundRef = useRef(1);
+  const oppPickByRoundRef = useRef<Record<number, RpsPick>>({});
+  const reportedRef = useRef(false);
+
+  useEffect(() => { roundRef.current = round; }, [round]);
+
+  // 상대 선택 수신 (멀티플레이)
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const socket = getLocationSocket();
+    const handler = (payload: any) => {
+      if (payload?.type !== 'sync-rps') return;
+      if (payload.from !== multiplayerConfig!.opponentId) return;
+      const r = Number(payload.round);
+      const pick = payload.pick as RpsPick;
+      if (!pick) return;
+      oppPickByRoundRef.current[r] = pick;
+      if (r === roundRef.current) setOppPick(pick);
+    };
+    socket.on('game-relayed', handler);
+    return () => { socket.off('game-relayed', handler); };
+  }, [isMultiplayer, multiplayerConfig?.opponentId]);
+
+  // 양쪽 모두 선택 → 결과 판정
+  useEffect(() => {
+    if (!myPick || !oppPick || matchWinner) return;
+    const timer = setTimeout(() => {
+      setRevealed(true);
+      let nextMy = myScore;
+      let nextOpp = oppScore;
+      if (myPick === oppPick) {
+        setRoundMsg('비겼습니다! 한 번 더 ✋');
+      } else if (rpsBeats(myPick, oppPick)) {
+        nextMy += 1;
+        setMyScore(nextMy);
+        setRoundMsg(`이번 판 승리! (${RPS_LABEL[myPick]} > ${RPS_LABEL[oppPick]})`);
+      } else {
+        nextOpp += 1;
+        setOppScore(nextOpp);
+        setRoundMsg(`이번 판 패배... (${RPS_LABEL[oppPick]} > ${RPS_LABEL[myPick]})`);
+      }
+      setTimeout(() => {
+        if (nextMy >= 2 || nextOpp >= 2) {
+          const iWon = nextMy >= 2;
+          setMatchWinner(iWon ? 'me' : 'opp');
+          if (isMultiplayer && iWon && !reportedRef.current) {
+            reportedRef.current = true;
+            reportLeagueResult(
+              activeRoomId, 'rps',
+              activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+              multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+            );
+          }
+        } else {
+          const nextRound = roundRef.current + 1;
+          setRound(nextRound);
+          setMyPick(null);
+          setRevealed(false);
+          setRoundMsg('');
+          setOppPick(oppPickByRoundRef.current[nextRound] || null);
+        }
+      }, 1400);
+    }, 700);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myPick, oppPick]);
+
+  const handlePick = (pick: RpsPick) => {
+    if (myPick || matchWinner) return;
+    setMyPick(pick);
+    if (isMultiplayer) {
+      const socket = getLocationSocket();
+      socket.emit('game-relay', {
+        roomId: activeRoomId,
+        payload: { type: 'sync-rps', from: activeProfileId, round: roundRef.current, pick },
+      });
+    } else {
+      const picks: RpsPick[] = ['rock', 'scissors', 'paper'];
+      setOppPick(picks[Math.floor(Math.random() * 3)]);
+    }
+  };
+
+  const resetMatch = () => {
+    setRound(1); setMyPick(null); setOppPick(null); setRevealed(false);
+    setMyScore(0); setOppScore(0); setRoundMsg(''); setMatchWinner(null);
+    oppPickByRoundRef.current = {}; reportedRef.current = false;
+  };
+
+  const exit = () => { if (isMultiplayer) onResetMultiplayer(); onBack(); };
+
+  return (
+    <div className="flex flex-col h-full bg-gradient-to-b from-rose-50 via-white to-amber-50 select-none font-sans">
+      <MiniGameHeader title={`✌️ 가위바위보 ${isMultiplayer ? `— VS ${opponentName}` : '(연습)'}`} subtitle="3판 2선승!" onExit={exit} color="border-rose-100" />
+
+      <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
+        {/* 스코어 */}
+        <div className="flex items-center gap-4 text-center">
+          <div className="bg-white rounded-2xl px-5 py-2 shadow-sm border border-rose-100">
+            <p className="text-[10px] font-bold text-rose-500">나</p>
+            <p className="text-2xl font-black text-slate-900">{myScore}</p>
+          </div>
+          <span className="text-sm font-black text-slate-400">ROUND {round}</span>
+          <div className="bg-white rounded-2xl px-5 py-2 shadow-sm border border-indigo-100">
+            <p className="text-[10px] font-bold text-indigo-500 truncate max-w-[70px]">{opponentName}</p>
+            <p className="text-2xl font-black text-slate-900">{oppScore}</p>
+          </div>
+        </div>
+
+        {/* 대결 무대 */}
+        <div className="flex items-center justify-center gap-6 py-4">
+          <div className="text-6xl w-20 text-center">{myPick ? (revealed ? RPS_EMOJI[myPick] : '🤜') : '❔'}</div>
+          <span className="text-xl font-black text-slate-300">VS</span>
+          <div className="text-6xl w-20 text-center" style={{ transform: 'scaleX(-1)' }}>
+            {oppPick ? (revealed ? RPS_EMOJI[oppPick] : '🤜') : (myPick && isMultiplayer ? '⏳' : '❔')}
+          </div>
+        </div>
+
+        <p className="text-sm font-black text-slate-700 h-6">{roundMsg || (myPick ? (isMultiplayer ? '상대 선택 대기 중…' : '') : '아래에서 선택하세요!')}</p>
+
+        {/* 선택 버튼 */}
+        <div className="grid grid-cols-3 gap-3 w-full max-w-[330px]">
+          {(['scissors', 'rock', 'paper'] as RpsPick[]).map(p => (
+            <button
+              key={p}
+              onClick={() => handlePick(p)}
+              disabled={!!myPick || !!matchWinner}
+              className="bg-white hover:bg-rose-50 active:scale-95 disabled:opacity-40 border border-rose-100 rounded-3xl py-5 shadow-sm transition cursor-pointer"
+            >
+              <span className="text-4xl block">{RPS_EMOJI[p]}</span>
+              <span className="text-xs font-black text-slate-600 mt-1 block">{RPS_LABEL[p]}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* 매치 종료 오버레이 */}
+        {matchWinner && (
+          <div className="bg-white border-2 border-rose-200 rounded-3xl px-8 py-5 text-center shadow-xl">
+            <p className="text-2xl font-black">{matchWinner === 'me' ? '🏆 승리!' : '😢 패배...'}</p>
+            <p className="text-[11px] text-slate-400 mt-1">{myScore} : {oppScore}</p>
+            <div className="flex gap-2 mt-3">
+              {!isMultiplayer && (
+                <button onClick={resetMatch} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white text-xs font-black px-4 py-2 rounded-xl transition cursor-pointer">다시 하기</button>
+              )}
+              <button onClick={exit} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black px-4 py-2 rounded-xl transition cursor-pointer">나가기</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 5. 오목 (Omok) — 15×15 1:1 / 같은 기기 2인
+// ==========================================
+const OMOK_SIZE = 15;
+function checkOmokWin(board: string[][], r: number, c: number, stone: string): boolean {
+  const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+  for (const [dr, dc] of dirs) {
+    let count = 1;
+    for (const sign of [1, -1]) {
+      let rr = r + dr * sign, cc = c + dc * sign;
+      while (rr >= 0 && rr < OMOK_SIZE && cc >= 0 && cc < OMOK_SIZE && board[rr][cc] === stone) {
+        count++; rr += dr * sign; cc += dc * sign;
+      }
+    }
+    if (count >= 5) return true;
+  }
+  return false;
+}
+
+function OmokGame({ onBack, friends, activeProfileId, activeRoomId, multiplayerConfig, onResetMultiplayer }: MiniGameProps) {
+  const isMultiplayer = !!multiplayerConfig && multiplayerConfig.game === 'omok';
+  const opponentName = isMultiplayer ? friendDisplayName(friends, multiplayerConfig!.opponentId, '상대') : '같은 기기 친구';
+  const myStone = isMultiplayer ? (multiplayerConfig!.role === 'p1' ? 'B' : 'W') : ''; // 솔로는 번갈아 두기
+
+  const [board, setBoard] = useState<string[][]>(() => Array(OMOK_SIZE).fill(null).map(() => Array(OMOK_SIZE).fill('')));
+  const [turn, setTurn] = useState<'B' | 'W'>('B');
+  const [winner, setWinner] = useState<'B' | 'W' | null>(null);
+  const [lastMove, setLastMove] = useState<[number, number] | null>(null);
+  const boardRef = useRef(board);
+  const turnRef = useRef(turn);
+  const winnerRef = useRef(winner);
+  const reportedRef = useRef(false);
+  useEffect(() => { boardRef.current = board; }, [board]);
+  useEffect(() => { turnRef.current = turn; }, [turn]);
+  useEffect(() => { winnerRef.current = winner; }, [winner]);
+
+  const applyMove = (r: number, c: number, stone: 'B' | 'W') => {
+    if (winnerRef.current || boardRef.current[r][c]) return;
+    const next = boardRef.current.map(row => [...row]);
+    next[r][c] = stone;
+    setBoard(next);
+    boardRef.current = next;
+    setLastMove([r, c]);
+    if (checkOmokWin(next, r, c, stone)) {
+      setWinner(stone);
+      // 멀티플레이: 내가 이긴 수라면 리그 신고
+      if (isMultiplayer && stone === myStone && !reportedRef.current) {
+        reportedRef.current = true;
+        reportLeagueResult(
+          activeRoomId, 'omok',
+          activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+          multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+        );
+      }
+    } else {
+      setTurn(stone === 'B' ? 'W' : 'B');
+    }
+  };
+
+  // 상대 수 수신
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const socket = getLocationSocket();
+    const handler = (payload: any) => {
+      if (payload?.type !== 'sync-omok') return;
+      if (payload.from !== multiplayerConfig!.opponentId) return;
+      const { r, c, stone } = payload;
+      if (typeof r === 'number' && typeof c === 'number' && (stone === 'B' || stone === 'W')) {
+        applyMove(r, c, stone);
+      }
+    };
+    socket.on('game-relayed', handler);
+    return () => { socket.off('game-relayed', handler); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMultiplayer, multiplayerConfig?.opponentId]);
+
+  const handleCellClick = (r: number, c: number) => {
+    if (winner || board[r][c]) return;
+    if (isMultiplayer) {
+      if (turn !== myStone) return; // 내 차례 아님
+      applyMove(r, c, myStone as 'B' | 'W');
+      const socket = getLocationSocket();
+      socket.emit('game-relay', {
+        roomId: activeRoomId,
+        payload: { type: 'sync-omok', from: activeProfileId, r, c, stone: myStone },
+      });
+    } else {
+      applyMove(r, c, turn);
+    }
+  };
+
+  const resetGame = () => {
+    setBoard(Array(OMOK_SIZE).fill(null).map(() => Array(OMOK_SIZE).fill('')));
+    setTurn('B'); setWinner(null); setLastMove(null); reportedRef.current = false;
+  };
+
+  const exit = () => { if (isMultiplayer) onResetMultiplayer(); onBack(); };
+  const isMyTurn = !isMultiplayer || turn === myStone;
+  const stoneName = (s: string) => (s === 'B' ? '⚫ 흑' : '⚪ 백');
+
+  return (
+    <div className="flex flex-col h-full bg-gradient-to-b from-amber-50 via-white to-orange-50 select-none font-sans overflow-y-auto">
+      <MiniGameHeader
+        title={`⚫ 오목 ${isMultiplayer ? `— VS ${opponentName}` : '(같은 기기 2인)'}`}
+        subtitle={isMultiplayer ? `나는 ${stoneName(myStone)} · 흑이 선공` : '한 기기에서 번갈아 두기'}
+        onExit={exit}
+        color="border-amber-100"
+      />
+
+      <div className="flex-1 flex flex-col items-center p-3 gap-2.5">
+        <div className={`text-xs font-black px-4 py-1.5 rounded-full ${winner ? 'bg-emerald-100 text-emerald-700' : isMyTurn ? 'bg-rose-100 text-rose-600 animate-pulse' : 'bg-slate-100 text-slate-500'}`}>
+          {winner ? `${stoneName(winner)} 승리! 🎉` : `${stoneName(turn)} 차례${isMultiplayer ? (isMyTurn ? ' (나)' : ' (상대 대기)') : ''}`}
+        </div>
+
+        {/* 바둑판 */}
+        <div className="bg-amber-200/80 rounded-xl p-1.5 shadow-md w-full max-w-[420px]">
+          <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${OMOK_SIZE}, minmax(0, 1fr))` }}>
+            {board.map((row, r) =>
+              row.map((cell, c) => (
+                <button
+                  key={`${r}-${c}`}
+                  onClick={() => handleCellClick(r, c)}
+                  disabled={!!winner || !!cell || (isMultiplayer && !isMyTurn)}
+                  className="relative aspect-square flex items-center justify-center cursor-pointer disabled:cursor-default"
+                >
+                  {/* 격자선 */}
+                  <span className="absolute left-0 right-0 top-1/2 h-px bg-amber-700/40" />
+                  <span className="absolute top-0 bottom-0 left-1/2 w-px bg-amber-700/40" />
+                  {cell && (
+                    <span
+                      className={`relative z-10 w-[80%] h-[80%] rounded-full shadow ${cell === 'B' ? 'bg-slate-900' : 'bg-white border border-slate-300'} ${lastMove && lastMove[0] === r && lastMove[1] === c ? 'ring-2 ring-rose-400' : ''}`}
+                    />
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          {(!isMultiplayer || winner) && (
+            <button onClick={resetGame} className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-black px-5 py-2.5 rounded-xl transition cursor-pointer">
+              새 판
+            </button>
+          )}
+          {winner && (
+            <button onClick={exit} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black px-5 py-2.5 rounded-xl transition cursor-pointer">
+              나가기
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 6. 숫자야구 (Baseball) — 1:1 추리 / 혼자(컴퓨터)
+// ==========================================
+function bbJudge(secret: string, guess: string): { s: number; b: number } {
+  let s = 0, b = 0;
+  for (let i = 0; i < 3; i++) {
+    if (guess[i] === secret[i]) s++;
+    else if (secret.includes(guess[i])) b++;
+  }
+  return { s, b };
+}
+function bbValid(numStr: string): boolean {
+  return /^\d{3}$/.test(numStr) && new Set(numStr.split('')).size === 3;
+}
+function bbRandomSecret(): string {
+  const digits = ['0','1','2','3','4','5','6','7','8','9'];
+  for (let i = digits.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [digits[i], digits[j]] = [digits[j], digits[i]];
+  }
+  return digits.slice(0, 3).join('');
+}
+interface BbLogEntry { guess: string; s: number; b: number; }
+
+function BaseballGame({ onBack, friends, activeProfileId, activeRoomId, multiplayerConfig, onResetMultiplayer }: MiniGameProps) {
+  const isMultiplayer = !!multiplayerConfig && multiplayerConfig.game === 'baseball';
+  const opponentName = isMultiplayer ? friendDisplayName(friends, multiplayerConfig!.opponentId, '상대') : '컴퓨터';
+
+  const [phase, setPhase] = useState<'secret' | 'play' | 'over'>(isMultiplayer ? 'secret' : 'play');
+  const [mySecret, setMySecret] = useState(() => (isMultiplayer ? '' : bbRandomSecret()));
+  const [secretInput, setSecretInput] = useState('');
+  const [myReady, setMyReady] = useState(!isMultiplayer);
+  const [oppReady, setOppReady] = useState(!isMultiplayer);
+  const [isMyTurn, setIsMyTurn] = useState(!isMultiplayer || multiplayerConfig!.role === 'p1');
+  const [guessInput, setGuessInput] = useState('');
+  const [myLog, setMyLog] = useState<BbLogEntry[]>([]);
+  const [oppLog, setOppLog] = useState<BbLogEntry[]>([]);
+  const [winner, setWinner] = useState<'me' | 'opp' | null>(null);
+  const mySecretRef = useRef(mySecret);
+  const reportedRef = useRef(false);
+  useEffect(() => { mySecretRef.current = mySecret; }, [mySecret]);
+
+  // 멀티플레이 수신
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const socket = getLocationSocket();
+    const handler = (payload: any) => {
+      if (payload?.type !== 'sync-bb') return;
+      if (payload.from !== multiplayerConfig!.opponentId) return;
+      if (payload.kind === 'ready') {
+        setOppReady(true);
+        return;
+      }
+      if (payload.kind === 'guess' && typeof payload.guess === 'string') {
+        // 상대가 내 숫자를 추리 → 내 비밀번호로 판정해서 회신
+        const { s, b } = bbJudge(mySecretRef.current, payload.guess);
+        setOppLog(prev => [...prev, { guess: payload.guess, s, b }]);
+        socket.emit('game-relay', {
+          roomId: activeRoomId,
+          payload: { type: 'sync-bb', kind: 'result', from: activeProfileId, guess: payload.guess, s, b },
+        });
+        if (s === 3) {
+          setWinner('opp');
+          setPhase('over');
+        } else {
+          setIsMyTurn(true); // 상대 추리가 끝났으니 내 차례
+        }
+        return;
+      }
+      if (payload.kind === 'result' && typeof payload.guess === 'string') {
+        // 내 추리에 대한 상대의 판정 회신
+        const entry = { guess: payload.guess, s: Number(payload.s) || 0, b: Number(payload.b) || 0 };
+        setMyLog(prev => [...prev, entry]);
+        if (entry.s === 3) {
+          setWinner('me');
+          setPhase('over');
+          if (!reportedRef.current) {
+            reportedRef.current = true;
+            reportLeagueResult(
+              activeRoomId, 'baseball',
+              activeProfileId, friendDisplayName(friends, activeProfileId, '나'),
+              multiplayerConfig!.opponentId, friendDisplayName(friends, multiplayerConfig!.opponentId, '상대')
+            );
+          }
+        } else {
+          setIsMyTurn(false); // 내 추리가 끝났으니 상대 차례
+        }
+      }
+    };
+    socket.on('game-relayed', handler);
+    return () => { socket.off('game-relayed', handler); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMultiplayer, multiplayerConfig?.opponentId, activeRoomId, activeProfileId]);
+
+  // 양쪽 준비 완료 → 플레이 시작
+  useEffect(() => {
+    if (isMultiplayer && phase === 'secret' && myReady && oppReady) setPhase('play');
+  }, [isMultiplayer, phase, myReady, oppReady]);
+
+  const handleSetSecret = () => {
+    if (!bbValid(secretInput)) { alert('서로 다른 숫자 3자리를 입력해 주세요. (예: 372)'); return; }
+    setMySecret(secretInput);
+    setMyReady(true);
+    const socket = getLocationSocket();
+    socket.emit('game-relay', {
+      roomId: activeRoomId,
+      payload: { type: 'sync-bb', kind: 'ready', from: activeProfileId },
+    });
+  };
+
+  const handleGuess = () => {
+    if (!bbValid(guessInput)) { alert('서로 다른 숫자 3자리를 입력해 주세요. (예: 941)'); return; }
+    if (winner) return;
+    if (isMultiplayer) {
+      if (!isMyTurn) return;
+      const socket = getLocationSocket();
+      socket.emit('game-relay', {
+        roomId: activeRoomId,
+        payload: { type: 'sync-bb', kind: 'guess', from: activeProfileId, guess: guessInput },
+      });
+    } else {
+      const { s, b } = bbJudge(mySecret, guessInput);
+      setMyLog(prev => [...prev, { guess: guessInput, s, b }]);
+      if (s === 3) { setWinner('me'); setPhase('over'); }
+    }
+    setGuessInput('');
+  };
+
+  const resetSolo = () => {
+    setMySecret(bbRandomSecret());
+    setMyLog([]); setWinner(null); setPhase('play'); setGuessInput('');
+  };
+
+  const exit = () => { if (isMultiplayer) onResetMultiplayer(); onBack(); };
+
+  return (
+    <div className="flex flex-col h-full bg-gradient-to-b from-sky-50 via-white to-emerald-50 select-none font-sans overflow-y-auto">
+      <MiniGameHeader
+        title={`⚾ 숫자야구 ${isMultiplayer ? `— VS ${opponentName}` : '(연습)'}`}
+        subtitle="서로 다른 3자리 숫자 추리 — 3S면 승리!"
+        onExit={exit}
+        color="border-sky-100"
+      />
+
+      <div className="flex-1 p-4 space-y-3 max-w-[420px] w-full mx-auto">
+        {/* 비밀 숫자 설정 단계 (멀티플레이) */}
+        {isMultiplayer && phase === 'secret' && (
+          <div className="bg-white border border-sky-100 rounded-3xl p-5 text-center shadow-sm space-y-3">
+            {!myReady ? (
+              <>
+                <p className="text-sm font-black text-slate-800">🔒 나의 비밀 숫자 설정</p>
+                <p className="text-[11px] text-slate-400">상대가 맞혀야 할 서로 다른 숫자 3자리를 정하세요</p>
+                <input
+                  type="tel"
+                  maxLength={3}
+                  value={secretInput}
+                  onChange={e => setSecretInput(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  placeholder="예) 372"
+                  className="w-32 text-center text-2xl font-black tracking-[0.3em] bg-sky-50 rounded-2xl px-3 py-3 focus:outline-none focus:ring-2 focus:ring-sky-300"
+                />
+                <button onClick={handleSetSecret} className="block w-full bg-sky-500 hover:bg-sky-600 text-white text-sm font-black py-3 rounded-2xl transition cursor-pointer">
+                  이 숫자로 확정!
+                </button>
+              </>
+            ) : (
+              <p className="text-sm font-black text-slate-600 py-4 animate-pulse">⏳ {opponentName} 님의 숫자 설정을 기다리는 중…</p>
+            )}
+          </div>
+        )}
+
+        {/* 플레이 단계 */}
+        {phase !== 'secret' && (
+          <>
+            <div className={`text-center text-xs font-black px-4 py-2 rounded-full ${winner ? 'bg-emerald-100 text-emerald-700' : isMyTurn ? 'bg-rose-100 text-rose-600 animate-pulse' : 'bg-slate-100 text-slate-500'}`}>
+              {winner ? (winner === 'me' ? '🏆 승리! 숫자를 맞혔습니다!' : `😢 패배... ${opponentName} 님이 먼저 맞혔습니다`) : isMyTurn ? '내 차례 — 추리해 보세요!' : `${opponentName} 님 차례…`}
+            </div>
+
+            {isMultiplayer && mySecret && (
+              <p className="text-center text-[10px] text-slate-400">내 비밀 숫자: <b className="text-slate-600 tracking-widest">{mySecret}</b></p>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="tel"
+                maxLength={3}
+                value={guessInput}
+                onChange={e => setGuessInput(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                onKeyDown={e => { if (e.key === 'Enter') handleGuess(); }}
+                placeholder="3자리 추리"
+                disabled={!!winner || (isMultiplayer && !isMyTurn)}
+                className="flex-1 text-center text-xl font-black tracking-[0.3em] bg-white border border-sky-100 rounded-2xl px-3 py-3 focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:opacity-40"
+              />
+              <button
+                onClick={handleGuess}
+                disabled={!!winner || (isMultiplayer && !isMyTurn)}
+                className="bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-black px-6 rounded-2xl transition cursor-pointer"
+              >
+                ⚾ 추리!
+              </button>
+            </div>
+
+            {/* 추리 로그 */}
+            <div className={`grid gap-2 ${isMultiplayer ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <div className="bg-white border border-sky-100 rounded-2xl p-3">
+                <p className="text-[10px] font-black text-sky-600 mb-1.5">🙋 내 추리 ({myLog.length}회)</p>
+                <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                  {myLog.length === 0 && <p className="text-[10px] text-slate-300 text-center py-2">아직 없음</p>}
+                  {myLog.map((l, i) => (
+                    <div key={i} className="flex justify-between text-[11px] font-bold bg-sky-50/60 rounded-lg px-2 py-1">
+                      <span className="font-mono tracking-widest text-slate-700">{l.guess}</span>
+                      <span>
+                        {l.s > 0 && <span className="text-emerald-600">{l.s}S </span>}
+                        {l.b > 0 && <span className="text-amber-600">{l.b}B</span>}
+                        {l.s === 0 && l.b === 0 && <span className="text-slate-400">OUT</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {isMultiplayer && (
+                <div className="bg-white border border-indigo-100 rounded-2xl p-3">
+                  <p className="text-[10px] font-black text-indigo-600 mb-1.5 truncate">⚔️ {opponentName} 추리 ({oppLog.length}회)</p>
+                  <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                    {oppLog.length === 0 && <p className="text-[10px] text-slate-300 text-center py-2">아직 없음</p>}
+                    {oppLog.map((l, i) => (
+                      <div key={i} className="flex justify-between text-[11px] font-bold bg-indigo-50/60 rounded-lg px-2 py-1">
+                        <span className="font-mono tracking-widest text-slate-700">{l.guess}</span>
+                        <span>
+                          {l.s > 0 && <span className="text-emerald-600">{l.s}S </span>}
+                          {l.b > 0 && <span className="text-amber-600">{l.b}B</span>}
+                          {l.s === 0 && l.b === 0 && <span className="text-slate-400">OUT</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {winner && (
+              <div className="flex gap-2">
+                {!isMultiplayer && (
+                  <button onClick={resetSolo} className="flex-1 bg-sky-500 hover:bg-sky-600 text-white text-xs font-black py-3 rounded-2xl transition cursor-pointer">다시 하기</button>
+                )}
+                <button onClick={exit} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black py-3 rounded-2xl transition cursor-pointer">나가기</button>
+              </div>
+            )}
+
+            <p className="text-[9.5px] text-slate-400 text-center leading-relaxed">
+              S(스트라이크): 숫자와 자리 모두 일치 · B(볼): 숫자만 일치 · OUT: 모두 불일치
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function GamePanel({
   friends,
   activeProfileId,
@@ -3457,7 +4075,7 @@ export default function GamePanel({
   multiplayerConfig,
   onResetMultiplayer
 }: GamePanelProps) {
-  const [activeGame, setActiveGame] = useState<'drone_battle' | 'tetris' | 'yut_nori' | null>(null);
+  const [activeGame, setActiveGame] = useState<'drone_battle' | 'tetris' | 'yut_nori' | 'rps' | 'omok' | 'baseball' | null>(null);
   const [selectedTetrisTerrain, setSelectedTetrisTerrain] = useState<TetrisTerrainKey>('classic');
 
   // ===== GAME-SOCIAL ①: 주간 게임 리그 순위표 =====
@@ -3537,7 +4155,7 @@ export default function GamePanel({
     }
   }, [multiplayerConfig]);
 
-  const sendGameInvite = async (friendId: string, gameType: 'drone_battle' | 'yut_nori' | 'tetris') => {
+  const sendGameInvite = async (friendId: string, gameType: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball') => {
     const socket = getLocationSocket();
     const tetrisTerrain = gameType === 'tetris' ? selectedTetrisTerrain : undefined;
     socket.emit('game-relay', {
@@ -3653,6 +4271,26 @@ export default function GamePanel({
             >
               테트리스 혼자 하기
             </button>
+          </div>
+
+          {/* NEW: 간단 게임 3종 (가위바위보·오목·숫자야구) */}
+          <div className="grid grid-cols-3 gap-2.5">
+            {([
+              { g: 'rps' as const, emoji: '✌️', name: '가위바위보', desc: '3판 2선승', cls: 'from-rose-100 to-rose-50 border-rose-200 hover:border-rose-400' },
+              { g: 'omok' as const, emoji: '⚫', name: '오목', desc: '5목을 만들자', cls: 'from-amber-100 to-amber-50 border-amber-200 hover:border-amber-400' },
+              { g: 'baseball' as const, emoji: '⚾', name: '숫자야구', desc: '3자리 추리', cls: 'from-sky-100 to-sky-50 border-sky-200 hover:border-sky-400' },
+            ]).map(({ g, emoji, name, desc, cls }) => (
+              <button
+                key={g}
+                onClick={() => setActiveGame(g)}
+                className={`bg-gradient-to-br ${cls} border rounded-2xl p-3 text-center transition-all hover:-translate-y-0.5 shadow-sm cursor-pointer`}
+              >
+                <span className="text-2xl block">{emoji}</span>
+                <p className="text-[11px] font-black text-slate-800 mt-1">{name}</p>
+                <p className="text-[8.5px] text-slate-500">{desc}</p>
+                <span className="inline-block mt-1 text-[8px] font-black bg-white/70 text-slate-600 px-1.5 py-0.5 rounded-full">NEW</span>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -3776,25 +4414,24 @@ export default function GamePanel({
                       <p className="text-[8.5px] text-emerald-500 font-bold">● 접속중</p>
                     </div>
                   </div>
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={() => sendGameInvite(f.id, 'drone_battle')}
-                      className="bg-indigo-650 hover:bg-indigo-700 text-white text-[9px] font-black px-2 py-1 rounded-lg transition cursor-pointer"
-                    >
-                      🛸 드론
-                    </button>
-                    <button
-                      onClick={() => sendGameInvite(f.id, 'yut_nori')}
-                      className="bg-amber-600 hover:bg-amber-700 text-slate-950 text-[9px] font-black px-2 py-1 rounded-lg transition cursor-pointer"
-                    >
-                      🎲 윷놀이
-                    </button>
-                    <button
-                      onClick={() => sendGameInvite(f.id, 'tetris')}
-                      className="bg-pink-600 hover:bg-pink-700 text-white text-[9px] font-black px-2 py-1 rounded-lg transition cursor-pointer"
-                    >
-                      🧱 테트리스
-                    </button>
+                  <div className="flex flex-wrap gap-1.5 justify-end max-w-[125px]">
+                    {([
+                      { g: 'drone_battle' as const, label: '🛸', title: '드론 전쟁', cls: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+                      { g: 'yut_nori' as const, label: '🎲', title: '윷놀이', cls: 'bg-amber-500 hover:bg-amber-600 text-white' },
+                      { g: 'tetris' as const, label: '🧱', title: '테트리스 대전', cls: 'bg-pink-600 hover:bg-pink-700 text-white' },
+                      { g: 'rps' as const, label: '✌️', title: '가위바위보', cls: 'bg-rose-500 hover:bg-rose-600 text-white' },
+                      { g: 'omok' as const, label: '⚫', title: '오목', cls: 'bg-slate-700 hover:bg-slate-800 text-white' },
+                      { g: 'baseball' as const, label: '⚾', title: '숫자야구', cls: 'bg-sky-500 hover:bg-sky-600 text-white' },
+                    ]).map(({ g, label, title, cls }) => (
+                      <button
+                        key={g}
+                        onClick={() => sendGameInvite(f.id, g)}
+                        title={`${title} 초대`}
+                        className={`${cls} text-sm font-black w-8 h-8 rounded-lg transition cursor-pointer flex items-center justify-center`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))
@@ -3823,6 +4460,45 @@ export default function GamePanel({
       <YutNoriGame
         onBack={() => setActiveGame(null)} 
         friends={friends} 
+        activeProfileId={activeProfileId}
+        activeRoomId={activeRoomId}
+        multiplayerConfig={multiplayerConfig}
+        onResetMultiplayer={onResetMultiplayer}
+      />
+    );
+  }
+
+  if (activeGame === 'rps') {
+    return (
+      <RpsGame
+        onBack={() => setActiveGame(null)}
+        friends={friends}
+        activeProfileId={activeProfileId}
+        activeRoomId={activeRoomId}
+        multiplayerConfig={multiplayerConfig}
+        onResetMultiplayer={onResetMultiplayer}
+      />
+    );
+  }
+
+  if (activeGame === 'omok') {
+    return (
+      <OmokGame
+        onBack={() => setActiveGame(null)}
+        friends={friends}
+        activeProfileId={activeProfileId}
+        activeRoomId={activeRoomId}
+        multiplayerConfig={multiplayerConfig}
+        onResetMultiplayer={onResetMultiplayer}
+      />
+    );
+  }
+
+  if (activeGame === 'baseball') {
+    return (
+      <BaseballGame
+        onBack={() => setActiveGame(null)}
+        friends={friends}
         activeProfileId={activeProfileId}
         activeRoomId={activeRoomId}
         multiplayerConfig={multiplayerConfig}

@@ -8,6 +8,7 @@ import { CapacitorHttp } from '@capacitor/core';
 import { getLocationSocket } from '../realtime/socketClient';
 import type { GpsStatus, LocationUpdatedPayload } from '../realtime/types';
 import { isNativeApp, startNativeBackgroundWatch } from '../native/backgroundLocation';
+import { pedometerTodayStr, rolloverIfNeeded, saveTodaySteps } from '../pedometerRollover';
 
 const MIN_SEND_INTERVAL_MS = 3500;
 const MIN_MOVE_METERS = 12;
@@ -95,16 +96,7 @@ export interface UseRealtimeLocationResult {
 const STEP_THRESHOLD = 11.5;
 const STEP_COOLDOWN_MS = 300;
 
-// 로컬 날짜 문자열(YYYY-MM-DD) — 하루 기준 걸음 카운팅
-function pedometerTodayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function saveStepsToday(steps: number) {
-  try {
-    localStorage.setItem('aemang_steps_today', JSON.stringify({ date: pedometerTodayStr(), steps }));
-  } catch {}
-}
+// 자정 롤오버·저장은 pedometerRollover 유틸로 일원화 (어제 기록 유실 버그 방지)
 
 export function useRealtimeLocation({
   roomId,
@@ -120,16 +112,8 @@ export function useRealtimeLocation({
   const [myCoords, setMyCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const [lastSentAt, setLastSentAt] = useState<string | null>(null);
   // 오늘 걸음수를 날짜별로 localStorage에 영속화 — 앱을 나갔다 들어와도 누적 유지
-  const [stepsToday, setStepsToday] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem('aemang_steps_today');
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (d && d.date === pedometerTodayStr()) return Number(d.steps) || 0;
-      }
-    } catch {}
-    return 0;
-  });
+  // 시작 시 롤오버 검사: 어제 기록이 남아있으면 히스토리에 보존 후 0으로 시작
+  const [stepsToday, setStepsToday] = useState<number>(() => rolloverIfNeeded().steps);
   const [pedometerAvailable, setPedometerAvailable] = useState(false);
   const stepMagnitudeRef = useRef(0);
   const stepLastTimeRef = useRef(0);
@@ -463,51 +447,19 @@ export function useRealtimeLocation({
       if (mag > STEP_THRESHOLD && stepMagnitudeRef.current <= STEP_THRESHOLD &&
           now - stepLastTimeRef.current > STEP_COOLDOWN_MS) {
         stepLastTimeRef.current = now;
-        setStepsToday(prev => {
-          const todayStr = pedometerTodayStr();
-          let currentSteps = prev;
-
-          // 자정 날짜 변경(롤오버) 감지 및 이전 기록 아카이빙
-          try {
-            const raw = localStorage.getItem('aemang_steps_today');
-            if (raw) {
-              const d = JSON.parse(raw);
-              if (d && d.date && d.date !== todayStr) {
-                const phoneDigits = (userId || '').replace(/\D/g, '') || 'guest';
-                const hKey = `aemang_pedometer_history_${phoneDigits}`;
-                const storedHistory = localStorage.getItem(hKey);
-                let historyList: any[] = [];
-                if (storedHistory) {
-                  try { historyList = JSON.parse(storedHistory); } catch {}
-                }
-                const found = historyList.find(r => r.date === d.date);
-                if (!found) {
-                  historyList.push({ date: d.date, steps: Number(d.steps) || 0 });
-                  historyList.sort((a, b) => b.date.localeCompare(a.date));
-                  if (historyList.length > 365) {
-                    historyList = historyList.slice(0, 365);
-                  }
-                  localStorage.setItem(hKey, JSON.stringify(historyList));
-                }
-                currentSteps = 0;
-              }
-            }
-          } catch (e) {
-            console.error('Pedometer rollover error:', e);
-          }
-
-          const next = currentSteps + 1;
-          saveStepsToday(next);
-          // 50걸음마다 혹은 자정 리셋 후 첫 걸음 시점에 서버 동기화
-          if (next % 50 === 0 || next === 1) {
-            fetch('/api/friends/pedometer', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: userId, pedometerEnabled: true, stepsToday: next, roomId }),
-            }).catch(() => {});
-          }
-          return next;
-        });
+        // 자정 롤오버(어제 기록 보존) 후 항상 localStorage 기준으로 +1 — 유틸로 일원화
+        const { steps: base } = rolloverIfNeeded();
+        const next = base + 1;
+        saveTodaySteps(next);
+        setStepsToday(next);
+        // 50걸음마다 혹은 자정 리셋 후 첫 걸음 시점에 서버 동기화
+        if (next % 50 === 0 || next === 1) {
+          fetch('/api/friends/pedometer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: userId, pedometerEnabled: true, stepsToday: next, roomId }),
+          }).catch(() => {});
+        }
       }
       stepMagnitudeRef.current = mag;
     };
@@ -551,6 +503,24 @@ export function useRealtimeLocation({
       }
     };
   }, [enabled, startPedometer]);
+
+  // 자정 감시(1분 주기): 걸음이 없어도 날짜가 바뀌면 어제 기록을 보존하고 0부터 새로 시작
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => {
+      const { rolled } = rolloverIfNeeded();
+      if (rolled) {
+        setStepsToday(0);
+        // 서버에도 새 날짜 0걸음으로 동기화 (새 날짜 기록 시작)
+        fetch('/api/friends/pedometer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: userId, pedometerEnabled: true, stepsToday: 0, roomId }),
+        }).catch(() => {});
+      }
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, [enabled, userId, roomId]);
 
   return {
     isSocketConnected,
