@@ -2934,9 +2934,9 @@ async function startServer() {
   // 1:1 Game Match Requests global registry
   const dbGameInvites: Record<string, { from: string; to: string; game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; roomId: string; timestamp: number; tetrisTerrain?: string }> = {};
 
-  // POST /api/games/invite
+  // POST /api/games/invite — 대결 신청 (+ 옵션: spectators 관전 초대)
   app.post('/api/games/invite', requireRoomMember, (req: AuthRequest, res: Response) => {
-    const { from, to, game, roomId, tetrisTerrain } = req.body;
+    const { from, to, game, roomId, tetrisTerrain, spectators } = req.body;
     if (!from || !to || !game || !roomId) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
@@ -2956,34 +2956,74 @@ async function startServer() {
     const GAME_LABELS: Record<string, string> = { drone_battle: '드론 전쟁', tetris: '테트리스 대전', yut_nori: '윷놀이', rps: '가위바위보', omok: '오목', baseball: '숫자야구' };
     const gameLabel = GAME_LABELS[game] || '게임';
 
-    // Add notification to room-friends for global exposure
-    const defaultRoom = dbRooms['room-friends'] || dbRooms[roomId];
-    if (defaultRoom) {
-      defaultRoom.notifications.unshift({
-        id: inviteId,
-        type: 'invite',
-        title: '🎮 1:1 대결 신청 도착!',
-        message: `[${senderName}] 님이 [${gameLabel}] 대결을 신청했습니다.`,
-        timestamp: new Date().toISOString(),
-        read: false,
-        roomId,
-        game,
-        from,
-        to
-      });
+    // 알림: 상대가 어느 방을 보고 있어도 발견하도록, 상대가 멤버인 모든 방에 추가
+    // (수락 시 /api/games/accept가 모든 방에서 해당 알림을 일괄 제거함)
+    const inviteNotif = {
+      id: inviteId,
+      type: 'invite',
+      title: '🎮 1:1 대결 신청 도착!',
+      message: `[${senderName}] 님이 [${gameLabel}] 대결을 신청했습니다.`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      roomId,
+      game,
+      from,
+      to
+    };
+    let notified = false;
+    Object.values(dbRooms).forEach((r: any) => {
+      const member = r.friends?.[to];
+      if (member && !member.isPendingInvite) {
+        r.notifications.unshift({ ...inviteNotif });
+        notified = true;
+      }
+    });
+    if (!notified && dbRooms[roomId]) {
+      dbRooms[roomId].notifications.unshift({ ...inviteNotif });
     }
 
-    // Trigger Socket.IO real-time pop-up broadcast
-    broadcastToRoom(roomId, 'game-relayed', {
+    // 실시간 팝업: 대결 방 채널 + 상대방 개인 채널(다른 방에 있어도 수신)
+    const invitePayload = {
       type: 'invite',
       from,
       fromName: senderName,
       to,
       game,
+      roomId,
       tetrisTerrain
+    };
+    broadcastToRoom(roomId, 'game-relayed', invitePayload);
+    if (broadcastToUser) broadcastToUser(to, 'game-relayed', invitePayload);
+
+    // 관전 초대 (옵션): 선택된 친구들에게 알림 + 개인 채널 푸시
+    const spectatorIds: string[] = Array.isArray(spectators) ? spectators.filter((s: any) => typeof s === 'string' && s !== to && s !== from) : [];
+    spectatorIds.forEach(sid => {
+      const spectateNotif = {
+        id: `spectate-${inviteId}-${sid}`,
+        type: 'system',
+        title: '👀 관전 초대 도착!',
+        message: `[${senderName}] 님이 [${gameLabel}] 대결 관전에 초대했습니다. 게임방 탭에서 지켜보세요!`,
+        timestamp: new Date().toISOString(),
+        read: false,
+      };
+      Object.values(dbRooms).forEach((r: any) => {
+        const member = r.friends?.[sid];
+        if (member && !member.isPendingInvite) r.notifications.unshift({ ...spectateNotif });
+      });
+      if (broadcastToUser) {
+        broadcastToUser(sid, 'game-relayed', {
+          type: 'spectate-invite',
+          from,
+          fromName: senderName,
+          to: sid,
+          game,
+          roomId,
+        });
+      }
     });
 
-    res.json({ success: true, inviteId });
+    saveDatabaseDebounced();
+    res.json({ success: true, inviteId, spectatorsInvited: spectatorIds.length });
   });
 
   // POST /api/games/accept
@@ -3005,14 +3045,17 @@ async function startServer() {
     const receiverName = receiverProfile ? (receiverProfile.alias || receiverProfile.realName || receiverProfile.name) : '친구';
 
     // Trigger Socket.IO real-time match accept broadcast to transition both clients
-    broadcastToRoom(roomId, 'game-relayed', {
+    const acceptPayload = {
       type: 'accept',
       from: receiverId, // The receiver accepted it
       fromName: receiverName,
       to: senderId,     // The sender should match
       game,
+      roomId,           // 신청자가 다른 방을 보고 있어도 대결 방으로 전환할 수 있게
       tetrisTerrain
-    });
+    };
+    broadcastToRoom(roomId, 'game-relayed', acceptPayload);
+    if (broadcastToUser) broadcastToUser(senderId, 'game-relayed', acceptPayload);
 
     // GAME-SOCIAL ②: 매치 시작을 방 채팅에 공지 → 다른 멤버들의 관전 유도
     const matchRoom = dbRooms[roomId];
@@ -3040,6 +3083,7 @@ async function startServer() {
     res.json({
       success: true,
       game,
+      roomId, // 수락자도 대결 방으로 전환
       opponentId: senderId,
       opponentName: senderName,
       role: 'p2', // The receiver acts as Player 2

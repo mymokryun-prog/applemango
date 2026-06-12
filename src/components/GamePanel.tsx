@@ -1570,7 +1570,7 @@ interface TetrisGameProps {
   friends?: any[];
   activeProfileId?: string;
   activeRoomId?: string;
-  multiplayerConfig?: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
+  multiplayerConfig?: { game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
   onResetMultiplayer?: () => void;
 }
 
@@ -2352,7 +2352,7 @@ interface YutNoriGameProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
   onResetMultiplayer: () => void;
 }
 
@@ -3212,8 +3212,12 @@ interface GamePanelProps {
   friends: any[];
   activeProfileId: string;
   activeRoomId: string;
-  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
+  multiplayerConfig: { game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball'; opponentId: string; role: 'p1' | 'p2'; opponentName?: string; tetrisTerrain?: TetrisTerrainKey } | null;
   onResetMultiplayer: () => void;
+  rooms?: Array<{ id: string; name: string; emoji: string; memberCount?: number }>;
+  onSwitchRoom?: (roomId: string) => void;
+  spectateHint?: string | null;
+  onSpectateHintHandled?: () => void;
 }
 
 const TETRIS_SHAPES = {
@@ -3445,6 +3449,176 @@ function TetrisSpectateView({
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 매치 셋업: 게임 → 그룹방 → 상대 → 관전자(옵션) 선택 모달
+// ==========================================
+type GameKey = 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball';
+const GAME_META: Record<GameKey, { emoji: string; name: string }> = {
+  drone_battle: { emoji: '🛸', name: '드론 전쟁' },
+  yut_nori: { emoji: '🎲', name: '윷놀이' },
+  tetris: { emoji: '🧱', name: '테트리스 대전' },
+  rps: { emoji: '✌️', name: '가위바위보' },
+  omok: { emoji: '⚫', name: '오목' },
+  baseball: { emoji: '⚾', name: '숫자야구' },
+};
+
+function MatchSetupModal({
+  initialGame,
+  rooms,
+  activeProfileId,
+  onClose,
+  onSend,
+}: {
+  initialGame: GameKey | null;
+  rooms: Array<{ id: string; name: string; emoji: string; memberCount?: number }>;
+  activeProfileId: string;
+  onClose: () => void;
+  onSend: (args: { game: GameKey; roomId: string; opponentId: string; opponentName: string; spectatorIds: string[] }) => void;
+}) {
+  const [game, setGame] = useState<GameKey | null>(initialGame);
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [members, setMembers] = useState<any[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [spectatorIds, setSpectatorIds] = useState<string[]>([]);
+
+  const selectRoom = async (rid: string) => {
+    setRoomId(rid);
+    setOpponentId(null);
+    setSpectatorIds([]);
+    setLoadingMembers(true);
+    try {
+      const res = await fetch(`/api/friends?roomId=${encodeURIComponent(rid)}`);
+      if (res.ok) {
+        const list = await res.json();
+        setMembers(Array.isArray(list) ? list.filter((f: any) => f.id !== activeProfileId && !f.isPendingInvite) : []);
+      } else {
+        setMembers([]);
+      }
+    } catch { setMembers([]); }
+    setLoadingMembers(false);
+  };
+
+  const toggleSpectator = (id: string) => {
+    setSpectatorIds(prev => (prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]));
+  };
+
+  const canSend = !!game && !!roomId && !!opponentId;
+  const stepLabel = (n: number, label: string, done: boolean) => (
+    <p className="text-[11px] font-black flex items-center gap-1.5 mb-1.5">
+      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] ${done ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{done ? '✓' : n}</span>
+      <span className="text-slate-700">{label}</span>
+    </p>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 font-sans" onClick={onClose}>
+      <div className="bg-white rounded-3xl p-4 w-full max-w-[330px] max-h-[88%] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-sm font-black text-slate-900">⚔️ 대결 만들기</h4>
+          <button onClick={onClose} className="w-7 h-7 rounded-full hover:bg-slate-100 text-slate-400 text-sm">✕</button>
+        </div>
+
+        {/* STEP 1: 게임 선택 */}
+        {stepLabel(1, game ? `게임: ${GAME_META[game].emoji} ${GAME_META[game].name}` : '게임 선택', !!game)}
+        {!game && (
+          <div className="grid grid-cols-3 gap-1.5 mb-3">
+            {(Object.keys(GAME_META) as GameKey[]).map(g => (
+              <button key={g} onClick={() => setGame(g)} className="bg-slate-50 hover:bg-rose-50 border border-slate-100 hover:border-rose-300 rounded-xl py-2.5 transition cursor-pointer">
+                <span className="text-xl block">{GAME_META[g].emoji}</span>
+                <span className="text-[9px] font-black text-slate-700">{GAME_META[g].name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* STEP 2: 그룹방 선택 */}
+        {game && (
+          <>
+            {stepLabel(2, roomId ? `그룹방: ${rooms.find(r => r.id === roomId)?.name || ''}` : '어느 그룹방에서 대결할까요?', !!roomId)}
+            <div className="space-y-1 mb-3 max-h-[140px] overflow-y-auto">
+              {rooms.map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => selectRoom(r.id)}
+                  className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left transition cursor-pointer border ${roomId === r.id ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                >
+                  <span className="text-lg shrink-0">{r.emoji}</span>
+                  <span className="text-xs font-bold text-slate-800 flex-1 truncate">{r.name}</span>
+                  {typeof r.memberCount === 'number' && <span className="text-[9px] text-slate-400">{r.memberCount}명</span>}
+                </button>
+              ))}
+              {rooms.length === 0 && <p className="text-[10px] text-slate-400 text-center py-2">속한 그룹방이 없습니다.</p>}
+            </div>
+          </>
+        )}
+
+        {/* STEP 3: 대결 상대 선택 */}
+        {game && roomId && (
+          <>
+            {stepLabel(3, opponentId ? `상대: ${friendDisplayName(members, opponentId, '상대')}` : '대결 상대를 선택하세요', !!opponentId)}
+            {loadingMembers ? (
+              <p className="text-[10px] text-slate-400 text-center py-2">멤버 불러오는 중…</p>
+            ) : (
+              <div className="space-y-1 mb-3 max-h-[140px] overflow-y-auto">
+                {members.map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => { setOpponentId(m.id); setSpectatorIds(prev => prev.filter(s => s !== m.id)); }}
+                    className={`w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-left transition cursor-pointer border ${opponentId === m.id ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                  >
+                    <span className="text-lg shrink-0">{m.avatar || '👤'}</span>
+                    <span className="text-xs font-bold text-slate-800 flex-1 truncate">{m.alias || m.name}</span>
+                    <span className={`text-[9px] font-bold ${m.isOnline ? 'text-emerald-500' : 'text-slate-300'}`}>{m.isOnline ? '● 접속중' : '오프라인'}</span>
+                  </button>
+                ))}
+                {members.length === 0 && <p className="text-[10px] text-slate-400 text-center py-2">이 방에 초대할 멤버가 없습니다.</p>}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* STEP 4 (옵션): 관전 초대 */}
+        {game && roomId && opponentId && members.filter(m => m.id !== opponentId).length > 0 && (
+          <>
+            {stepLabel(4, `지켜보기 초대 (선택) — ${spectatorIds.length}명`, spectatorIds.length > 0)}
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {members.filter(m => m.id !== opponentId).map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => toggleSpectator(m.id)}
+                  className={`flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[10px] font-bold transition cursor-pointer border ${spectatorIds.includes(m.id) ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
+                >
+                  <span>{m.avatar || '👤'}</span>
+                  <span className="max-w-[70px] truncate">{m.alias || m.name}</span>
+                  {spectatorIds.includes(m.id) && <span>👀</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <button
+          disabled={!canSend}
+          onClick={() => {
+            if (!canSend) return;
+            onSend({
+              game: game!,
+              roomId: roomId!,
+              opponentId: opponentId!,
+              opponentName: friendDisplayName(members, opponentId!, '상대'),
+              spectatorIds,
+            });
+          }}
+          className="w-full bg-gradient-to-r from-rose-500 to-amber-500 disabled:from-slate-200 disabled:to-slate-200 disabled:text-slate-400 text-white text-sm font-black py-3 rounded-2xl transition cursor-pointer"
+        >
+          {canSend ? `⚔️ 대결 신청 보내기${spectatorIds.length > 0 ? ` (+관전 ${spectatorIds.length}명)` : ''}` : '게임·방·상대를 선택하세요'}
+        </button>
       </div>
     </div>
   );
@@ -4073,7 +4247,11 @@ export default function GamePanel({
   activeProfileId,
   activeRoomId,
   multiplayerConfig,
-  onResetMultiplayer
+  onResetMultiplayer,
+  rooms = [],
+  onSwitchRoom,
+  spectateHint = null,
+  onSpectateHintHandled
 }: GamePanelProps) {
   const [activeGame, setActiveGame] = useState<'drone_battle' | 'tetris' | 'yut_nori' | 'rps' | 'omok' | 'baseball' | null>(null);
   const [selectedTetrisTerrain, setSelectedTetrisTerrain] = useState<TetrisTerrainKey>('classic');
@@ -4147,6 +4325,53 @@ export default function GamePanel({
     setLobbyCheerSent(emoji);
     setTimeout(() => setLobbyCheerSent(null), 1200);
   };
+
+  // ===== ⚔️ 매치 셋업: 게임 → 그룹방 → 상대 → 관전자(옵션) =====
+  const [matchSetup, setMatchSetup] = useState<{ open: boolean; game: GameKey | null }>({ open: false, game: null });
+
+  const handleSendMatchRequest = async ({ game, roomId, opponentId, opponentName, spectatorIds }: { game: GameKey; roomId: string; opponentId: string; opponentName: string; spectatorIds: string[] }) => {
+    setMatchSetup({ open: false, game: null });
+    // 다른 방을 선택했으면 그 방으로 전환 (실시간 릴레이 채널 일치)
+    if (roomId !== activeRoomId) onSwitchRoom?.(roomId);
+    try {
+      const res = await fetch('/api/games/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('aemang_token') || ''}`
+        },
+        body: JSON.stringify({
+          from: activeProfileId,
+          to: opponentId,
+          game,
+          roomId,
+          spectators: spectatorIds,
+        })
+      });
+      if (res.ok) {
+        alert(`⚔️ [${opponentName}] 님에게 ${GAME_META[game].emoji} ${GAME_META[game].name} 대결 신청을 보냈습니다!${spectatorIds.length > 0 ? ` (관전 초대 ${spectatorIds.length}명 👀)` : ''}\n상대가 수락하면 자동으로 대국이 시작됩니다.`);
+      } else {
+        alert('대결 신청 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } catch {
+      alert('대결 신청 발송에 실패했습니다. 네트워크를 확인해 주세요.');
+    }
+  };
+
+  // 관전 초대 수락 후 진입: 테트리스 스트림이 잡히면 자동 관전 화면으로
+  useEffect(() => {
+    if (!spectateHint) return;
+    if (activeGame !== null) return;
+    if (liveStreamers.length > 0) {
+      setSpectateIds(liveStreamers.slice(0, 2));
+      onSpectateHintHandled?.();
+      return;
+    }
+    // 드론·윷놀이 등은 라이브 배너로 안내 — 15초 후 힌트 해제
+    const t = setTimeout(() => onSpectateHintHandled?.(), 15000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spectateHint, liveStreamers, activeGame]);
 
   // Transition to multiplayer game automatically if matched globally
   useEffect(() => {
@@ -4365,11 +4590,20 @@ export default function GamePanel({
           )}
         </div>
 
+        {/* ⚔️ 대결 만들기 — 게임→그룹방→상대→관전자 선택 */}
+        <button
+          onClick={() => setMatchSetup({ open: true, game: null })}
+          className="w-full bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white rounded-2xl p-4 text-left shadow-md transition-all hover:-translate-y-0.5 cursor-pointer"
+        >
+          <p className="text-sm font-black flex items-center gap-1.5">⚔️ 대결 만들기</p>
+          <p className="text-[10px] opacity-90 mt-0.5">게임 선택 → 그룹방 선택 → 상대 선택 → 지켜보기 친구 초대(옵션)</p>
+        </button>
+
         {/* Room multiplayer invite lobby */}
         <div className="bg-white border border-rose-200 rounded-2xl p-4 space-y-2 mt-2 shadow-sm">
           <h3 className="text-xs font-black text-rose-500 flex items-center gap-1">
             <span>👥</span>
-            <span>대화방 친구와 1:1 대결하기</span>
+            <span>대화방 친구와 1:1 빠른 대결 (현재 방)</span>
           </h3>
           <p className="text-[9.5px] text-slate-500 leading-tight">
             현재 같은 모임 대화방에 들어와 있는 온라인 친구에게 초대를 보낼 수 있습니다.
@@ -4438,83 +4672,62 @@ export default function GamePanel({
             )}
           </div>
         </div>
+
+        {/* 매치 셋업 모달 (로비) */}
+        {matchSetup.open && (
+          <MatchSetupModal
+            initialGame={matchSetup.game}
+            rooms={rooms}
+            activeProfileId={activeProfileId}
+            onClose={() => setMatchSetup({ open: false, game: null })}
+            onSend={handleSendMatchRequest}
+          />
+        )}
       </div>
     );
   }
 
-  if (activeGame === 'drone_battle') {
-    return (
-      <DroneCrashGame 
-        onBack={() => setActiveGame(null)} 
-        friends={friends} 
-        activeProfileId={activeProfileId}
-        activeRoomId={activeRoomId}
-        multiplayerConfig={multiplayerConfig}
-        onResetMultiplayer={onResetMultiplayer}
-      />
-    );
-  }
+  // ===== 게임 화면 + 게임 안에서 바로 대결 신청 (⚔️ 플로팅 버튼) =====
+  const commonGameProps = {
+    onBack: () => setActiveGame(null),
+    friends,
+    activeProfileId,
+    activeRoomId,
+    multiplayerConfig,
+    onResetMultiplayer,
+  };
 
-  if (activeGame === 'yut_nori') {
-    return (
-      <YutNoriGame
-        onBack={() => setActiveGame(null)} 
-        friends={friends} 
-        activeProfileId={activeProfileId}
-        activeRoomId={activeRoomId}
-        multiplayerConfig={multiplayerConfig}
-        onResetMultiplayer={onResetMultiplayer}
-      />
-    );
-  }
-
-  if (activeGame === 'rps') {
-    return (
-      <RpsGame
-        onBack={() => setActiveGame(null)}
-        friends={friends}
-        activeProfileId={activeProfileId}
-        activeRoomId={activeRoomId}
-        multiplayerConfig={multiplayerConfig}
-        onResetMultiplayer={onResetMultiplayer}
-      />
-    );
-  }
-
-  if (activeGame === 'omok') {
-    return (
-      <OmokGame
-        onBack={() => setActiveGame(null)}
-        friends={friends}
-        activeProfileId={activeProfileId}
-        activeRoomId={activeRoomId}
-        multiplayerConfig={multiplayerConfig}
-        onResetMultiplayer={onResetMultiplayer}
-      />
-    );
-  }
-
-  if (activeGame === 'baseball') {
-    return (
-      <BaseballGame
-        onBack={() => setActiveGame(null)}
-        friends={friends}
-        activeProfileId={activeProfileId}
-        activeRoomId={activeRoomId}
-        multiplayerConfig={multiplayerConfig}
-        onResetMultiplayer={onResetMultiplayer}
-      />
-    );
-  }
+  let gameView: any = null;
+  if (activeGame === 'drone_battle') gameView = <DroneCrashGame {...commonGameProps} />;
+  else if (activeGame === 'yut_nori') gameView = <YutNoriGame {...commonGameProps} />;
+  else if (activeGame === 'rps') gameView = <RpsGame {...commonGameProps} />;
+  else if (activeGame === 'omok') gameView = <OmokGame {...commonGameProps} />;
+  else if (activeGame === 'baseball') gameView = <BaseballGame {...commonGameProps} />;
+  else gameView = <TetrisGame {...commonGameProps} />;
 
   return (
-    <TetrisGame
-      onBack={() => setActiveGame(null)}
-      friends={friends}
-      activeProfileId={activeProfileId}
-      activeRoomId={activeRoomId}
-      multiplayerConfig={multiplayerConfig}
-      onResetMultiplayer={onResetMultiplayer}
-    />
+    <div className="relative h-full">
+      {gameView}
+
+      {/* 게임 안에서 바로 대결 신청 (혼자 연습 중일 때만) */}
+      {!multiplayerConfig && !matchSetup.open && (
+        <button
+          onClick={() => setMatchSetup({ open: true, game: activeGame as GameKey })}
+          className="absolute bottom-5 right-4 z-40 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white text-xs font-black px-4 py-3 rounded-full shadow-xl transition-all hover:-translate-y-0.5 cursor-pointer flex items-center gap-1.5"
+        >
+          ⚔️ 친구와 대결
+        </button>
+      )}
+
+      {matchSetup.open && (
+        <MatchSetupModal
+          initialGame={matchSetup.game}
+          rooms={rooms}
+          activeProfileId={activeProfileId}
+          onClose={() => setMatchSetup({ open: false, game: null })}
+          onSend={handleSendMatchRequest}
+        />
+      )}
+    </div>
   );
 }

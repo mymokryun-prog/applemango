@@ -172,7 +172,11 @@ export default function App() {
     fromName: string;
     game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball';
     tetrisTerrain?: TetrisTerrainKey;
+    roomId?: string;            // 대결이 열리는 방 (다른 방에 있어도 전환)
+    kind?: 'match' | 'spectate'; // match=대결 신청, spectate=관전 초대
   } | null>(null);
+  // 관전 초대 수락 시 게임방 탭에 전달되는 힌트 (테트리스면 자동 관전 진입)
+  const [spectateHintGame, setSpectateHintGame] = useState<string | null>(null);
   const [multiplayerGameConfig, setMultiplayerGameConfig] = useState<{
     game: 'drone_battle' | 'yut_nori' | 'tetris' | 'rps' | 'omok' | 'baseball';
     opponentId: string;
@@ -899,9 +903,24 @@ export default function App() {
           from: payload.from,
           fromName: payload.fromName || sender.alias || sender.name || '친구',
           game: payload.game,
-          tetrisTerrain: payload.tetrisTerrain
+          tetrisTerrain: payload.tetrisTerrain,
+          roomId: payload.roomId,
+          kind: 'match'
+        });
+      } else if (payload.type === 'spectate-invite' && payload.to === activeProfileId) {
+        // 관전 초대 팝업
+        setActiveGameInvite({
+          from: payload.from,
+          fromName: payload.fromName || '친구',
+          game: payload.game,
+          roomId: payload.roomId,
+          kind: 'spectate'
         });
       } else if (payload.type === 'accept' && payload.to === activeProfileId) {
+        // 대결 방이 현재 방과 다르면 전환 (크로스룸 매치)
+        if (payload.roomId && payload.roomId !== activeRoomId) {
+          setActiveRoomId(payload.roomId);
+        }
         setMultiplayerGameConfig({
           game: payload.game,
           opponentId: payload.from,
@@ -1225,6 +1244,10 @@ export default function App() {
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
+          // 대결이 열리는 방으로 전환 (다른 방에 있던 경우)
+          if (data.roomId && data.roomId !== activeRoomId) {
+            setActiveRoomId(data.roomId);
+          }
           setMultiplayerGameConfig({
             game: data.game,
             opponentId: data.opponentId,
@@ -2640,6 +2663,10 @@ export default function App() {
             activeRoomId={activeRoomId}
             multiplayerConfig={multiplayerGameConfig}
             onResetMultiplayer={() => setMultiplayerGameConfig(null)}
+            rooms={rooms.filter(r => !r.isDisbanded)}
+            onSwitchRoom={(roomId) => { if (roomId !== activeRoomId) setActiveRoomId(roomId); }}
+            spectateHint={spectateHintGame}
+            onSpectateHintHandled={() => setSpectateHintGame(null)}
           />
         )}
 
@@ -3632,35 +3659,39 @@ export default function App() {
         </div>
       )}
 
-      {/* 게임 초대 모달 */}
+      {/* 게임 초대 모달 (대결 신청 / 관전 초대) */}
       {activeGameInvite && (
         <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 font-sans">
-          <div className="bg-slate-900 border-2 border-rose-500 rounded-3xl p-5 w-full max-w-[280px] text-center shadow-2xl text-white">
-            <span className="text-4xl block mb-2">🕹️</span>
-            <h4 className="text-sm font-black text-rose-400 text-[13px]">게임 초대 도착!</h4>
+          <div className={`bg-slate-900 border-2 rounded-3xl p-5 w-full max-w-[280px] text-center shadow-2xl text-white ${activeGameInvite.kind === 'spectate' ? 'border-indigo-500' : 'border-rose-500'}`}>
+            <span className="text-4xl block mb-2">{activeGameInvite.kind === 'spectate' ? '👀' : '🕹️'}</span>
+            <h4 className={`text-sm font-black text-[13px] ${activeGameInvite.kind === 'spectate' ? 'text-indigo-400' : 'text-rose-400'}`}>
+              {activeGameInvite.kind === 'spectate' ? '관전 초대 도착!' : '게임 초대 도착!'}
+            </h4>
             <p className="text-xs text-slate-300 mt-2 leading-relaxed">
               <span className="font-bold text-white">[{activeGameInvite.fromName}]</span> 님이 <br />
               <span className="font-extrabold text-yellow-400">
                 {({ drone_battle: '드론 전쟁 🛸', tetris: '테트리스 대전 🧱', yut_nori: '전통 윷놀이 🎲', rps: '가위바위보 ✌️', omok: '오목 ⚫', baseball: '숫자야구 ⚾' } as Record<string, string>)[activeGameInvite.game] || '게임 🎮'}
               </span>
-              에 초대하셨습니다!
+              {activeGameInvite.kind === 'spectate' ? ' 관전에 초대했습니다! 응원하러 가볼까요?' : '에 초대하셨습니다!'}
             </p>
             <div className="grid grid-cols-2 gap-2 mt-4 pt-2">
               <button
                 type="button"
                 onClick={() => {
-                  const socket = getLocationSocket();
-                  socket.emit('game-relay', {
-                    roomId: activeRoomId,
-                    payload: {
-                      type: 'decline',
-                      from: activeProfileId,
-                      fromName: regAlias || regRealName || activeProfile.name || '나',
-                      to: activeGameInvite.from,
-                      game: activeGameInvite.game,
-                      tetrisTerrain: activeGameInvite.tetrisTerrain
-                    }
-                  });
+                  if (activeGameInvite.kind !== 'spectate') {
+                    const socket = getLocationSocket();
+                    socket.emit('game-relay', {
+                      roomId: activeGameInvite.roomId || activeRoomId,
+                      payload: {
+                        type: 'decline',
+                        from: activeProfileId,
+                        fromName: regAlias || regRealName || activeProfile.name || '나',
+                        to: activeGameInvite.from,
+                        game: activeGameInvite.game,
+                        tetrisTerrain: activeGameInvite.tetrisTerrain
+                      }
+                    });
+                  }
                   setActiveGameInvite(null);
                 }}
                 className="py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl text-slate-400"
@@ -3670,18 +3701,29 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
+                  const matchRoomId = activeGameInvite.roomId || activeRoomId;
+                  if (activeGameInvite.kind === 'spectate') {
+                    // 관전 수락: 대결 방으로 전환 + 게임방 탭 + 자동 관전 힌트
+                    if (matchRoomId !== activeRoomId) setActiveRoomId(matchRoomId);
+                    setSpectateHintGame(activeGameInvite.game);
+                    setActiveGameInvite(null);
+                    setActiveTab('game');
+                    return;
+                  }
                   const socket = getLocationSocket();
                   socket.emit('game-relay', {
-                    roomId: activeRoomId,
+                    roomId: matchRoomId,
                     payload: {
                       type: 'accept',
                       from: activeProfileId,
                       fromName: regAlias || regRealName || activeProfile.name || '나',
                       to: activeGameInvite.from,
                       game: activeGameInvite.game,
+                      roomId: matchRoomId,
                       tetrisTerrain: activeGameInvite.tetrisTerrain
                     }
                   });
+                  if (matchRoomId !== activeRoomId) setActiveRoomId(matchRoomId);
                   setMultiplayerGameConfig({
                     game: activeGameInvite.game,
                     opponentId: activeGameInvite.from,
@@ -3692,9 +3734,9 @@ export default function App() {
                   setActiveGameInvite(null);
                   setActiveTab('game');
                 }}
-                className="py-2 bg-rose-500 hover:bg-rose-600 text-xs font-bold rounded-xl text-white shadow-md"
+                className={`py-2 text-xs font-bold rounded-xl text-white shadow-md ${activeGameInvite.kind === 'spectate' ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-rose-500 hover:bg-rose-600'}`}
               >
-                수락!
+                {activeGameInvite.kind === 'spectate' ? '👀 관전하기' : '수락!'}
               </button>
             </div>
           </div>
