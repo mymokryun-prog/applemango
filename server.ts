@@ -3252,110 +3252,142 @@ async function startServer() {
   // 서울 노선 유형 코드 → 이름
   const SEOUL_ROUTE_TYPES: Record<string, string> = { '1': '공항', '2': '마을', '3': '간선', '4': '지선', '5': '순환', '6': '광역', '7': '인천', '8': '경기', '9': '폐지', '0': '공용' };
 
+  // 도시코드 → 데이터 공급자 결정
+  // TAGO 도시코드 중 서울(11xxx)·경기(31xxx)는 TAGO에 실데이터가 없으므로 TOPIS/GBIS로 자동 우회
+  const busProvider = (cityCode: string): 'SEOUL' | 'GG' | 'TAGO' => {
+    if (cityCode === 'SEOUL' || cityCode === '11' || cityCode.startsWith('11')) return 'SEOUL';
+    if (cityCode === 'GG' || cityCode.startsWith('31')) return 'GG';
+    return 'TAGO';
+  };
+
+  // 버스 API 오류를 사용자에게 그대로 전달 (Internal Server Error로 감춰지지 않게)
+  const busErrorReply = (res: Response, e: any) => {
+    res.status(502).json({ error: e?.message || '버스 API 호출에 실패했습니다.' });
+  };
+
   // 도시코드 목록 (서울·경기 + TAGO 전국, 24시간 메모리 캐시)
+  // TAGO 목록의 서울(11xxx)·경기(31xxx) 항목은 실데이터가 없으므로 제거 (상단 SEOUL/GG로 대체)
   let busCityCache: { at: number; list: any[] } | null = null;
-  app.get('/api/bus/cities', rateLimit(20), tryCatch(async (_req: Request, res: Response) => {
+  app.get('/api/bus/cities', rateLimit(20), async (_req: Request, res: Response) => {
     const special = [
       { cityCode: 'SEOUL', cityName: '서울특별시' },
       { cityCode: 'GG', cityName: '경기도' },
     ];
-    if (busCityCache && Date.now() - busCityCache.at < 24 * 60 * 60 * 1000) {
-      return res.json([...special, ...busCityCache.list]);
+    try {
+      if (busCityCache && Date.now() - busCityCache.at < 24 * 60 * 60 * 1000) {
+        return res.json([...special, ...busCityCache.list]);
+      }
+      const items = await tagoGet('BusLcInfoInqireService/getCtyCodeList', {});
+      const list = items
+        .map((i: any) => ({ cityCode: String(i.citycode), cityName: String(i.cityname) }))
+        .filter((c: any) => busProvider(c.cityCode) === 'TAGO');
+      busCityCache = { at: Date.now(), list };
+      res.json([...special, ...list]);
+    } catch (e) {
+      busErrorReply(res, e);
     }
-    const items = await tagoGet('BusLcInfoInqireService/getCtyCodeList', {});
-    const list = items.map((i: any) => ({ cityCode: String(i.citycode), cityName: String(i.cityname) }));
-    busCityCache = { at: Date.now(), list };
-    res.json([...special, ...list]);
-  }));
+  });
 
   // 노선번호로 노선 검색 — 도시코드에 따라 서울/경기/TAGO 자동 분기
-  app.get('/api/bus/routes', rateLimit(30), tryCatch(async (req: Request, res: Response) => {
+  app.get('/api/bus/routes', rateLimit(30), async (req: Request, res: Response) => {
     const cityCode = String(req.query.cityCode || '');
     const routeNo = String(req.query.routeNo || '').trim();
     if (!cityCode || !routeNo) return res.status(400).json({ error: 'cityCode, routeNo가 필요합니다.' });
 
-    if (cityCode === 'SEOUL') {
-      // 서울특별시_노선정보조회 서비스
-      const items = await seoulGet('busRouteInfo/getBusRouteList', { strSrch: routeNo });
-      return res.json(items.map((i: any) => ({
-        routeId: String(i.busRouteId),
-        routeNo: String(i.busRouteNm),
-        routeType: SEOUL_ROUTE_TYPES[String(i.routeType)] || '',
-        start: String(i.stStationNm || ''),
-        end: String(i.edStationNm || ''),
-      })));
-    }
+    try {
+      const provider = busProvider(cityCode);
 
-    if (cityCode === 'GG') {
-      // 경기도_버스노선조회 v2
-      const items = await ggGet('busrouteservice/v2/getBusRouteListv2', { keyword: routeNo }, 'busRouteList');
-      return res.json(items.map((i: any) => ({
-        routeId: String(i.routeId),
-        routeNo: String(i.routeName),
-        routeType: String(i.routeTypeName || ''),
-        start: String(i.startStationName || ''),
-        end: String(i.endStationName || ''),
-      })));
-    }
+      if (provider === 'SEOUL') {
+        // 서울특별시_노선정보조회 서비스
+        const items = await seoulGet('busRouteInfo/getBusRouteList', { strSrch: routeNo });
+        return res.json(items.map((i: any) => ({
+          routeId: String(i.busRouteId),
+          routeNo: String(i.busRouteNm),
+          routeType: SEOUL_ROUTE_TYPES[String(i.routeType)] || '',
+          start: String(i.stStationNm || ''),
+          end: String(i.edStationNm || ''),
+        })));
+      }
 
-    const items = await tagoGet('BusRouteInfoInqireService/getRouteNoList', { cityCode, routeNo });
-    res.json(items.map((i: any) => ({
-      routeId: String(i.routeid),
-      routeNo: String(i.routeno),
-      routeType: String(i.routetp || ''),
-      start: String(i.startnodenm || ''),
-      end: String(i.endnodenm || ''),
-    })));
-  }));
+      if (provider === 'GG') {
+        // 경기도_버스노선조회 v2 (용인 등 경기 시군 포함)
+        const items = await ggGet('busrouteservice/v2/getBusRouteListv2', { keyword: routeNo }, 'busRouteList');
+        return res.json(items.map((i: any) => ({
+          routeId: String(i.routeId),
+          routeNo: String(i.routeName),
+          routeType: String(i.routeTypeName || ''),
+          start: String(i.startStationName || ''),
+          end: String(i.endStationName || ''),
+        })));
+      }
+
+      const items = await tagoGet('BusRouteInfoInqireService/getRouteNoList', { cityCode, routeNo });
+      res.json(items.map((i: any) => ({
+        routeId: String(i.routeid),
+        routeNo: String(i.routeno),
+        routeType: String(i.routetp || ''),
+        start: String(i.startnodenm || ''),
+        end: String(i.endnodenm || ''),
+      })));
+    } catch (e) {
+      busErrorReply(res, e);
+    }
+  });
 
   // 노선별 실시간 버스 위치 — 도시코드에 따라 자동 분기
-  app.get('/api/bus/locations', rateLimit(60), tryCatch(async (req: Request, res: Response) => {
+  app.get('/api/bus/locations', rateLimit(60), async (req: Request, res: Response) => {
     const cityCode = String(req.query.cityCode || '');
     const routeId = String(req.query.routeId || '');
     if (!cityCode || !routeId) return res.status(400).json({ error: 'cityCode, routeId가 필요합니다.' });
 
-    if (cityCode === 'SEOUL') {
-      // 서울특별시_버스위치정보조회: gpsY=위도, gpsX=경도 (WGS84)
-      const items = await seoulGet('buspos/getBusPosByRtid', { busRouteId: routeId });
-      return res.json(items.map((i: any) => ({
-        lat: Number(i.gpsY),
-        lng: Number(i.gpsX),
-        vehicleNo: String(i.plainNo || ''),
-        nodeName: '',
-        nodeOrder: Number(i.sectOrd || 0),
-        routeNo: '',
-      })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng) && b.lat > 30 && b.lng > 120));
-    }
+    try {
+      const provider = busProvider(cityCode);
 
-    if (cityCode === 'GG') {
-      // 경기도_버스위치정보 v2: 좌표가 없어 정류장 순번(stationSeq)으로 정류장 좌표에 매칭
-      const [locations, stations] = await Promise.all([
-        ggGet('buslocationservice/v2/getBusLocationListv2', { routeId }, 'busLocationList'),
-        ggRouteStations(routeId),
-      ]);
-      return res.json(locations.map((i: any) => {
-        const st = stations[String(i.stationSeq)];
-        return st ? {
-          lat: st.lat,
-          lng: st.lng,
-          vehicleNo: String(i.plateNo || ''),
-          nodeName: st.name,
-          nodeOrder: Number(i.stationSeq || 0),
+      if (provider === 'SEOUL') {
+        // 서울특별시_버스위치정보조회: gpsY=위도, gpsX=경도 (WGS84)
+        const items = await seoulGet('buspos/getBusPosByRtid', { busRouteId: routeId });
+        return res.json(items.map((i: any) => ({
+          lat: Number(i.gpsY),
+          lng: Number(i.gpsX),
+          vehicleNo: String(i.plainNo || ''),
+          nodeName: '',
+          nodeOrder: Number(i.sectOrd || 0),
           routeNo: '',
-        } : null;
-      }).filter((b: any) => b && !isNaN(b.lat) && !isNaN(b.lng)));
-    }
+        })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng) && b.lat > 30 && b.lng > 120));
+      }
 
-    const items = await tagoGet('BusLcInfoInqireService/getRouteAcctoBusLcList', { cityCode, routeId });
-    res.json(items.map((i: any) => ({
-      lat: Number(i.gpslati),
-      lng: Number(i.gpslong),
-      vehicleNo: String(i.vehicleno || ''),
-      nodeName: String(i.nodenm || ''),
-      nodeOrder: Number(i.nodeord || 0),
-      routeNo: String(i.routenm || ''),
-    })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng)));
-  }));
+      if (provider === 'GG') {
+        // 경기도_버스위치정보 v2: 좌표가 없어 정류장 순번(stationSeq)으로 정류장 좌표에 매칭
+        const [locations, stations] = await Promise.all([
+          ggGet('buslocationservice/v2/getBusLocationListv2', { routeId }, 'busLocationList'),
+          ggRouteStations(routeId),
+        ]);
+        return res.json(locations.map((i: any) => {
+          const st = stations[String(i.stationSeq)];
+          return st ? {
+            lat: st.lat,
+            lng: st.lng,
+            vehicleNo: String(i.plateNo || ''),
+            nodeName: st.name,
+            nodeOrder: Number(i.stationSeq || 0),
+            routeNo: '',
+          } : null;
+        }).filter((b: any) => b && !isNaN(b.lat) && !isNaN(b.lng)));
+      }
+
+      const items = await tagoGet('BusLcInfoInqireService/getRouteAcctoBusLcList', { cityCode, routeId });
+      res.json(items.map((i: any) => ({
+        lat: Number(i.gpslati),
+        lng: Number(i.gpslong),
+        vehicleNo: String(i.vehicleno || ''),
+        nodeName: String(i.nodenm || ''),
+        nodeOrder: Number(i.nodeord || 0),
+        routeNo: String(i.routenm || ''),
+      })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng)));
+    } catch (e) {
+      busErrorReply(res, e);
+    }
+  });
 
   // 내 위치를 볼 수 있는 전체 멤버 — 내가 속한 모든 방의 멤버를 방 이름과 함께 반환
   app.get('/api/friends/all-viewers', (req: AuthRequest, res: Response) => {
