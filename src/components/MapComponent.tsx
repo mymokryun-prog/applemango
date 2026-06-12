@@ -15,19 +15,20 @@ declare global {
 }
 
 interface MapComponentProps {
-  friends: Friend[];
-  appointments: Appointment[];
+  friends?: Friend[];
+  appointments?: Appointment[];
   activeProfileId: string;
-  selectedFriendId: string | null;
-  selectedPromiseId: string | null;
-  onMapClick: (lat: number, lng: number) => void;
-  tempPromiseCoords: [number, number] | null;
+  selectedFriendId?: string | null;
+  selectedPromiseId?: string | null;
+  onMapClick?: (lat: number, lng: number) => void;
+  tempPromiseCoords?: [number, number] | null;
   mapViewCoords?: [number, number] | null;
   isPersonalRoom?: boolean;
   myGpsCoords?: [number, number] | null;
   centerOnMyGpsOnce?: boolean;
   onMyGpsCentered?: () => void;
   onUpdateStatusMsg?: (id: string, text: string) => void;
+  isLobbyBusMode?: boolean;
 }
 
 interface PlaceResult { name: string; address: string; lat: number; lng: number; }
@@ -187,11 +188,12 @@ function selfMarkerHtml(myProfile: { avatar: string; color: string; name: string
 }
 
 export default function MapComponent({
-  friends, appointments, activeProfileId,
-  selectedFriendId, selectedPromiseId,
-  onMapClick, tempPromiseCoords, mapViewCoords = null, isPersonalRoom = false,
-  myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered,
-  onUpdateStatusMsg,
+  friends = [], appointments = [], activeProfileId,
+  selectedFriendId = null, selectedPromiseId = null,
+  onMapClick = () => {}, tempPromiseCoords = null, mapViewCoords = null, isPersonalRoom = false,
+  myGpsCoords = null, centerOnMyGpsOnce = false, onMyGpsCentered = () => {},
+  onUpdateStatusMsg = () => {},
+  isLobbyBusMode = false,
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   // 지도 검색 결과 '보기'용 좌표 — 컴포넌트가 지도 탭 진입마다 새로 마운트되어 자동 초기화됨(약속 연동 아님)
@@ -226,6 +228,12 @@ export default function MapComponent({
 
   // ===== 🚌 실시간 버스 위치 레이어 (국토교통부 TAGO) =====
   const [busPanelOpen, setBusPanelOpen] = useState(false);
+  useEffect(() => {
+    if (isLobbyBusMode) {
+      setBusPanelOpen(true);
+    }
+  }, [isLobbyBusMode]);
+
   const [busCities, setBusCities] = useState<Array<{ cityCode: string; cityName: string }>>([]);
   const [busCityCode, setBusCityCode] = useState<string>(() => {
     try { return localStorage.getItem('aemang_bus_city') || 'AUTO'; } catch { return 'AUTO'; }
@@ -242,9 +250,9 @@ export default function MapComponent({
   // ─── 버스 정류소 관련 상태 ─────────────────────────────────────────────────
   const [busTab, setBusTab] = useState<'route' | 'station'>('route');
   const [busStationKeyword, setBusStationKeyword] = useState('');
-  const [busStations, setBusStations] = useState<Array<{ stationId: string; stationName: string; stationNo: string; lat: number; lng: number; cityCode: string; region?: string }>>([]);
+  const [busStations, setBusStations] = useState<Array<{ stationId: string; stationName: string; stationNo: string; nextStationName?: string; lat: number; lng: number; cityCode: string; region?: string }>>([]);
   const [busStationSearching, setBusStationSearching] = useState(false);
-  const [selectedStation, setSelectedStation] = useState<{ stationId: string; stationName: string; stationNo: string; lat: number; lng: number; cityCode: string } | null>(null);
+  const [selectedStation, setSelectedStation] = useState<{ stationId: string; stationName: string; stationNo: string; nextStationName?: string; lat: number; lng: number; cityCode: string } | null>(null);
   const [busArrivals, setBusArrivals] = useState<Array<{ routeNo: string; predictTime: number; remainStations: number; msg: string }>>([]);
   const [busArrivalLoading, setBusArrivalLoading] = useState(false);
   const busStationKakaoOverlaysRef = useRef<any[]>([]);
@@ -445,6 +453,20 @@ export default function MapComponent({
     }
     setBusStationSearching(false);
   };
+
+  // 정류소 검색어 실시간 디바운스 자동 검색 (2글자 이상 입력 시 500ms 지연 자동 검색)
+  useEffect(() => {
+    if (busTab !== 'station') return;
+    const kw = busStationKeyword.trim();
+    if (kw.length < 2) {
+      setBusStations([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      handleBusStationSearch();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [busStationKeyword, busTab, busCityCode]); // busCityCode도 변경 시 자동 검색 트리거되게 의존성 추가
 
   const stopBusStationTracking = () => {
     setSelectedStation(null);
@@ -1227,22 +1249,26 @@ export default function MapComponent({
       )}
 
       {/* 소집 장소 지정 버튼 / 모드 안내 */}
-      <button
-        type="button"
-        onClick={() => setPlaceSelectMode(m => !m)}
-        className={`absolute bottom-4 left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
-          placeSelectMode ? 'bg-rose-500 text-white animate-pulse' : 'bg-yellow-300 text-slate-900'
-        }`}
-      >
-        <span className={`w-2.5 h-2.5 rounded-full ${placeSelectMode ? 'bg-white' : 'bg-rose-500'}`} />
-        <span>{placeSelectMode ? '지도를 터치해 장소를 지정하세요 (취소하려면 다시 탭)' : '📍 소집 장소 지정하기'}</span>
-      </button>
+      {!isLobbyBusMode && (
+        <button
+          type="button"
+          onClick={() => setPlaceSelectMode(m => !m)}
+          className={`absolute bottom-4 left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+            placeSelectMode ? 'bg-rose-500 text-white animate-pulse' : 'bg-yellow-300 text-slate-900'
+          }`}
+        >
+          <span className={`w-2.5 h-2.5 rounded-full ${placeSelectMode ? 'bg-white' : 'bg-rose-500'}`} />
+          <span>{placeSelectMode ? '지도를 터치해 장소를 지정하세요 (취소하려면 다시 탭)' : '📍 소집 장소 지정하기'}</span>
+        </button>
+      )}
 
       {/* 🚌 실시간 버스 정보 버튼 (소집 장소 버튼 위) */}
       <button
         type="button"
         onClick={() => setBusPanelOpen(o => !o)}
-        className={`absolute bottom-[68px] left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+        className={`absolute left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+          isLobbyBusMode ? 'bottom-4' : 'bottom-[68px]'
+        } ${
           busTracking ? 'bg-sky-500 text-white' : selectedStation ? 'bg-emerald-500 text-white' : 'bg-white text-slate-800'
         }`}
       >
@@ -1258,7 +1284,9 @@ export default function MapComponent({
 
       {/* 🚌 버스 정보 선택 및 도착 패널 */}
       {busPanelOpen && (
-        <div className="absolute bottom-[116px] left-4 z-30 bg-white rounded-2xl shadow-xl p-4 w-[310px] max-w-[calc(100%-32px)] font-sans space-y-2.5">
+        <div className={`absolute left-4 z-30 bg-white rounded-2xl shadow-xl p-4 w-[310px] max-w-[calc(100%-32px)] font-sans space-y-2.5 ${
+          isLobbyBusMode ? 'bottom-[60px]' : 'bottom-[116px]'
+        }`}>
           <div className="flex items-center justify-between">
             <p className="text-[14px] font-black text-slate-800">
               🚌 {busTracking ? '버스 위치 추적' : selectedStation ? '정류소 도착 정보' : '실시간 버스 정보'}
@@ -1280,7 +1308,14 @@ export default function MapComponent({
             // 2) 정류소 추적 중일 때 UI (실시간 도착 버스 목록)
             <div className="space-y-2.5">
               <div className="bg-emerald-50 rounded-xl p-2.5 text-left">
-                <p className="text-[13px] font-black text-emerald-800">{selectedStation.stationName}</p>
+                <p className="text-[13px] font-black text-emerald-800">
+                  {selectedStation.stationName}
+                  {selectedStation.nextStationName && (
+                    <span className="ml-1 text-[11px] text-emerald-600 font-normal">
+                      (→ {selectedStation.nextStationName} 방면)
+                    </span>
+                  )}
+                </p>
                 <p className="text-[10.5px] text-emerald-600 font-bold">{selectedStation.stationNo ? `정류소 번호: ${selectedStation.stationNo}` : '정류소 상세'}</p>
               </div>
               
@@ -1443,6 +1478,7 @@ export default function MapComponent({
                               stationId: s.stationId,
                               stationName: s.stationName,
                               stationNo: s.stationNo,
+                              nextStationName: s.nextStationName,
                               lat: s.lat,
                               lng: s.lng,
                               cityCode: s.cityCode,
@@ -1452,6 +1488,11 @@ export default function MapComponent({
                         >
                           <p className="text-[13px] font-black text-emerald-700">
                             {s.stationName}
+                            {s.nextStationName && (
+                              <span className="ml-1 text-[10.5px] text-slate-500 font-normal">
+                                (→ {s.nextStationName} 방면)
+                              </span>
+                            )}
                             {s.region && <span className="ml-1 text-[9px] bg-white text-slate-500 font-bold px-1.5 py-0.5 rounded-full align-middle">{s.region}</span>}
                           </p>
                           <p className="text-[10.5px] text-slate-500 truncate">{s.stationNo ? `정류소 번호: ${s.stationNo}` : '정류소 ID: ' + s.stationId}</p>

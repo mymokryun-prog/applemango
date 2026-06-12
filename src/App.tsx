@@ -13,7 +13,7 @@ import NotificationPanel from './components/NotificationPanel';
 import GroupRoomsPanel from './components/GroupRoomsPanel';
 import OnboardingScreen, { ApmtLogo } from './components/OnboardingScreen';
 import { Friend, Message, Appointment, NotificationAlert } from './types';
-import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote, TrendingUp, GraduationCap } from 'lucide-react';
+import { Map, MessageSquare, Calendar, Bell, RefreshCw, LayoutList, Settings, Gamepad2, Footprints, Music, Utensils, BookOpen, Contact, ArrowLeft, Megaphone, StickyNote, TrendingUp, GraduationCap, Bus } from 'lucide-react';
 import { App as CapacitorApp } from '@capacitor/app';
 import LifeToolsPanel from './components/LifeToolsPanel';
 import GamePanel from './components/GamePanel';
@@ -56,12 +56,12 @@ export default function App() {
   });
 
   // Navigation active state
-  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice' | 'parents' | 'students'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'map' | 'chat' | 'appointments' | 'notifications' | 'game' | 'pedometer' | 'music' | 'restaurant' | 'book' | 'contacts' | 'lobbyNotice' | 'roomNotice' | 'parents' | 'students' | 'bus'>('rooms');
 
   // 2단계 내비게이션: 'lobby'(로비 = 앱 접속 첫 화면, 전체 공개 기능) / 'room'(특정 그룹방 내부, 멤버 전용 폐쇄 기능)
   // 로비 탭(전체 공개): 그룹방·연락처·알림·음악·맛집·책·게임방
   // 방 내부 탭(그룹 멤버 전용): 지도·채팅·약속·만보기
-  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice', 'parents', 'students'] as const;
+  const LOBBY_TABS = ['rooms', 'contacts', 'notifications', 'music', 'restaurant', 'book', 'game', 'lobbyNotice', 'parents', 'students', 'bus'] as const;
   const ROOM_TABS = ['chat', 'map', 'appointments', 'pedometer', 'roomNotice'] as const;
   const [view, setView] = useState<'lobby' | 'room'>('lobby');
 
@@ -2760,6 +2760,17 @@ export default function App() {
         {/* 부모·학생 생활 도구 (전체 공개) */}
         {activeTab === 'parents' && <LifeToolsPanel audience="parents" />}
         {activeTab === 'students' && <LifeToolsPanel audience="students" />}
+
+        {activeTab === 'bus' && (
+          <MapComponent
+            friends={[]}
+            appointments={[]}
+            activeProfileId={activeProfileId}
+            myGpsCoords={myCoords ? [myCoords.lat, myCoords.lng] : null}
+            centerOnMyGpsOnce={true}
+            isLobbyBusMode={true}
+          />
+        )}
       </div>
 
       {/* BIZ-CORE-8 ④: 보호자 SOS 알림 오버레이 (구 119 시뮬레이션 대체) */}
@@ -2854,21 +2865,22 @@ export default function App() {
       {/* 3. 하단 내비게이션 — 2단계 구조 */}
       <div className="bg-white border-t border-gray-100 px-1.5 flex items-center justify-center gap-0.5 overflow-x-auto scrollbar-none select-none z-40 shrink-0 pt-1.5 pb-3 safe-area-pb" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))' }}>
         {view === 'lobby' ? (
-          // ── 로비 내비게이션: 10개 탭을 5×2 격자로 모두 표시 (스크롤 없이 한눈에) ──
-          <div className="grid grid-cols-5 gap-1 w-full max-w-[440px] mx-auto">
+          // ── 로비 내비게이션: 11개 탭을 6×2 격자로 모두 표시 (스크롤 없이 한눈에) ──
+          <div className="grid grid-cols-6 gap-1 w-full max-w-[500px] mx-auto">
             {([
-              // 1행: 핵심 기능 (로즈) + 문화 시작
+              // 1행: 핵심 기능 + 문화 시작
               { id: 'rooms' as const, Icon: LayoutList, label: '그룹방', activeCls: 'text-rose-500 bg-rose-50 border border-rose-100', onClick: () => setActiveTab('rooms') },
               { id: 'contacts' as const, Icon: Contact, label: '연락처', activeCls: 'text-rose-500 bg-rose-50 border border-rose-100', onClick: () => setActiveTab('contacts') },
               { id: 'notifications' as const, Icon: Bell, label: '알림', activeCls: 'text-rose-500 bg-rose-50 border border-rose-100', onClick: () => setActiveTab('notifications') },
               { id: 'music' as const, Icon: Music, label: '음악', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('music') },
               { id: 'restaurant' as const, Icon: Utensils, label: '맛집', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('restaurant') },
-              // 2행: 문화 + 공지 + 생활 도구(부모·학생)
               { id: 'book' as const, Icon: BookOpen, label: '책', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('book') },
+              // 2행: 문화 + 공지 + 생활 도구 + 버스
               { id: 'game' as const, Icon: Gamepad2, label: '게임방', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('game') },
               { id: 'lobbyNotice' as const, Icon: Megaphone, label: '공지', activeCls: 'text-indigo-600 bg-indigo-50 border border-indigo-100', onClick: () => setActiveTab('lobbyNotice') },
               { id: 'parents' as const, Icon: TrendingUp, label: '부모', activeCls: 'text-emerald-600 bg-emerald-50 border border-emerald-100', onClick: () => setActiveTab('parents') },
               { id: 'students' as const, Icon: GraduationCap, label: '학생', activeCls: 'text-sky-600 bg-sky-50 border border-sky-100', onClick: () => setActiveTab('students') },
+              { id: 'bus' as const, Icon: Bus, label: '버스', activeCls: 'text-sky-500 bg-sky-50 border border-sky-100', onClick: () => setActiveTab('bus') },
             ]).map(({ id, Icon, label, activeCls, onClick }) => (
               <button
                 key={id}
