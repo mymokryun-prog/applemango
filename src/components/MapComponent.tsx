@@ -223,6 +223,117 @@ export default function MapComponent({
   const [placeSelectMode, setPlaceSelectMode] = useState(false);
   const placeSelectModeRef = useRef(false);
   useEffect(() => { placeSelectModeRef.current = placeSelectMode; }, [placeSelectMode]);
+
+  // ===== 🚌 실시간 버스 위치 레이어 (국토교통부 TAGO) =====
+  const [busPanelOpen, setBusPanelOpen] = useState(false);
+  const [busCities, setBusCities] = useState<Array<{ cityCode: string; cityName: string }>>([]);
+  const [busCityCode, setBusCityCode] = useState<string>(() => {
+    try { return localStorage.getItem('aemang_bus_city') || ''; } catch { return ''; }
+  });
+  const [busRouteNo, setBusRouteNo] = useState('');
+  const [busRoutes, setBusRoutes] = useState<Array<{ routeId: string; routeNo: string; routeType: string; start: string; end: string }>>([]);
+  const [busSearching, setBusSearching] = useState(false);
+  const [busTracking, setBusTracking] = useState<{ routeId: string; routeNo: string } | null>(null);
+  const [busLocations, setBusLocations] = useState<Array<{ lat: number; lng: number; vehicleNo: string; nodeName: string }>>([]);
+  const [busError, setBusError] = useState<string | null>(null);
+  const busKakaoOverlaysRef = useRef<any[]>([]);
+  const busLeafletMarkersRef = useRef<L.Marker[]>([]);
+
+  // 도시 목록 로드 (패널 처음 열 때)
+  useEffect(() => {
+    if (!busPanelOpen || busCities.length > 0) return;
+    fetch('/api/bus/cities')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setBusCities(data);
+        else setBusError(data?.error || '도시 목록을 불러오지 못했습니다.');
+      })
+      .catch(() => setBusError('도시 목록을 불러오지 못했습니다. (서버 BUS_API_KEY 확인)'));
+  }, [busPanelOpen, busCities.length]);
+
+  const handleBusRouteSearch = async () => {
+    if (!busCityCode || !busRouteNo.trim()) { setBusError('도시와 버스 번호를 입력해 주세요.'); return; }
+    setBusSearching(true);
+    setBusError(null);
+    setBusRoutes([]);
+    try {
+      localStorage.setItem('aemang_bus_city', busCityCode);
+      const res = await fetch(`/api/bus/routes?cityCode=${encodeURIComponent(busCityCode)}&routeNo=${encodeURIComponent(busRouteNo.trim())}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '검색 실패');
+      if (!Array.isArray(data) || data.length === 0) setBusError('해당 번호의 노선을 찾지 못했습니다.');
+      else setBusRoutes(data.slice(0, 8));
+    } catch (e: any) {
+      setBusError(e?.message || '노선 검색에 실패했습니다.');
+    }
+    setBusSearching(false);
+  };
+
+  // 선택 노선 실시간 위치 폴링 (15초)
+  useEffect(() => {
+    if (!busTracking || !busCityCode) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/bus/locations?cityCode=${encodeURIComponent(busCityCode)}&routeId=${encodeURIComponent(busTracking.routeId)}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setBusError(data?.error || '버스 위치 조회 실패'); return; }
+        setBusError(null);
+        setBusLocations(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setBusError('버스 위치 조회 실패 (네트워크)');
+      }
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [busTracking, busCityCode]);
+
+  // 버스 마커 렌더링 (카카오/Leaflet 양쪽 지원)
+  useEffect(() => {
+    // 기존 마커 제거
+    busKakaoOverlaysRef.current.forEach(o => { try { o.setMap(null); } catch {} });
+    busKakaoOverlaysRef.current = [];
+    busLeafletMarkersRef.current.forEach(m => { try { m.remove(); } catch {} });
+    busLeafletMarkersRef.current = [];
+
+    if (!busTracking || busLocations.length === 0) return;
+
+    const busHtml = (b: { vehicleNo: string; nodeName: string }) =>
+      `<div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif">
+        <div style="background:#0EA5E9;color:#fff;font-size:10px;font-weight:900;padding:2px 6px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.35);white-space:nowrap">🚌 ${busTracking.routeNo}</div>
+        <div style="background:#fff;color:#334155;font-size:8px;font-weight:700;padding:1px 4px;border-radius:4px;margin-top:2px;box-shadow:0 1px 2px rgba(0,0,0,0.2);white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis">${b.nodeName || b.vehicleNo}</div>
+      </div>`;
+
+    if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+      busLocations.forEach(b => {
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(b.lat, b.lng),
+          content: busHtml(b),
+          yAnchor: 0.5,
+          zIndex: 4,
+        });
+        overlay.setMap(kakaoMapInstanceRef.current);
+        busKakaoOverlaysRef.current.push(overlay);
+      });
+    } else if (leafletMapInstanceRef.current) {
+      busLocations.forEach(b => {
+        const marker = L.marker([b.lat, b.lng], {
+          icon: L.divIcon({ className: '', html: busHtml(b), iconSize: [0, 0] }),
+          interactive: false,
+        });
+        marker.addTo(leafletMapInstanceRef.current!);
+        busLeafletMarkersRef.current.push(marker);
+      });
+    }
+  }, [busLocations, busTracking, isKakaoReady, useFallbackMap]);
+
+  const stopBusTracking = () => {
+    setBusTracking(null);
+    setBusLocations([]);
+    setBusRoutes([]);
+  };
   // 지도 클릭 리스너는 1회만 등록되므로 최신 onMapClick을 ref로 참조(stale 클로저 방지)
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => { onMapClickRef.current = onMapClick; }, [onMapClick]);
@@ -1010,6 +1121,89 @@ export default function MapComponent({
         <span className={`w-2.5 h-2.5 rounded-full ${placeSelectMode ? 'bg-white' : 'bg-rose-500'}`} />
         <span>{placeSelectMode ? '지도를 터치해 장소를 지정하세요 (취소하려면 다시 탭)' : '📍 소집 장소 지정하기'}</span>
       </button>
+
+      {/* 🚌 실시간 버스 위치 버튼 (소집 장소 버튼 위) */}
+      <button
+        type="button"
+        onClick={() => setBusPanelOpen(o => !o)}
+        className={`absolute bottom-[68px] left-4 z-30 font-black text-[10px] px-3.5 py-2.5 rounded-2xl shadow-lg flex items-center gap-1.5 transition active:translate-y-0.5 ${
+          busTracking ? 'bg-sky-500 text-white' : 'bg-white text-slate-800'
+        }`}
+      >
+        <span>🚌</span>
+        <span>{busTracking ? `${busTracking.routeNo}번 추적 중 (${busLocations.length}대)` : '버스 위치 보기'}</span>
+      </button>
+
+      {/* 🚌 버스 노선 선택 패널 */}
+      {busPanelOpen && (
+        <div className="absolute bottom-[116px] left-4 z-30 bg-white rounded-2xl shadow-xl p-3 w-[250px] font-sans space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-black text-slate-800">🚌 실시간 버스 위치</p>
+            <button onClick={() => setBusPanelOpen(false)} className="text-slate-400 hover:text-slate-600 text-xs w-5 h-5">✕</button>
+          </div>
+
+          {busTracking ? (
+            <div className="space-y-2">
+              <p className="text-[10px] text-slate-500">
+                <b className="text-sky-600">{busTracking.routeNo}번</b> 버스 <b>{busLocations.length}대</b> 표시 중 (15초마다 갱신)
+              </p>
+              <button onClick={stopBusTracking} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-black py-2 rounded-xl transition">
+                추적 중지
+              </button>
+            </div>
+          ) : (
+            <>
+              <select
+                value={busCityCode}
+                onChange={e => setBusCityCode(e.target.value)}
+                className="w-full bg-slate-50 text-[11px] font-bold rounded-xl px-2 py-2 focus:outline-none"
+              >
+                <option value="">도시 선택</option>
+                {busCities.map(c => (
+                  <option key={c.cityCode} value={c.cityCode}>{c.cityName}</option>
+                ))}
+              </select>
+              <div className="flex gap-1.5">
+                <input
+                  type="tel"
+                  value={busRouteNo}
+                  onChange={e => setBusRouteNo(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleBusRouteSearch(); }}
+                  placeholder="버스 번호 (예: 102)"
+                  className="flex-1 bg-slate-50 text-[11px] font-bold rounded-xl px-2.5 py-2 focus:outline-none min-w-0"
+                />
+                <button
+                  onClick={handleBusRouteSearch}
+                  disabled={busSearching}
+                  className="bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 text-white text-[11px] font-black px-3 rounded-xl transition shrink-0"
+                >
+                  {busSearching ? '…' : '검색'}
+                </button>
+              </div>
+
+              {busRoutes.length > 0 && (
+                <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                  {busRoutes.map(r => (
+                    <button
+                      key={r.routeId}
+                      onClick={() => { setBusTracking({ routeId: r.routeId, routeNo: r.routeNo }); setBusPanelOpen(false); }}
+                      className="w-full bg-sky-50 hover:bg-sky-100 rounded-xl px-2.5 py-1.5 text-left transition"
+                    >
+                      <p className="text-[11px] font-black text-sky-700">{r.routeNo}번 <span className="text-[8.5px] text-slate-400 font-bold">{r.routeType}</span></p>
+                      <p className="text-[9px] text-slate-500 truncate">{r.start} ↔ {r.end}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-[8.5px] text-slate-400 leading-tight">
+                전국 대부분 도시 지원 (TAGO). 서울·경기 노선은 별도 API 연동 예정입니다.
+              </p>
+            </>
+          )}
+          {busError && <p className="text-[9px] text-rose-500 font-bold leading-tight">⚠️ {busError}</p>}
+        </div>
+      )}
     </div>
   );
 }

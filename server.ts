@@ -3161,6 +3161,81 @@ async function startServer() {
     res.json({ success: true, league: room.gameLeague });
   });
 
+  // ============= 🚌 실시간 버스 위치 (국토교통부 TAGO) =============
+  // 키는 환경변수 BUS_API_KEY 로만 주입 (코드·저장소에 키를 두지 않음)
+  // 참고: TAGO는 전국 참여 지자체 통합이지만 서울(TOPIS)·경기(GBIS)는 별도 API라 v1에서는 미지원
+  const BUS_API_KEY = process.env.BUS_API_KEY || '';
+
+  async function tagoGet(servicePath: string, params: Record<string, string>): Promise<any[]> {
+    if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
+    const qs = new URLSearchParams({
+      serviceKey: BUS_API_KEY,
+      _type: 'json',
+      numOfRows: '200',
+      pageNo: '1',
+      ...params,
+    });
+    const url = `http://apis.data.go.kr/1613000/${servicePath}?${qs.toString()}`;
+    const resp = await fetch(url);
+    const text = await resp.text();
+    // 키 오류 등은 XML로 응답됨
+    if (text.trim().startsWith('<')) {
+      const errMsg = (text.match(/<returnAuthMsg>([^<]+)</) || text.match(/<errMsg>([^<]+)</))?.[1] || 'TAGO API 오류';
+      throw new Error(errMsg);
+    }
+    const data = JSON.parse(text);
+    const header = data?.response?.header;
+    if (header && header.resultCode !== '00') {
+      throw new Error(header.resultMsg || 'TAGO API 오류');
+    }
+    const items = data?.response?.body?.items?.item;
+    if (!items) return [];
+    return Array.isArray(items) ? items : [items];
+  }
+
+  // 도시코드 목록 (24시간 메모리 캐시)
+  let busCityCache: { at: number; list: any[] } | null = null;
+  app.get('/api/bus/cities', rateLimit(20), tryCatch(async (_req: Request, res: Response) => {
+    if (busCityCache && Date.now() - busCityCache.at < 24 * 60 * 60 * 1000) {
+      return res.json(busCityCache.list);
+    }
+    const items = await tagoGet('BusLcInfoInqireService/getCtyCodeList', {});
+    const list = items.map((i: any) => ({ cityCode: String(i.citycode), cityName: String(i.cityname) }));
+    busCityCache = { at: Date.now(), list };
+    res.json(list);
+  }));
+
+  // 노선번호로 노선 검색 (TAGO 버스노선정보 서비스 — 공공데이터포털에서 별도 활용신청 필요)
+  app.get('/api/bus/routes', rateLimit(30), tryCatch(async (req: Request, res: Response) => {
+    const cityCode = String(req.query.cityCode || '');
+    const routeNo = String(req.query.routeNo || '').trim();
+    if (!cityCode || !routeNo) return res.status(400).json({ error: 'cityCode, routeNo가 필요합니다.' });
+    const items = await tagoGet('BusRouteInfoInqireService/getRouteNoList', { cityCode, routeNo });
+    res.json(items.map((i: any) => ({
+      routeId: String(i.routeid),
+      routeNo: String(i.routeno),
+      routeType: String(i.routetp || ''),
+      start: String(i.startnodenm || ''),
+      end: String(i.endnodenm || ''),
+    })));
+  }));
+
+  // 노선별 실시간 버스 위치
+  app.get('/api/bus/locations', rateLimit(60), tryCatch(async (req: Request, res: Response) => {
+    const cityCode = String(req.query.cityCode || '');
+    const routeId = String(req.query.routeId || '');
+    if (!cityCode || !routeId) return res.status(400).json({ error: 'cityCode, routeId가 필요합니다.' });
+    const items = await tagoGet('BusLcInfoInqireService/getRouteAcctoBusLcList', { cityCode, routeId });
+    res.json(items.map((i: any) => ({
+      lat: Number(i.gpslati),
+      lng: Number(i.gpslong),
+      vehicleNo: String(i.vehicleno || ''),
+      nodeName: String(i.nodenm || ''),
+      nodeOrder: Number(i.nodeord || 0),
+      routeNo: String(i.routenm || ''),
+    })).filter((b: any) => !isNaN(b.lat) && !isNaN(b.lng)));
+  }));
+
   // 내 위치를 볼 수 있는 전체 멤버 — 내가 속한 모든 방의 멤버를 방 이름과 함께 반환
   app.get('/api/friends/all-viewers', (req: AuthRequest, res: Response) => {
     const userId = req.user?.userId || (req.headers['x-user-id'] as string);
