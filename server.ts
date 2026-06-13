@@ -3170,6 +3170,15 @@ async function startServer() {
   // 참고: TAGO는 전국 참여 지자체 통합이지만 서울(TOPIS)·경기(GBIS)는 별도 API라 v1에서는 미지원
   const BUS_API_KEY = process.env.BUS_API_KEY || '';
 
+  // 공공데이터포털 인증키 스마트 처리: 이미 인코딩되어 %가 포함된 경우 그대로 사용하고, 디코딩 상태인 경우 인코딩
+  function getStandardServiceKey(key: string): string {
+    const trimmed = key.trim();
+    if (trimmed.includes('%')) {
+      return trimmed;
+    }
+    return encodeURIComponent(trimmed);
+  }
+
   // 비정상 응답(plain text 등)을 친절한 메시지로 변환
   function busApiTextError(text: string, serviceLabel: string): Error {
     const t = text.trim().slice(0, 100);
@@ -3188,7 +3197,7 @@ async function startServer() {
       ...params,
     });
     // serviceKey를 URLSearchParams에 주입하여 이중 인코딩되는 문제를 피하기 위해 raw 주입
-    const url = `http://apis.data.go.kr/1613000/${servicePath}?serviceKey=${BUS_API_KEY}&${qs.toString()}`;
+    const url = `http://apis.data.go.kr/1613000/${servicePath}?serviceKey=${getStandardServiceKey(BUS_API_KEY)}&${qs.toString()}`;
     const resp = await fetch(url);
     const text = await resp.text();
     // 키 오류 등은 XML로 응답됨
@@ -3212,7 +3221,7 @@ async function startServer() {
     if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
     const qs = new URLSearchParams({ resultType: 'json', ...params });
     // serviceKey 이중 인코딩 우회
-    const url = `http://ws.bus.go.kr/api/rest/${path}?serviceKey=${BUS_API_KEY}&${qs.toString()}`;
+    const url = `http://ws.bus.go.kr/api/rest/${path}?serviceKey=${getStandardServiceKey(BUS_API_KEY)}&${qs.toString()}`;
     const resp = await fetch(url);
     const text = await resp.text();
     if (text.trim().startsWith('<')) {
@@ -3237,7 +3246,7 @@ async function startServer() {
     if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
     const qs = new URLSearchParams({ format: 'json', ...params });
     // serviceKey 이중 인코딩 우회
-    const url = `http://apis.data.go.kr/6410000/${path}?serviceKey=${BUS_API_KEY}&${qs.toString()}`;
+    const url = `http://apis.data.go.kr/6410000/${path}?serviceKey=${getStandardServiceKey(BUS_API_KEY)}&${qs.toString()}`;
     const resp = await fetch(url);
     const text = await resp.text();
     if (text.trim().startsWith('<')) {

@@ -580,7 +580,7 @@ export default function MapComponent({
           <div style="transform:rotate(${rotation}deg);position:relative;width:46px;height:23px;flex-shrink:0;z-index:5;">
             
             <!-- Details Card wrapper (Counter-rotated) -->
-            <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
               <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 <div style="display:flex;align-items:center;justify-content:center;gap:2.5px;font-weight:700;width:100%;">
                   <span style="color:#64748b;font-size:7.5px;max-width:45px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fromSt}">${fromSt}</span>
@@ -594,7 +594,7 @@ export default function MapComponent({
             </div>
 
             <!-- Dashed connector -->
-            <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
+            <div style="position:absolute;right:100%;top:50%;width:40px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
 
             <!-- Side-view Subway SVG (No wheels) -->
             <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});">
@@ -808,7 +808,7 @@ export default function MapComponent({
           <div style="transform:rotate(${rotation}deg);position:relative;width:48px;height:24px;flex-shrink:0;z-index:5;">
             
             <!-- Details Card wrapper (Counter-rotated) -->
-            <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
               <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.12);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 ${flowHtml}
                 <div style="color:#64748b;font-size:6.5px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
@@ -816,7 +816,7 @@ export default function MapComponent({
             </div>
 
             <!-- Dashed connector -->
-            <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
+            <div style="position:absolute;right:100%;top:50%;width:40px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
 
             <!-- Side-view Bus SVG -->
             <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});">
