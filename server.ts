@@ -3182,13 +3182,13 @@ async function startServer() {
   async function tagoGet(servicePath: string, params: Record<string, string>): Promise<any[]> {
     if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
     const qs = new URLSearchParams({
-      serviceKey: BUS_API_KEY,
       _type: 'json',
       numOfRows: '200',
       pageNo: '1',
       ...params,
     });
-    const url = `http://apis.data.go.kr/1613000/${servicePath}?${qs.toString()}`;
+    // serviceKey를 URLSearchParams에 주입하여 이중 인코딩되는 문제를 피하기 위해 raw 주입
+    const url = `http://apis.data.go.kr/1613000/${servicePath}?serviceKey=${BUS_API_KEY}&${qs.toString()}`;
     const resp = await fetch(url);
     const text = await resp.text();
     // 키 오류 등은 XML로 응답됨
@@ -3210,8 +3210,10 @@ async function startServer() {
   // ── 서울(TOPIS) 헬퍼: ws.bus.go.kr — resultType=json
   async function seoulGet(path: string, params: Record<string, string>): Promise<any[]> {
     if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
-    const qs = new URLSearchParams({ serviceKey: BUS_API_KEY, resultType: 'json', ...params });
-    const resp = await fetch(`http://ws.bus.go.kr/api/rest/${path}?${qs.toString()}`);
+    const qs = new URLSearchParams({ resultType: 'json', ...params });
+    // serviceKey 이중 인코딩 우회
+    const url = `http://ws.bus.go.kr/api/rest/${path}?serviceKey=${BUS_API_KEY}&${qs.toString()}`;
+    const resp = await fetch(url);
     const text = await resp.text();
     if (text.trim().startsWith('<')) {
       let errMsg = (text.match(/<headerMsg>([^<]+)</) || text.match(/<returnAuthMsg>([^<]+)</))?.[1] || '서울 버스 API 오류 (활용신청 승인 여부 확인)';
@@ -3233,8 +3235,10 @@ async function startServer() {
   // ── 경기(GBIS v2) 헬퍼: apis.data.go.kr/6410000 — format=json
   async function ggGet(path: string, params: Record<string, string>, listKey: string): Promise<any[]> {
     if (!BUS_API_KEY) throw new Error('BUS_API_KEY 환경변수가 설정되지 않았습니다.');
-    const qs = new URLSearchParams({ serviceKey: BUS_API_KEY, format: 'json', ...params });
-    const resp = await fetch(`http://apis.data.go.kr/6410000/${path}?${qs.toString()}`);
+    const qs = new URLSearchParams({ format: 'json', ...params });
+    // serviceKey 이중 인코딩 우회
+    const url = `http://apis.data.go.kr/6410000/${path}?serviceKey=${BUS_API_KEY}&${qs.toString()}`;
+    const resp = await fetch(url);
     const text = await resp.text();
     if (text.trim().startsWith('<')) {
       let errMsg = (text.match(/<returnAuthMsg>([^<]+)</) || text.match(/<resultMessage>([^<]+)</))?.[1] || '경기 버스 API 오류 (활용신청 승인 여부 확인)';

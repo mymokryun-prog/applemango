@@ -576,8 +576,8 @@ export default function MapComponent({
 
       const trainHtml = `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
-          <!-- Rotated container wrapping side-view train SVG, headlight, connector and card -->
-          <div style="transform:rotate(${rotation}deg);position:relative;display:flex;align-items:center;flex-shrink:0;">
+          <!-- Rotated container with fixed dimensions wrapping side-view train SVG, headlight, connector and card -->
+          <div style="transform:rotate(${rotation}deg);position:relative;width:46px;height:23px;flex-shrink:0;z-index:5;">
             
             <!-- Details Card wrapper (Counter-rotated) -->
             <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
@@ -597,7 +597,7 @@ export default function MapComponent({
             <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
 
             <!-- Side-view Subway SVG (No wheels) -->
-            <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:relative;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});">
+            <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});">
               <!-- Subway Body -->
               <rect x="2" y="6" width="60" height="20" rx="4" fill="${lineColor}" stroke="${neonDetails.neon}" stroke-width="1.8" />
               <!-- Front curved windshield (Right side) -->
@@ -616,6 +616,10 @@ export default function MapComponent({
 
             <!-- Headlight beam (Extended to 60px) -->
             <div style="
+              position: absolute;
+              left: 100%;
+              top: 50%;
+              transform: translateY(-50%);
               width: 60px;
               height: 18px;
               background: linear-gradient(90deg, ${neonDetails.neon} 0%, rgba(${neonDetails.rgb}, 0.45) 40%, rgba(${neonDetails.rgb}, 0) 100%);
@@ -800,8 +804,8 @@ export default function MapComponent({
 
       return `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
-          <!-- Rotated container wrapping side-view bus SVG, headlight, connector and card -->
-          <div style="transform:rotate(${rotation}deg);position:relative;display:flex;align-items:center;flex-shrink:0;">
+          <!-- Rotated container with fixed dimensions wrapping side-view bus SVG, headlight, connector and card -->
+          <div style="transform:rotate(${rotation}deg);position:relative;width:48px;height:24px;flex-shrink:0;z-index:5;">
             
             <!-- Details Card wrapper (Counter-rotated) -->
             <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
@@ -815,7 +819,7 @@ export default function MapComponent({
             <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
 
             <!-- Side-view Bus SVG -->
-            <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:relative;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});">
+            <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});">
               <!-- Roof AC unit -->
               <rect x="22" y="2" width="20" height="3" rx="1.5" fill="${busColor.main}" stroke="${busColor.neon}" stroke-width="1.2" />
               <!-- Bus Body -->
@@ -842,6 +846,10 @@ export default function MapComponent({
 
             <!-- Fluorescent Headlight Beam -->
             <div style="
+              position: absolute;
+              left: 100%;
+              top: 50%;
+              transform: translateY(-50%);
               width: 35px;
               height: 22px;
               background: linear-gradient(90deg, ${busColor.neon} 0%, rgba(${busColor.rgb}, 0.45) 40%, rgba(${busColor.rgb}, 0) 100%);
