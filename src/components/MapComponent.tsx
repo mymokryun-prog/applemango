@@ -301,7 +301,53 @@ export default function MapComponent({
   const [subwayLineTrains, setSubwayLineTrains] = useState<Array<{ subwayId: string; subwayNm: string; statnId: string; statnNm: string; trainNo: string; updnLine: string; statnTnm: string; trainSttus: string; directAt: string }>>([]);
   const [subwayLineTrainsLoading, setSubwayLineTrainsLoading] = useState(false);
   const [subwayStationCoords, setSubwayStationCoords] = useState<Record<string, { lat: number; lng: number }>>(() => {
-    try { return JSON.parse(localStorage.getItem('aemang_subway_coords_cache') || '{}'); } catch { return {}; }
+    const defaultCoords: Record<string, { lat: number; lng: number }> = {
+      '수원': { lat: 37.2662, lng: 127.0002 },
+      '화서': { lat: 37.2838, lng: 126.9896 },
+      '성균관대': { lat: 37.3003, lng: 126.9707 },
+      '의왕': { lat: 37.3218, lng: 126.9682 },
+      '당정': { lat: 37.3441, lng: 126.9568 },
+      '군포': { lat: 37.3534, lng: 126.9455 },
+      '금정': { lat: 37.3722, lng: 126.9434 },
+      '명학': { lat: 37.3847, lng: 126.9359 },
+      '안양': { lat: 37.3943, lng: 126.9227 },
+      '관악': { lat: 37.4190, lng: 126.9084 },
+      '석수': { lat: 37.4350, lng: 126.9023 },
+      '금천구청': { lat: 37.4554, lng: 126.8939 },
+      '독산': { lat: 37.4686, lng: 126.8912 },
+      '가산디지털단지': { lat: 37.4812, lng: 126.8826 },
+      '구로': { lat: 37.5031, lng: 126.8820 },
+      '신도림': { lat: 37.5088, lng: 126.8912 },
+      '영등포': { lat: 37.5156, lng: 126.9076 },
+      '세류': { lat: 37.2450, lng: 127.0135 },
+      '병점': { lat: 37.2075, lng: 127.0340 },
+      '세마': { lat: 37.1879, lng: 127.0435 },
+      '오산대': { lat: 37.1687, lng: 127.0441 },
+      '오산': { lat: 37.1460, lng: 127.0443 },
+      '진위': { lat: 37.1009, lng: 127.0628 },
+      '송탄': { lat: 37.0786, lng: 127.0545 },
+      '서정리': { lat: 37.0565, lng: 127.0526 },
+      '평택지제': { lat: 37.0187, lng: 127.0702 },
+      '평택': { lat: 36.9907, lng: 127.0852 },
+      '성환': { lat: 36.9157, lng: 127.1265 },
+      '직산': { lat: 36.8745, lng: 127.1437 },
+      '두정': { lat: 36.8322, lng: 127.1488 },
+      '천안': { lat: 36.8123, lng: 127.1462 },
+      '봉명': { lat: 36.8016, lng: 127.1367 },
+      '쌍용': { lat: 36.7937, lng: 127.1216 },
+      '아산': { lat: 36.7918, lng: 127.1042 },
+      '탕정': { lat: 36.7981, lng: 127.0673 },
+      '배방': { lat: 36.7779, lng: 127.0531 },
+      '온양온천': { lat: 36.7845, lng: 126.9996 },
+      '신창': { lat: 36.7698, lng: 126.9511 },
+      '서동탄': { lat: 37.1995, lng: 127.0543 }
+    };
+    try {
+      const cached = JSON.parse(localStorage.getItem('aemang_subway_coords_cache') || '{}');
+      return { ...defaultCoords, ...cached };
+    } catch {
+      return defaultCoords;
+    }
   });
   const subwayTrainKakaoOverlaysRef = useRef<any[]>([]);
   const subwayTrainLeafletMarkersRef = useRef<L.Marker[]>([]);
@@ -499,18 +545,18 @@ export default function MapComponent({
           <div style="transform:rotate(${rotation}deg);position:relative;display:flex;align-items:center;flex-shrink:0;">
             
             <!-- Details Card wrapper (Counter-rotated) -->
-            <div style="position:absolute;right:calc(100% + 18px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
-              <div style="background:rgba(15, 23, 42, 0.92);color:#fff;font-size:7.5px;font-weight:700;padding:4px 7px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.25);white-space:nowrap;display:flex;align-items:center;gap:3px;border:1px solid ${neonDetails.neon};">
-                <span style="color:#39FF14;font-weight:900;">${statusLabel || '운행'}</span>
-                <span>${t.trainNo}</span>
-                <span style="color:#94a3b8;font-weight:500;">(${t.statnTnm.replace('종착', '')}행)</span>
+            <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+              <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;display:flex;align-items:center;gap:3px;">
+                <span style="color:#10b981;font-weight:900;">${statusLabel || '운행'}</span>
+                <span style="font-weight:800;">${t.trainNo}</span>
+                <span style="color:#64748b;font-weight:500;">(${t.statnTnm.replace('종착', '')}행)</span>
               </div>
             </div>
 
             <!-- Dashed connector -->
-            <div style="position:absolute;right:100%;top:50%;width:18px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
+            <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
 
-            <!-- Side-view Subway SVG -->
+            <!-- Side-view Subway SVG (No wheels) -->
             <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:relative;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});">
               <!-- Subway Body -->
               <rect x="2" y="6" width="60" height="20" rx="4" fill="${lineColor}" stroke="${neonDetails.neon}" stroke-width="1.8" />
@@ -521,23 +567,18 @@ export default function MapComponent({
               <rect x="17" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
               <rect x="28" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
               <rect x="39" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
-              <!-- Wheels -->
-              <circle cx="14" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
-              <circle cx="22" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
-              <circle cx="42" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
-              <circle cx="50" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
               <!-- Tail Lights (Left) -->
               <circle cx="4" cy="10" r="1.5" fill="#EF4444" />
               <circle cx="4" cy="18" r="1.5" fill="#EF4444" />
               <!-- Train Number Text Overlay -->
-              <text x="28" y="21" fill="#FFFFFF" font-size="8" font-weight="900" font-family="'Space Grotesk',sans-serif" text-anchor="middle" style="letter-spacing:-0.2px;">${t.trainNo}</text>
+              <text x="28" y="20" fill="#FFFFFF" font-size="8" font-weight="900" font-family="'Space Grotesk',sans-serif" text-anchor="middle" style="letter-spacing:-0.2px;">${t.trainNo}</text>
             </svg>
 
-            <!-- Headlight beam -->
+            <!-- Headlight beam (Extended to 60px) -->
             <div style="
-              width: 30px;
+              width: 60px;
               height: 18px;
-              background: linear-gradient(90deg, ${neonDetails.neon} 0%, rgba(${neonDetails.rgb}, 0.45) 45%, rgba(${neonDetails.rgb}, 0) 100%);
+              background: linear-gradient(90deg, ${neonDetails.neon} 0%, rgba(${neonDetails.rgb}, 0.45) 40%, rgba(${neonDetails.rgb}, 0) 100%);
               clip-path: polygon(0 35%, 100% 0, 100% 100%, 0 65%);
               margin-left: -2px;
               flex-shrink: 0;
@@ -703,15 +744,15 @@ export default function MapComponent({
         const fromSt = parts[0].trim();
         const toSt = parts[1].trim();
         flowHtml = `
-          <div style="display:flex;align-items:center;justify-content:center;gap:3px;font-weight:700;width:100%;">
-            <span style="color:#64748b;font-size:8px;max-width:55px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fromSt}">${fromSt}</span>
-            <span style="color:#10b981;font-size:7px;font-weight:bold;flex-shrink:0;">➔</span>
-            <span style="color:#0f172a;font-size:9px;max-width:65px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:900" title="${toSt}">${toSt}</span>
+          <div style="display:flex;align-items:center;justify-content:center;gap:2.5px;font-weight:700;width:100%;">
+            <span style="color:#64748b;font-size:7.5px;max-width:45px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fromSt}">${fromSt}</span>
+            <span style="color:#10b981;font-size:6.5px;font-weight:bold;flex-shrink:0;">➔</span>
+            <span style="color:#0f172a;font-size:8.5px;max-width:55px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:900" title="${toSt}">${toSt}</span>
           </div>
         `;
       } else {
         flowHtml = `
-          <div style="color:#0f172a;font-size:8.5px;font-weight:800;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${b.nodeName}">
+          <div style="color:#0f172a;font-size:8px;font-weight:800;max-width:95px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${b.nodeName}">
             ${b.nodeName || b.vehicleNo}
           </div>
         `;
@@ -723,15 +764,15 @@ export default function MapComponent({
           <div style="transform:rotate(${rotation}deg);position:relative;display:flex;align-items:center;flex-shrink:0;">
             
             <!-- Details Card wrapper (Counter-rotated) -->
-            <div style="position:absolute;right:calc(100% + 18px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
-              <div style="background:rgba(255, 255, 255, 0.98);color:#1e293b;font-size:8px;font-weight:700;padding:4.5px 8px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:110px;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2px;border:1.2px solid ${busColor.neon};">
+            <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+              <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.12);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 ${flowHtml}
-                <div style="color:#64748b;font-size:7px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
+                <div style="color:#64748b;font-size:6.5px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
               </div>
             </div>
 
             <!-- Dashed connector -->
-            <div style="position:absolute;right:100%;top:50%;width:18px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
+            <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
 
             <!-- Side-view Bus SVG -->
             <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:relative;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});">
@@ -2338,7 +2379,12 @@ function getBusTypeColor(routeType?: string, routeNo?: string): { main: string; 
   const type = (routeType || '').trim();
   const no = (routeNo || '').trim();
 
-  // 1. 광역 / 직행좌석 (Red)
+  // 1. 경기순환 (Orange/Red)
+  if (type.includes('경기순환') || (type.includes('순환') && type.includes('경기'))) {
+    return { main: '#EA580C', neon: '#FF7E39', rgb: '255, 126, 57', label: '경기순환' };
+  }
+
+  // 2. 광역 / 직행좌석 (Red)
   if (
     type.includes('광역') ||
     type.includes('직행좌석') ||
@@ -2348,19 +2394,24 @@ function getBusTypeColor(routeType?: string, routeNo?: string): { main: string; 
     return { main: '#E11D48', neon: '#FF4560', rgb: '255, 69, 96', label: '광역' };
   }
 
-  // 2. 간선 / 일반좌석 (Blue)
+  // 3. 간선 / 일반좌석 (Blue)
   if (type.includes('간선') || type.includes('좌석') || (no.length === 3 && !isNaN(Number(no)))) {
     return { main: '#1D4ED8', neon: '#39D4FF', rgb: '57, 212, 255', label: '간선' };
   }
 
-  // 3. 순환 (Yellow/Orange)
+  // 4. 순환 (Yellow/Orange)
   if (type.includes('순환')) {
     return { main: '#D97706', neon: '#FFE239', rgb: '255, 226, 57', label: '순환' };
   }
 
-  // 4. 지선 / 마을 / 일반 (Green)
-  // Default for others is Green (마을/지선)
-  return { main: '#047857', neon: '#39FF14', rgb: '57, 255, 20', label: '지선/마을' };
+  // 5. 마을 (자주색)
+  if (type.includes('마을')) {
+    return { main: '#86198F', neon: '#F472B6', rgb: '244, 114, 182', label: '마을' };
+  }
+
+  // 6. 지선 / 일반 (Green)
+  // Default for others is Green (지선)
+  return { main: '#047857', neon: '#39FF14', rgb: '57, 255, 20', label: '지선' };
 }
 
 // ===== 지하철 열차 진행 방향각 추정 헬퍼 =====
