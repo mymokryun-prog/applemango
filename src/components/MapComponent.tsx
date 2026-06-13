@@ -243,7 +243,7 @@ export default function MapComponent({
   const [busRouteNo, setBusRouteNo] = useState('');
   const [busRoutes, setBusRoutes] = useState<Array<{ routeId: string; routeNo: string; routeType: string; start: string; end: string; cityCode?: string; region?: string }>>([]);
   const [busSearching, setBusSearching] = useState(false);
-  const [busTracking, setBusTracking] = useState<{ routeId: string; routeNo: string; cityCode: string } | null>(null);
+  const [busTracking, setBusTracking] = useState<{ routeId: string; routeNo: string; cityCode: string; routeType?: string } | null>(null);
   const [busLocations, setBusLocations] = useState<Array<{ lat: number; lng: number; vehicleNo: string; nodeName: string; nextLat?: number | null; nextLng?: number | null }>>([]);
   const [busError, setBusError] = useState<string | null>(null);
   const busKakaoOverlaysRef = useRef<any[]>([]);
@@ -261,19 +261,19 @@ export default function MapComponent({
   const busStationLeafletMarkersRef = useRef<L.Marker[]>([]);
 
   // 최근 추적한 노선 (원탭 재추적) — 전체 노선 목록 로딩 대신 트래픽 효율적인 방식
-  const [busRecent, setBusRecent] = useState<Array<{ cityCode: string; routeId: string; routeNo: string }>>(() => {
+  const [busRecent, setBusRecent] = useState<Array<{ cityCode: string; routeId: string; routeNo: string; routeType?: string }>>(() => {
     try { return JSON.parse(localStorage.getItem('aemang_bus_recent') || '[]'); } catch { return []; }
   });
-  const saveBusRecent = (entry: { cityCode: string; routeId: string; routeNo: string }) => {
+  const saveBusRecent = (entry: { cityCode: string; routeId: string; routeNo: string; routeType?: string }) => {
     setBusRecent(prev => {
       const next = [entry, ...prev.filter(r => r.routeId !== entry.routeId)].slice(0, 6);
       try { localStorage.setItem('aemang_bus_recent', JSON.stringify(next)); } catch {}
       return next;
     });
   };
-  const startBusTracking = (entry: { cityCode: string; routeId: string; routeNo: string }) => {
+  const startBusTracking = (entry: { cityCode: string; routeId: string; routeNo: string; routeType?: string }) => {
     saveBusRecent(entry);
-    setBusTracking({ routeId: entry.routeId, routeNo: entry.routeNo, cityCode: entry.cityCode });
+    setBusTracking({ routeId: entry.routeId, routeNo: entry.routeNo, cityCode: entry.cityCode, routeType: entry.routeType });
     setBusPanelOpen(false);
   };
 
@@ -285,6 +285,7 @@ export default function MapComponent({
     }
   }, [isLobbySubwayMode]);
 
+  const [subwayTab, setSubwayTab] = useState<'station' | 'line'>('station');
   const [subwayKeyword, setSubwayKeyword] = useState('');
   const [subwayStations, setSubwayStations] = useState<Array<{ stationId: string; stationName: string; lat: number; lng: number }>>([]);
   const [subwaySearching, setSubwaySearching] = useState(false);
@@ -295,11 +296,32 @@ export default function MapComponent({
   const subwayKakaoOverlaysRef = useRef<any[]>([]);
   const subwayLeafletMarkersRef = useRef<L.Marker[]>([]);
 
+  // 호선별 실시간 열차 위치 추적 관련 상태 및 Ref
+  const [activeSubwayLine, setActiveSubwayLine] = useState<string | null>(null);
+  const [subwayLineTrains, setSubwayLineTrains] = useState<Array<{ subwayId: string; subwayNm: string; statnId: string; statnNm: string; trainNo: string; updnLine: string; statnTnm: string; trainSttus: string; directAt: string }>>([]);
+  const [subwayLineTrainsLoading, setSubwayLineTrainsLoading] = useState(false);
+  const [subwayStationCoords, setSubwayStationCoords] = useState<Record<string, { lat: number; lng: number }>>(() => {
+    try { return JSON.parse(localStorage.getItem('aemang_subway_coords_cache') || '{}'); } catch { return {}; }
+  });
+  const subwayTrainKakaoOverlaysRef = useRef<any[]>([]);
+  const subwayTrainLeafletMarkersRef = useRef<L.Marker[]>([]);
+
+  const saveSubwayCoords = (stationName: string, lat: number, lng: number) => {
+    setSubwayStationCoords(prev => {
+      const cleanName = stationName.replace(/역$/, '').trim();
+      const next = { ...prev, [cleanName]: { lat, lng } };
+      try { localStorage.setItem('aemang_subway_coords_cache', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
   const stopSubwayTracking = () => {
     setSelectedSubwayStation(null);
     setSubwayArrivals([]);
     setSubwayStations([]);
     setSubwayKeyword('');
+    setActiveSubwayLine(null);
+    setSubwayLineTrains([]);
   };
 
   // 선택 지하철역 실시간 도착 정보 조회 및 폴링 (15초)
@@ -370,6 +392,179 @@ export default function MapComponent({
       subwayLeafletMarkersRef.current.push(marker);
     }
   }, [selectedSubwayStation, isKakaoReady, useFallbackMap]);
+
+  // 1. 선택 호선 실시간 열차 위치 조회 및 폴링 (15초)
+  useEffect(() => {
+    if (!activeSubwayLine) {
+      setSubwayLineTrains([]);
+      return;
+    }
+    let cancelled = false;
+    const loadLineTrains = async () => {
+      setSubwayLineTrainsLoading(true);
+      try {
+        const res = await fetch(`/api/subway/line-positions?lineName=${encodeURIComponent(activeSubwayLine)}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setSubwayError(data?.error || '열차 위치 조회 실패'); return; }
+        setSubwayError(null);
+        setSubwayLineTrains(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setSubwayError('열차 위치 조회 실패 (네트워크)');
+      }
+      setSubwayLineTrainsLoading(false);
+    };
+
+    loadLineTrains();
+    const timer = setInterval(loadLineTrains, 15000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [activeSubwayLine]);
+
+  // 2. 미등록 역 위/경도 좌표 순차적 해결 (150ms 스로틀링)
+  useEffect(() => {
+    if (!activeSubwayLine || subwayLineTrains.length === 0) return;
+
+    const missing = Array.from(new Set(subwayLineTrains.map(t => t.statnNm.replace(/역$/, '').trim())))
+      .filter(name => !subwayStationCoords[name]) as string[];
+
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    const resolveAll = async () => {
+      for (const name of missing) {
+        if (cancelled) break;
+        
+        // Kakao Places SW8 search
+        if (isKakaoReady && !useFallbackMap && window.kakao?.maps?.services) {
+          try {
+            const ps = new window.kakao.maps.services.Places();
+            ps.keywordSearch(name + '역', (data: any, status: any) => {
+              if (status === window.kakao.maps.services.Status.OK) {
+                const match = data.find((item: any) => item.category_group_code === 'SW8' || item.place_name.includes(name));
+                if (match) {
+                  saveSubwayCoords(name, parseFloat(match.y), parseFloat(match.x));
+                }
+              }
+            });
+          } catch (err) {
+            console.warn('Subway station search error:', err);
+          }
+        } else {
+          // Nominatim
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name + '역')}`);
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+              saveSubwayCoords(name, parseFloat(data[0].lat), parseFloat(data[0].lon));
+            }
+          } catch {}
+        }
+        await new Promise(r => setTimeout(r, 150));
+      }
+    };
+
+    resolveAll();
+    return () => { cancelled = true; };
+  }, [subwayLineTrains, subwayStationCoords, activeSubwayLine, isKakaoReady, useFallbackMap]);
+
+  // 3. 지하철 실시간 열차 마커 렌더링 (방향 회전 + 헤드라이트 빔)
+  useEffect(() => {
+    // 기존 마커 제거
+    subwayTrainKakaoOverlaysRef.current.forEach(o => { try { o.setMap(null); } catch {} });
+    subwayTrainKakaoOverlaysRef.current = [];
+    subwayTrainLeafletMarkersRef.current.forEach(m => { try { m.remove(); } catch {} });
+    subwayTrainLeafletMarkersRef.current = [];
+
+    if (!activeSubwayLine || subwayLineTrains.length === 0) return;
+
+    subwayLineTrains.forEach(t => {
+      const cleanName = t.statnNm.replace(/역$/, '').trim();
+      const coords = subwayStationCoords[cleanName];
+      if (!coords) return;
+
+      const rotation = getSubwayTrainRotation(t.subwayNm, t.updnLine);
+      const lineColor = getSubwayLineColor(t.subwayId);
+      const neonDetails = getSubwayLineNeonDetails(t.subwayId);
+
+      // train status msg (진입, 도착, 출발, 전역출발)
+      let statusLabel = '';
+      if (t.trainSttus === '0') statusLabel = '진입';
+      else if (t.trainSttus === '1') statusLabel = '도착';
+      else if (t.trainSttus === '2') statusLabel = '출발';
+      else if (t.trainSttus === '3') statusLabel = '전역출발';
+
+      const trainHtml = `
+        <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
+          <!-- Train carriage (rotates in direction of travel) -->
+          <div style="transform:rotate(${rotation}deg);display:flex;align-items:center;position:relative;flex-shrink:0;">
+            <!-- Carriage body -->
+            <div style="
+              width: 44px;
+              height: 18px;
+              background: ${lineColor};
+              border: 2px solid ${neonDetails.neon};
+              box-shadow: 0 0 8px ${neonDetails.neon};
+              border-radius: 4px;
+              position: relative;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: #fff;
+              font-size: 10px;
+              font-weight: 900;
+              letter-spacing: -0.2px;
+              z-index: 2;
+            ">
+              <!-- Cabin Windows -->
+              <div style="position: absolute; left: 6px; right: 6px; top: 3px; bottom: 3px; background: rgba(0,0,0,0.5); border-radius: 1px; display:flex; align-items:center; justify-content:center;">
+                <span style="font-size: 8px; font-weight: 900; transform: scale(0.9);">${t.trainNo}</span>
+              </div>
+              <!-- Windshield -->
+              <div style="position: absolute; right: 2px; top: 2px; bottom: 2px; width: 3px; background: rgba(255,255,255,0.75); border-radius: 1px;"></div>
+              <!-- Tail lights -->
+              <div style="position: absolute; left: -1.5px; top: 3.5px; width: 1.5px; height: 3px; background: #EF4444; border-radius: 0.5px;"></div>
+              <div style="position: absolute; left: -1.5px; bottom: 3.5px; width: 1.5px; height: 3px; background: #EF4444; border-radius: 0.5px;"></div>
+            </div>
+            <!-- Headlight beam -->
+            <div style="
+              width: 30px;
+              height: 18px;
+              background: linear-gradient(90deg, ${neonDetails.neon} 0%, rgba(${neonDetails.rgb}, 0.45) 45%, rgba(${neonDetails.rgb}, 0) 100%);
+              clip-path: polygon(0 35%, 100% 0, 100% 100%, 0 65%);
+              margin-left: -2px;
+              flex-shrink: 0;
+              z-index: 1;
+              filter: blur(0.5px);
+            "></div>
+          </div>
+          <!-- Label below train -->
+          <div style="background:rgba(15, 23, 42, 0.88);color:#fff;font-size:7.5px;font-weight:700;padding:2px 5px;border-radius:4px;margin-top:4.5px;box-shadow:0 2px 4px rgba(0,0,0,0.15);white-space:nowrap;display:flex;align-items:center;gap:3px;border:0.5px solid rgba(255,255,255,0.1);">
+            <span style="color:#39FF14;font-weight:900;">${statusLabel || '운행'}</span>
+            <span>${t.trainNo}</span>
+          </div>
+        </div>
+      `;
+
+      if (isKakaoReady && !useFallbackMap && kakaoMapInstanceRef.current) {
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: new window.kakao.maps.LatLng(coords.lat, coords.lng),
+          content: trainHtml,
+          xAnchor: 0.5,
+          yAnchor: 0.5,
+          zIndex: 15,
+        });
+        overlay.setMap(kakaoMapInstanceRef.current);
+        subwayTrainKakaoOverlaysRef.current.push(overlay);
+      } else if (useFallbackMap && leafletMapInstanceRef.current) {
+        const marker = L.marker([coords.lat, coords.lng], {
+          icon: L.divIcon({ className: '', html: trainHtml, iconSize: [0, 0] }),
+          zIndexOffset: 1500,
+        });
+        marker.addTo(leafletMapInstanceRef.current);
+        subwayTrainLeafletMarkersRef.current.push(marker);
+      }
+    });
+  }, [subwayLineTrains, subwayStationCoords, activeSubwayLine, isKakaoReady, useFallbackMap]);
 
   const handleSubwayStationSearch = async () => {
     if (!subwayKeyword.trim()) { setSubwayError('지하철역 이름을 입력해 주세요.'); return; }
@@ -497,6 +692,8 @@ export default function MapComponent({
         rotation = bearingAngle - 90;
       }
 
+      const busColor = getBusTypeColor(busTracking.routeType, busTracking.routeNo);
+
       const parts = b.nodeName.split('→');
       let flowHtml = '';
       if (parts.length >= 2) {
@@ -519,21 +716,64 @@ export default function MapComponent({
 
       return `
         <div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif;pointer-events:none">
-          <!-- Upper glowing capsule badge -->
-          <div class="neon-bus-badge" style="background:#1e293b;color:#fff;font-size:10px;font-weight:900;padding:4.5px 9px;border-radius:20px;border:1.5px solid #39FF14;white-space:nowrap;display:flex;align-items:center;gap:6px;">
-            <!-- Rotated container for bus icon and headlight -->
-            <div style="transform:rotate(${rotation}deg);display:flex;align-items:center;position:relative;flex-shrink:0;">
-              <!-- Side-facing Bus SVG -->
-              <svg viewBox="0 0 24 24" width="16" height="12" fill="#39FF14" style="filter:drop-shadow(0 0 2.5px #39FF14);flex-shrink:0;z-index:2;position:relative;">
-                <path d="M19 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h1c0 1.1.9 2 2 2s2-.9 2-2h6c0 1.1.9 2 2 2s2-.9 2-2h1c1.1 0 2-.9 2-2v-4.5c0-.8-.7-1.5-1.5-1.5H19V6zm-8 4H3V8h8v2zm7 0h-5V8h5v2z"/>
-              </svg>
-              <!-- Fluorescent Headlight Beam -->
-              <div style="width:22px;height:12px;background:linear-gradient(90deg, rgba(57,255,20,0.85) 0%, rgba(57,255,20,0.3) 40%, rgba(57,255,20,0) 100%);clip-path:polygon(0 35%, 100% 0, 100% 100%, 0 65%);margin-left:-2px;flex-shrink:0;z-index:1;filter:blur(0.5px);"></div>
+          <!-- Upper rotating bus body and headlight -->
+          <div style="transform:rotate(${rotation}deg);display:flex;align-items:center;position:relative;flex-shrink:0;margin-bottom:6px;margin-top:12px;">
+            <!-- Bus Body -->
+            <div style="
+              width: 48px;
+              height: 22px;
+              background: ${busColor.main};
+              border: 2.2px solid ${busColor.neon};
+              box-shadow: 0 0 10px ${busColor.neon};
+              border-radius: 4px 12px 12px 4px;
+              position: relative;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: #fff;
+              font-size: 11px;
+              font-weight: 900;
+              font-family: 'Space Grotesk', sans-serif;
+              letter-spacing: -0.3px;
+              z-index: 2;
+            ">
+              <!-- Windshield (Front Window) -->
+              <div style="
+                position: absolute;
+                right: 4px;
+                top: 2px;
+                bottom: 2px;
+                width: 6px;
+                background: rgba(255, 255, 255, 0.7);
+                border-radius: 1px 4px 4px 1px;
+              "></div>
+
+              <!-- Side Mirrors -->
+              <div style="position: absolute; right: 8px; top: -3px; width: 3px; height: 3px; background: ${busColor.neon}; border-radius: 50%;"></div>
+              <div style="position: absolute; right: 8px; bottom: -3px; width: 3px; height: 3px; background: ${busColor.neon}; border-radius: 50%;"></div>
+
+              <!-- Tail Lights -->
+              <div style="position: absolute; left: -2px; top: 3px; width: 2px; height: 4px; background: #EF4444; border-radius: 1px;"></div>
+              <div style="position: absolute; left: -2px; bottom: 3px; width: 2px; height: 4px; background: #EF4444; border-radius: 1px;"></div>
+
+              <!-- Route Number -->
+              <span style="z-index: 3; margin-right: 4px;">${busTracking.routeNo}</span>
             </div>
-            <span style="font-size:11px;font-family:'Space Grotesk',sans-serif;font-weight:900;letter-spacing:-0.2px;">${busTracking.routeNo}</span>
+
+            <!-- Fluorescent Headlight Beam -->
+            <div style="
+              width: 35px;
+              height: 22px;
+              background: linear-gradient(90deg, ${busColor.neon} 0%, rgba(${busColor.rgb}, 0.45) 40%, rgba(${busColor.rgb}, 0) 100%);
+              clip-path: polygon(0 35%, 100% 0, 100% 100%, 0 65%);
+              margin-left: -2px;
+              flex-shrink: 0;
+              z-index: 1;
+              filter: blur(0.5px);
+            "></div>
           </div>
           <!-- Lower destination / vehicle info plate -->
-          <div style="background:rgba(255, 255, 255, 0.98);color:#1e293b;font-size:8px;font-weight:700;padding:3.5px 7px;border-radius:6px;margin-top:4px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:110px;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2.5px;border:1px solid rgba(226, 232, 240, 0.9);">
+          <div style="background:rgba(255, 255, 255, 0.98);color:#1e293b;font-size:8px;font-weight:700;padding:3.5px 7px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:110px;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2.5px;border:1px solid rgba(226, 232, 240, 0.9);">
             ${flowHtml}
             <div style="color:#64748b;font-size:7px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
           </div>
@@ -1621,7 +1861,7 @@ export default function MapComponent({
                       {busRoutes.map(r => (
                         <button
                           key={`${r.cityCode || busCityCode}-${r.routeId}`}
-                          onClick={() => startBusTracking({ cityCode: r.cityCode || busCityCode, routeId: r.routeId, routeNo: r.routeNo })}
+                          onClick={() => startBusTracking({ cityCode: r.cityCode || busCityCode, routeId: r.routeId, routeNo: r.routeNo, routeType: r.routeType })}
                           className="w-full bg-sky-50 hover:bg-sky-100 rounded-xl px-3 py-2 text-left transition"
                         >
                           <p className="text-[13px] font-black text-sky-700">
@@ -1745,7 +1985,7 @@ export default function MapComponent({
         }`}>
           <div className="flex items-center justify-between">
             <p className="text-[14px] font-black text-slate-800">
-              🚇 {selectedSubwayStation ? '지하철 도착 정보' : '실시간 지하철 정보'}
+              🚇 {selectedSubwayStation ? '지하철 도착 정보' : activeSubwayLine ? '실시간 열차 위치' : '실시간 지하철 정보'}
             </p>
             <button onClick={() => setSubwayPanelOpen(false)} className="text-slate-400 hover:text-slate-600 text-sm w-6 h-6">✕</button>
           </div>
@@ -1753,6 +1993,30 @@ export default function MapComponent({
           {subwayError && (
             <div className="bg-rose-50 text-rose-600 text-[11px] font-bold p-2.5 rounded-xl text-left">
               ⚠️ {subwayError}
+            </div>
+          )}
+
+          {/* Sub-tabs (only show when not actively tracking a station or a line) */}
+          {!selectedSubwayStation && !activeSubwayLine && (
+            <div className="flex border-b border-slate-100 pb-1">
+              <button
+                type="button"
+                onClick={() => setSubwayTab('station')}
+                className={`flex-1 pb-1.5 text-[12px] font-black transition text-center ${
+                  subwayTab === 'station' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                역 검색
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubwayTab('line')}
+                className={`flex-1 pb-1.5 text-[12px] font-black transition text-center ${
+                  subwayTab === 'line' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                노선 추적
+              </button>
             </div>
           )}
 
@@ -1828,8 +2092,78 @@ export default function MapComponent({
                 </button>
               </div>
             </div>
-          ) : (
-            // 지하철역 검색 UI
+          ) : activeSubwayLine ? (
+            // 2. 호선 실시간 열차 위치 추적 출력
+            <div className="space-y-2.5">
+              <div className="bg-emerald-50 rounded-xl p-2.5 text-left flex items-center justify-between">
+                <div>
+                  <p className="text-[13px] font-black text-emerald-800">
+                    🚇 {activeSubwayLine}
+                  </p>
+                  <p className="text-[10px] text-emerald-600 font-bold">실시간 열차 위치 ({subwayLineTrains.length}대)</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubwayLine(null)}
+                  className="text-[10px] bg-white text-slate-500 font-black px-2 py-1 rounded-lg border border-slate-100 hover:bg-slate-50 transition"
+                >
+                  노선 변경
+                </button>
+              </div>
+
+              <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-0.5">
+                {subwayLineTrainsLoading && subwayLineTrains.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 text-center py-4">열차 위치 정보를 불러오는 중입니다…</p>
+                ) : subwayLineTrains.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 text-center py-4">현재 운행 중인 열차가 없습니다.</p>
+                ) : (
+                  subwayLineTrains.map((t, idx) => {
+                    let statusLabel = '운행';
+                    if (t.trainSttus === '0') statusLabel = '진입';
+                    else if (t.trainSttus === '1') statusLabel = '도착';
+                    else if (t.trainSttus === '2') statusLabel = '출발';
+                    else if (t.trainSttus === '3') statusLabel = '전역출발';
+
+                    const cleanName = t.statnNm.replace(/역$/, '').trim();
+                    const coords = subwayStationCoords[cleanName];
+
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          if (coords) {
+                            setSearchFocusCoords([coords.lat, coords.lng]);
+                          }
+                        }}
+                        className={`flex items-center justify-between bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-xl px-3 py-2 text-left cursor-pointer transition ${
+                          coords ? '' : 'opacity-85'
+                        }`}
+                      >
+                        <div className="flex flex-col">
+                          <span className="text-[12px] font-extrabold text-slate-800">{t.statnNm}역 <span className="text-[9px] text-emerald-600 font-bold">({statusLabel})</span></span>
+                          <span className="text-[8.5px] text-slate-400 font-bold">열차번호 {t.trainNo} ({t.updnLine === '0' || t.updnLine.includes('상행') || t.updnLine.includes('내선') ? '상행/내선' : '하행/외선'})</span>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-[10px] font-black bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
+                            {t.statnTnm.replace('종착', '')}행
+                          </span>
+                          {coords && (
+                            <span className="text-[8px] text-emerald-600 font-bold">📍 지도 포커스</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <p className="text-[9.5px] text-slate-400 text-center">15초마다 자동으로 갱신됩니다.</p>
+              <button onClick={stopSubwayTracking} className="w-full bg-rose-50 hover:bg-rose-100 text-rose-600 text-[12px] font-bold py-2 rounded-xl transition">
+                추적 중지
+              </button>
+            </div>
+          ) : subwayTab === 'station' ? (
+            // 3. 지하철역 검색 UI
             <>
               <div className="flex gap-1.5">
                 <input
@@ -1841,6 +2175,7 @@ export default function MapComponent({
                   className="flex-1 bg-slate-50 text-[13px] font-bold rounded-xl px-3 py-2.5 focus:outline-none min-w-0"
                 />
                 <button
+                  type="button"
                   onClick={handleSubwayStationSearch}
                   disabled={subwaySearching}
                   className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 text-white text-[13px] font-black px-4 rounded-xl transition shrink-0"
@@ -1868,6 +2203,40 @@ export default function MapComponent({
                 </div>
               )}
             </>
+          ) : (
+            // 4. 노선 선택 UI
+            <div className="space-y-2.5">
+              <p className="text-[10.5px] font-bold text-slate-400">실시간 위치를 추적할 호선 선택</p>
+              <div className="grid grid-cols-3 gap-1.5 max-h-[200px] overflow-y-auto pr-0.5">
+                {[
+                  { id: '1호선', name: '1호선', color: '#0052A4' },
+                  { id: '2호선', name: '2호선', color: '#00A84D' },
+                  { id: '3호선', name: '3호선', color: '#EF7C1C' },
+                  { id: '4호선', name: '4호선', color: '#00A5DE' },
+                  { id: '5호선', name: '5호선', color: '#996CAC' },
+                  { id: '6호선', name: '6호선', color: '#CD7C2F' },
+                  { id: '7호선', name: '7호선', color: '#747F00' },
+                  { id: '8호선', name: '8호선', color: '#E6186C' },
+                  { id: '9호선', name: '9호선', color: '#BDB092' },
+                  { id: '수인분당선', name: '수인분당', color: '#F5A200' },
+                  { id: '신분당선', name: '신분당선', color: '#D4003B' },
+                  { id: '경의중앙선', name: '경의중앙', color: '#77C4A3' },
+                  { id: '공항철도', name: '공항철도', color: '#0090D2' },
+                  { id: '경춘선', name: '경춘선', color: '#0C8E72' },
+                  { id: '우이신설선', name: '우이신설', color: '#B7C452' }
+                ].map(l => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => setActiveSubwayLine(l.id)}
+                    style={{ borderLeft: `3px solid ${l.color}` }}
+                    className="bg-slate-50 hover:bg-slate-100 text-slate-800 text-[11px] font-bold py-2 px-1 rounded-xl transition text-center shadow-sm border border-slate-100"
+                  >
+                    {l.name}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -1969,3 +2338,74 @@ const getRestroomTip = (stationName: string): string => {
   }
   return '역내 대합실(개찰구 주변) 또는 개찰구 안팎 연결 통로의 이정표를 따라 이동하시면 화장실을 이용할 수 있습니다.';
 };
+
+// ===== 버스 종류별 고유 색상 및 네온 정보 매핑 헬퍼 =====
+function getBusTypeColor(routeType?: string, routeNo?: string): { main: string; neon: string; rgb: string; label: string } {
+  const type = (routeType || '').trim();
+  const no = (routeNo || '').trim();
+
+  // 1. 광역 / 직행좌석 (Red)
+  if (
+    type.includes('광역') ||
+    type.includes('직행좌석') ||
+    no.startsWith('M') ||
+    (no.length >= 4 && no.startsWith('9') && !type.includes('마을'))
+  ) {
+    return { main: '#E11D48', neon: '#FF4560', rgb: '255, 69, 96', label: '광역' };
+  }
+
+  // 2. 간선 / 일반좌석 (Blue)
+  if (type.includes('간선') || type.includes('좌석') || (no.length === 3 && !isNaN(Number(no)))) {
+    return { main: '#1D4ED8', neon: '#39D4FF', rgb: '57, 212, 255', label: '간선' };
+  }
+
+  // 3. 순환 (Yellow/Orange)
+  if (type.includes('순환')) {
+    return { main: '#D97706', neon: '#FFE239', rgb: '255, 226, 57', label: '순환' };
+  }
+
+  // 4. 지선 / 마을 / 일반 (Green)
+  // Default for others is Green (마을/지선)
+  return { main: '#047857', neon: '#39FF14', rgb: '57, 255, 20', label: '지선/마을' };
+}
+
+// ===== 지하철 열차 진행 방향각 추정 헬퍼 =====
+function getSubwayTrainRotation(lineName: string, updnLine: string): number {
+  const isNorthSouth = 
+    lineName.includes('1호선') ||
+    lineName.includes('3호선') ||
+    lineName.includes('4호선') ||
+    lineName.includes('7호선') ||
+    lineName.includes('8호선') ||
+    lineName.includes('신분당선') ||
+    lineName.includes('수인분당선') ||
+    lineName.includes('우이신설선') ||
+    lineName.includes('서해선') ||
+    lineName.includes('GTX');
+    
+  if (isNorthSouth) {
+    // 0 (상행): North (-90 deg), 1 (하행): South (90 deg)
+    return updnLine === '0' || updnLine.includes('상행') || updnLine.includes('내선') ? -90 : 90;
+  } else {
+    // East-West or Circular
+    // 0 (상행): West (180 deg), 1 (하행): East (0 deg)
+    return updnLine === '0' || updnLine.includes('상행') || updnLine.includes('내선') ? 180 : 0;
+  }
+}
+
+// ===== 지하철 호선별 네온 데코레이션 디테일 헬퍼 =====
+function getSubwayLineNeonDetails(subwayId: string): { neon: string; rgb: string } {
+  switch (subwayId) {
+    case '1001': return { neon: '#39D4FF', rgb: '57, 212, 255' };
+    case '1002': return { neon: '#39FF14', rgb: '57, 255, 20' };
+    case '1003': return { neon: '#FFA339', rgb: '255, 163, 57' };
+    case '1004': return { neon: '#39E6FF', rgb: '57, 230, 255' };
+    case '1005': return { neon: '#E699FF', rgb: '230, 153, 255' };
+    case '1006': return { neon: '#D4A373', rgb: '212, 163, 115' };
+    case '1007': return { neon: '#D4FF39', rgb: '212, 255, 57' };
+    case '1008': return { neon: '#FF579F', rgb: '255, 87, 159' };
+    case '1009': return { neon: '#FFE239', rgb: '255, 226, 57' };
+    case '1077': return { neon: '#FF397F', rgb: '255, 57, 127' };
+    default: return { neon: '#39FF14', rgb: '57, 255, 20' }; // Default neon green
+  }
+}

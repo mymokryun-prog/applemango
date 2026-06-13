@@ -3522,6 +3522,62 @@ async function startServer() {
     }
   });
 
+  // 지하철 실시간 노선별 열차 위치 조회 및 10초 캐싱
+  const subwayPositionCache: Record<string, { at: number; data: any }> = {};
+  app.get('/api/subway/line-positions', rateLimit(60), async (req: Request, res: Response) => {
+    const lineName = String(req.query.lineName || '').trim();
+    if (!lineName) return res.status(400).json({ error: 'lineName이 필요합니다.' });
+
+    let cleanLine = lineName;
+    if (/^\d+$/.test(cleanLine)) {
+      cleanLine = `${cleanLine}호선`;
+    }
+
+    const cached = subwayPositionCache[cleanLine];
+    if (cached && Date.now() - cached.at < 10000) {
+      return res.json(cached.data);
+    }
+
+    try {
+      const key = process.env.SUBWAY_API_KEY || 'sample';
+      const isSample = key === 'sample';
+      const startIndex = 1;
+      const endIndex = isSample ? 5 : 100;
+
+      const url = `http://swopenapi.seoul.go.kr/api/subway/${key}/json/realtimePosition/${startIndex}/${endIndex}/${encodeURIComponent(cleanLine)}`;
+      const resp = await fetch(url);
+      const text = await resp.text();
+
+      if (text.trim().startsWith('<') || text.trim().startsWith('{') === false) {
+        throw new Error('지하철 API 응답 오류 (네트워크 또는 권한 오류)');
+      }
+
+      const data = JSON.parse(text);
+      if (data?.errorMessage?.status === 200 || data?.realtimePositionList) {
+        const list = data.realtimePositionList || [];
+        const result = list.map((i: any) => ({
+          subwayId: String(i.subwayId || ''),
+          subwayNm: String(i.subwayNm || ''),
+          statnId: String(i.statnId || ''),
+          statnNm: String(i.statnNm || ''),
+          trainNo: String(i.trainNo || ''),
+          updnLine: String(i.updnLine || ''),
+          statnTnm: String(i.statnTnm || ''),
+          trainSttus: String(i.trainSttus || ''),
+          directAt: String(i.directAt || '0'),
+        }));
+        subwayPositionCache[cleanLine] = { at: Date.now(), data: result };
+        return res.json(result);
+      } else {
+        return res.json([]);
+      }
+    } catch (e: any) {
+      console.error('Subway Position API Error:', e);
+      if (cached) return res.json(cached.data);
+      res.status(500).json({ error: e?.message || '지하철 실시간 위치 조회 실패' });
+    }
+  });
+
   // ── 경기: 노선 ID -> 노선 정보(노선번호 등) 캐시
   const ggRouteInfoCache: Record<string, { routeName: string; routeTypeName: string }> = {};
   async function getGgRouteInfo(routeId: string): Promise<{ routeName: string; routeTypeName: string }> {
