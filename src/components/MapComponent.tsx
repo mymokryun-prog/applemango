@@ -574,13 +574,35 @@ export default function MapComponent({
       else if (t.trainSttus === '2') statusLabel = '출발';
       else if (t.trainSttus === '3') statusLabel = '전역출발';
 
+      // rotation 각도를 0 ~ 360도로 정규화하여 꼬리 상자 배치 방향 결정
+      const normAngle = (rotation % 360 + 360) % 360;
+      let cardTransform = '';
+      let cardOrigin = '';
+      if (normAngle >= 45 && normAngle < 135) {
+        // 하행 수직 방향 (아래): 설명 상자는 고정점의 위쪽에 수평으로 매달림
+        cardTransform = `translate(-50%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'center center';
+      } else if (normAngle >= 135 && normAngle < 225) {
+        // 좌행 수평 방향 (왼쪽): 고정점은 기차 오른쪽. 상자는 고정점의 오른쪽으로 뻗음
+        cardTransform = `translate(0%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'left center';
+      } else if (normAngle >= 225 && normAngle < 315) {
+        // 상행 수직 방향 (위): 설명 상자는 고정점의 아래쪽에 수평으로 매달림
+        cardTransform = `translate(-50%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'center center';
+      } else {
+        // 우행 수평 방향 (오른쪽): 고정점은 기차 왼쪽. 상자는 고정점의 왼쪽으로 뻗음
+        cardTransform = `translate(-100%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'right center';
+      }
+
       const trainHtml = `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
           <!-- Rotated container with fixed dimensions wrapping side-view train SVG, headlight, connector and card -->
           <div style="transform:rotate(${rotation}deg);position:relative;width:46px;height:23px;flex-shrink:0;z-index:5;">
             
-            <!-- Details Card wrapper (Counter-rotated) -->
-            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+            <!-- Details Card wrapper (Counter-rotated with dynamic transform to prevent overlapping) -->
+            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:${cardTransform};transform-origin:${cardOrigin};z-index:10;">
               <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 <div style="display:flex;align-items:center;justify-content:center;gap:2.5px;font-weight:700;width:100%;">
                   <span style="color:#64748b;font-size:7.5px;max-width:45px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fromSt}">${fromSt}</span>
@@ -802,13 +824,31 @@ export default function MapComponent({
         `;
       }
 
+      // rotation 각도를 0 ~ 360도로 정규화하여 꼬리 상자 배치 방향 결정
+      const normAngle = (rotation % 360 + 360) % 360;
+      let cardTransform = '';
+      let cardOrigin = '';
+      if (normAngle >= 45 && normAngle < 135) {
+        cardTransform = `translate(-50%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'center center';
+      } else if (normAngle >= 135 && normAngle < 225) {
+        cardTransform = `translate(0%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'left center';
+      } else if (normAngle >= 225 && normAngle < 315) {
+        cardTransform = `translate(-50%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'center center';
+      } else {
+        cardTransform = `translate(-100%, -50%) rotate(${-rotation}deg)`;
+        cardOrigin = 'right center';
+      }
+
       return `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
           <!-- Rotated container with fixed dimensions wrapping side-view bus SVG, headlight, connector and card -->
           <div style="transform:rotate(${rotation}deg);position:relative;width:48px;height:24px;flex-shrink:0;z-index:5;">
             
-            <!-- Details Card wrapper (Counter-rotated) -->
-            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+            <!-- Details Card wrapper (Counter-rotated with dynamic transform to prevent overlapping) -->
+            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:${cardTransform};transform-origin:${cardOrigin};z-index:10;">
               <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.12);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 ${flowHtml}
                 <div style="color:#64748b;font-size:6.5px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
