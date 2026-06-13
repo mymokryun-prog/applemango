@@ -352,6 +352,26 @@ export default function MapComponent({
   const subwayTrainKakaoOverlaysRef = useRef<any[]>([]);
   const subwayTrainLeafletMarkersRef = useRef<L.Marker[]>([]);
 
+  // 말풍선(설명 박스) 전체 ON/OFF 및 개별 마커 클릭 상태
+  const [showAllBusLabels, setShowAllBusLabels] = useState(true);
+  const [showAllSubwayLabels, setShowAllSubwayLabels] = useState(true);
+  const [clickedBusNo, setClickedBusNo] = useState<string | null>(null);
+  const [clickedTrainNo, setClickedTrainNo] = useState<string | null>(null);
+
+  // 글로벌 클릭 리스너 등록
+  useEffect(() => {
+    (window as any).onBusMarkerClick = (vehicleNo: string) => {
+      setClickedBusNo(prev => prev === vehicleNo ? null : vehicleNo);
+    };
+    (window as any).onTrainMarkerClick = (trainNo: string) => {
+      setClickedTrainNo(prev => prev === trainNo ? null : trainNo);
+    };
+    return () => {
+      delete (window as any).onBusMarkerClick;
+      delete (window as any).onTrainMarkerClick;
+    };
+  }, []);
+
   const saveSubwayCoords = (stationName: string, lat: number, lng: number) => {
     setSubwayStationCoords(prev => {
       const cleanName = stationName.replace(/역$/, '').trim();
@@ -596,13 +616,15 @@ export default function MapComponent({
         cardOrigin = 'right center';
       }
 
+      const isVisible = showAllSubwayLabels || clickedTrainNo === t.trainNo;
+
       const trainHtml = `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
           <!-- Rotated container with fixed dimensions wrapping side-view train SVG, headlight, connector and card -->
           <div style="transform:rotate(${rotation}deg);position:relative;width:46px;height:23px;flex-shrink:0;z-index:5;">
             
             <!-- Details Card wrapper (Counter-rotated with dynamic transform to prevent overlapping) -->
-            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:${cardTransform};transform-origin:${cardOrigin};z-index:10;">
+            <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:${cardTransform};transform-origin:${cardOrigin};z-index:10;display:${isVisible ? 'flex' : 'none'};">
               <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 <div style="display:flex;align-items:center;justify-content:center;gap:2.5px;font-weight:700;width:100%;">
                   <span style="color:#64748b;font-size:7.5px;max-width:45px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fromSt}">${fromSt}</span>
@@ -616,10 +638,10 @@ export default function MapComponent({
             </div>
 
             <!-- Dashed connector -->
-            <div style="position:absolute;right:100%;top:50%;width:40px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
+            <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;display:${isVisible ? 'block' : 'none'};"></div>
 
             <!-- Side-view Subway SVG (No wheels) -->
-            <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});">
+            <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});pointer-events:auto;cursor:pointer;" onclick="window.onTrainMarkerClick('${t.trainNo}')">
               <!-- Subway Body -->
               <rect x="2" y="6" width="60" height="20" rx="4" fill="${lineColor}" stroke="${neonDetails.neon}" stroke-width="1.8" />
               <!-- Front curved windshield (Right side) -->
@@ -674,7 +696,7 @@ export default function MapComponent({
         subwayTrainLeafletMarkersRef.current.push(marker);
       }
     });
-  }, [subwayLineTrains, subwayStationCoords, activeSubwayLine, isKakaoReady, useFallbackMap]);
+  }, [subwayLineTrains, subwayStationCoords, activeSubwayLine, isKakaoReady, useFallbackMap, showAllSubwayLabels, clickedTrainNo]);
 
   const handleSubwayStationSearch = async () => {
     if (!subwayKeyword.trim()) { setSubwayError('지하철역 이름을 입력해 주세요.'); return; }
@@ -842,13 +864,15 @@ export default function MapComponent({
         cardOrigin = 'right center';
       }
 
+      const isVisible = showAllBusLabels || clickedBusNo === b.vehicleNo;
+
       return `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
           <!-- Rotated container with fixed dimensions wrapping side-view bus SVG, headlight, connector and card -->
           <div style="transform:rotate(${rotation}deg);position:relative;width:48px;height:24px;flex-shrink:0;z-index:5;">
             
             <!-- Details Card wrapper (Counter-rotated with dynamic transform to prevent overlapping) -->
-            <div style="position:absolute;right:calc(100% + 40px);top:50%;transform:${cardTransform};transform-origin:${cardOrigin};z-index:10;">
+            <div style="position:absolute;right:calc(100% + 28px);top:50%;transform:${cardTransform};transform-origin:${cardOrigin};z-index:10;display:${isVisible ? 'flex' : 'none'};">
               <div style="background:rgba(255, 255, 255, 0.96);color:#1e293b;font-size:7.5px;font-weight:700;padding:3px 6px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.12);white-space:nowrap;min-width:80px;max-width:120px;display:flex;flex-direction:column;align-items:center;gap:2px;">
                 ${flowHtml}
                 <div style="color:#64748b;font-size:6.5px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
@@ -856,10 +880,10 @@ export default function MapComponent({
             </div>
 
             <!-- Dashed connector -->
-            <div style="position:absolute;right:100%;top:50%;width:40px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
+            <div style="position:absolute;right:100%;top:50%;width:28px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;display:${isVisible ? 'block' : 'none'};"></div>
 
             <!-- Side-view Bus SVG -->
-            <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});">
+            <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});pointer-events:auto;cursor:pointer;" onclick="window.onBusMarkerClick('${b.vehicleNo}')">
               <!-- Roof AC unit -->
               <rect x="22" y="2" width="20" height="3" rx="1.5" fill="${busColor.main}" stroke="${busColor.neon}" stroke-width="1.2" />
               <!-- Bus Body -->
@@ -925,7 +949,7 @@ export default function MapComponent({
         busLeafletMarkersRef.current.push(marker);
       });
     }
-  }, [busLocations, busTracking, isKakaoReady, useFallbackMap]);
+  }, [busLocations, busTracking, isKakaoReady, useFallbackMap, showAllBusLabels, clickedBusNo]);
 
   const stopBusTracking = () => {
     setBusTracking(null);
@@ -1870,6 +1894,22 @@ export default function MapComponent({
               <p className="text-[11px] text-slate-500 font-bold leading-normal text-left pl-1">
                 <b className="text-sky-600">{busTracking.routeNo}번</b> 버스 <b>{busLocations.length}대</b> 표시 중 (15초마다 갱신)
               </p>
+              <div className="flex items-center justify-between px-1 py-1 text-[11px] font-bold text-slate-600 border-t border-b border-slate-100 py-2">
+                <span>말풍선 모두 표시</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAllBusLabels(prev => !prev)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    showAllBusLabels ? 'bg-sky-500' : 'bg-slate-200'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      showAllBusLabels ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
               <button onClick={stopBusTracking} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-black py-2.5 rounded-xl transition">
                 추적 중지
               </button>
@@ -2231,6 +2271,23 @@ export default function MapComponent({
                   className="text-[10px] bg-white text-slate-500 font-black px-2 py-1 rounded-lg border border-slate-100 hover:bg-slate-50 transition"
                 >
                   노선 변경
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between px-1.5 py-1 text-[11px] font-bold text-slate-600 border-b border-slate-100 pb-2">
+                <span>말풍선 모두 표시</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAllSubwayLabels(prev => !prev)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    showAllSubwayLabels ? 'bg-emerald-500' : 'bg-slate-200'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      showAllSubwayLabels ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
                 </button>
               </div>
 
