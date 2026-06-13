@@ -495,36 +495,44 @@ export default function MapComponent({
 
       const trainHtml = `
         <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
-          <!-- Train carriage (rotates in direction of travel) -->
-          <div style="transform:rotate(${rotation}deg);display:flex;align-items:center;position:relative;flex-shrink:0;">
-            <!-- Carriage body -->
-            <div style="
-              width: 44px;
-              height: 18px;
-              background: ${lineColor};
-              border: 2px solid ${neonDetails.neon};
-              box-shadow: 0 0 8px ${neonDetails.neon};
-              border-radius: 4px;
-              position: relative;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              color: #fff;
-              font-size: 10px;
-              font-weight: 900;
-              letter-spacing: -0.2px;
-              z-index: 2;
-            ">
-              <!-- Cabin Windows -->
-              <div style="position: absolute; left: 6px; right: 6px; top: 3px; bottom: 3px; background: rgba(0,0,0,0.5); border-radius: 1px; display:flex; align-items:center; justify-content:center;">
-                <span style="font-size: 8px; font-weight: 900; transform: scale(0.9);">${t.trainNo}</span>
+          <!-- Rotated container wrapping side-view train SVG, headlight, connector and card -->
+          <div style="transform:rotate(${rotation}deg);position:relative;display:flex;align-items:center;flex-shrink:0;">
+            
+            <!-- Details Card wrapper (Counter-rotated) -->
+            <div style="position:absolute;right:calc(100% + 18px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+              <div style="background:rgba(15, 23, 42, 0.92);color:#fff;font-size:7.5px;font-weight:700;padding:4px 7px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.25);white-space:nowrap;display:flex;align-items:center;gap:3px;border:1px solid ${neonDetails.neon};">
+                <span style="color:#39FF14;font-weight:900;">${statusLabel || '운행'}</span>
+                <span>${t.trainNo}</span>
+                <span style="color:#94a3b8;font-weight:500;">(${t.statnTnm.replace('종착', '')}행)</span>
               </div>
-              <!-- Windshield -->
-              <div style="position: absolute; right: 2px; top: 2px; bottom: 2px; width: 3px; background: rgba(255,255,255,0.75); border-radius: 1px;"></div>
-              <!-- Tail lights -->
-              <div style="position: absolute; left: -1.5px; top: 3.5px; width: 1.5px; height: 3px; background: #EF4444; border-radius: 0.5px;"></div>
-              <div style="position: absolute; left: -1.5px; bottom: 3.5px; width: 1.5px; height: 3px; background: #EF4444; border-radius: 0.5px;"></div>
             </div>
+
+            <!-- Dashed connector -->
+            <div style="position:absolute;right:100%;top:50%;width:18px;border-top:1.5px dashed ${neonDetails.neon};transform:translateY(-50%);z-index:1;"></div>
+
+            <!-- Side-view Subway SVG -->
+            <svg viewBox="0 0 64 32" width="46" height="23" style="z-index:5;position:relative;overflow:visible;filter:drop-shadow(0 0 3px ${neonDetails.neon});">
+              <!-- Subway Body -->
+              <rect x="2" y="6" width="60" height="20" rx="4" fill="${lineColor}" stroke="${neonDetails.neon}" stroke-width="1.8" />
+              <!-- Front curved windshield (Right side) -->
+              <path d="M50 6h10c1 0 2 1 2 2v8c0 1-1 2-2 2h-10V6z" fill="#D1E8FF" stroke="${neonDetails.neon}" stroke-width="1.2" opacity="0.85" />
+              <!-- Cabin Windows -->
+              <rect x="6" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
+              <rect x="17" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
+              <rect x="28" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
+              <rect x="39" y="9" width="9" height="6" rx="1.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1" opacity="0.8" />
+              <!-- Wheels -->
+              <circle cx="14" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
+              <circle cx="22" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
+              <circle cx="42" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
+              <circle cx="50" cy="26" r="3.5" fill="#1E293B" stroke="${neonDetails.neon}" stroke-width="1.2" />
+              <!-- Tail Lights (Left) -->
+              <circle cx="4" cy="10" r="1.5" fill="#EF4444" />
+              <circle cx="4" cy="18" r="1.5" fill="#EF4444" />
+              <!-- Train Number Text Overlay -->
+              <text x="28" y="21" fill="#FFFFFF" font-size="8" font-weight="900" font-family="'Space Grotesk',sans-serif" text-anchor="middle" style="letter-spacing:-0.2px;">${t.trainNo}</text>
+            </svg>
+
             <!-- Headlight beam -->
             <div style="
               width: 30px;
@@ -536,11 +544,6 @@ export default function MapComponent({
               z-index: 1;
               filter: blur(0.5px);
             "></div>
-          </div>
-          <!-- Label below train -->
-          <div style="background:rgba(15, 23, 42, 0.88);color:#fff;font-size:7.5px;font-weight:700;padding:2px 5px;border-radius:4px;margin-top:4.5px;box-shadow:0 2px 4px rgba(0,0,0,0.15);white-space:nowrap;display:flex;align-items:center;gap:3px;border:0.5px solid rgba(255,255,255,0.1);">
-            <span style="color:#39FF14;font-weight:900;">${statusLabel || '운행'}</span>
-            <span>${t.trainNo}</span>
           </div>
         </div>
       `;
@@ -715,50 +718,46 @@ export default function MapComponent({
       }
 
       return `
-        <div style="display:flex;flex-direction:column;align-items:center;font-family:sans-serif;pointer-events:none">
-          <!-- Upper rotating bus body and headlight -->
-          <div style="transform:rotate(${rotation}deg);display:flex;align-items:center;position:relative;flex-shrink:0;margin-bottom:6px;margin-top:12px;">
-            <!-- Bus Body -->
-            <div style="
-              width: 48px;
-              height: 22px;
-              background: ${busColor.main};
-              border: 2.2px solid ${busColor.neon};
-              box-shadow: 0 0 10px ${busColor.neon};
-              border-radius: 4px 12px 12px 4px;
-              position: relative;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              color: #fff;
-              font-size: 11px;
-              font-weight: 900;
-              font-family: 'Space Grotesk', sans-serif;
-              letter-spacing: -0.3px;
-              z-index: 2;
-            ">
-              <!-- Windshield (Front Window) -->
-              <div style="
-                position: absolute;
-                right: 4px;
-                top: 2px;
-                bottom: 2px;
-                width: 6px;
-                background: rgba(255, 255, 255, 0.7);
-                border-radius: 1px 4px 4px 1px;
-              "></div>
-
-              <!-- Side Mirrors -->
-              <div style="position: absolute; right: 8px; top: -3px; width: 3px; height: 3px; background: ${busColor.neon}; border-radius: 50%;"></div>
-              <div style="position: absolute; right: 8px; bottom: -3px; width: 3px; height: 3px; background: ${busColor.neon}; border-radius: 50%;"></div>
-
-              <!-- Tail Lights -->
-              <div style="position: absolute; left: -2px; top: 3px; width: 2px; height: 4px; background: #EF4444; border-radius: 1px;"></div>
-              <div style="position: absolute; left: -2px; bottom: 3px; width: 2px; height: 4px; background: #EF4444; border-radius: 1px;"></div>
-
-              <!-- Route Number -->
-              <span style="z-index: 3; margin-right: 4px;">${busTracking.routeNo}</span>
+        <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;font-family:sans-serif;">
+          <!-- Rotated container wrapping side-view bus SVG, headlight, connector and card -->
+          <div style="transform:rotate(${rotation}deg);position:relative;display:flex;align-items:center;flex-shrink:0;">
+            
+            <!-- Details Card wrapper (Counter-rotated) -->
+            <div style="position:absolute;right:calc(100% + 18px);top:50%;transform:translateY(-50%) rotate(${-rotation}deg);transform-origin:right center;z-index:10;">
+              <div style="background:rgba(255, 255, 255, 0.98);color:#1e293b;font-size:8px;font-weight:700;padding:4.5px 8px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:110px;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2px;border:1.2px solid ${busColor.neon};">
+                ${flowHtml}
+                <div style="color:#64748b;font-size:7px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
+              </div>
             </div>
+
+            <!-- Dashed connector -->
+            <div style="position:absolute;right:100%;top:50%;width:18px;border-top:1.5px dashed ${busColor.neon};transform:translateY(-50%);z-index:1;"></div>
+
+            <!-- Side-view Bus SVG -->
+            <svg viewBox="0 0 64 32" width="48" height="24" style="z-index:5;position:relative;overflow:visible;filter:drop-shadow(0 0 3px ${busColor.neon});">
+              <!-- Roof AC unit -->
+              <rect x="22" y="2" width="20" height="3" rx="1.5" fill="${busColor.main}" stroke="${busColor.neon}" stroke-width="1.2" />
+              <!-- Bus Body -->
+              <rect x="2" y="5" width="60" height="22" rx="5" fill="${busColor.main}" stroke="${busColor.neon}" stroke-width="1.8" />
+              <!-- Front windshield (Right side) -->
+              <path d="M50 5h10c1 0 2 1 2 2v10c0 1-1 2-2 2h-10V5z" fill="#D1E8FF" stroke="${busColor.neon}" stroke-width="1.2" opacity="0.85" />
+              <!-- Windows -->
+              <rect x="6" y="8" width="9" height="7" rx="1.5" fill="#D1E8FF" stroke="${busColor.neon}" stroke-width="1.2" opacity="0.85" />
+              <rect x="17" y="8" width="9" height="7" rx="1.5" fill="#D1E8FF" stroke="${busColor.neon}" stroke-width="1.2" opacity="0.85" />
+              <rect x="28" y="8" width="9" height="7" rx="1.5" fill="#D1E8FF" stroke="${busColor.neon}" stroke-width="1.2" opacity="0.85" />
+              <rect x="39" y="8" width="9" height="7" rx="1.5" fill="#D1E8FF" stroke="${busColor.neon}" stroke-width="1.2" opacity="0.85" />
+              <!-- Wheels -->
+              <circle cx="16" cy="27" r="4.5" fill="#1E293B" stroke="${busColor.neon}" stroke-width="1.2" />
+              <circle cx="16" cy="27" r="1.5" fill="#FFFFFF" />
+              <circle cx="48" cy="27" r="4.5" fill="#1E293B" stroke="${busColor.neon}" stroke-width="1.2" />
+              <circle cx="48" cy="27" r="1.5" fill="#FFFFFF" />
+              <!-- Passenger Door outline -->
+              <line x1="49" y1="5" x2="49" y2="27" stroke="${busColor.neon}" stroke-width="1.2" />
+              <!-- Tail Light (Left) -->
+              <rect x="0.5" y="10" width="1.5" height="5" rx="0.5" fill="#EF4444" />
+              <!-- Route Number Overlay (on the side of the bus body) -->
+              <text x="28" y="21" fill="#FFFFFF" font-size="8.5" font-weight="900" font-family="'Space Grotesk',sans-serif" text-anchor="middle" style="letter-spacing:-0.2px;">${busTracking.routeNo}</text>
+            </svg>
 
             <!-- Fluorescent Headlight Beam -->
             <div style="
@@ -771,11 +770,6 @@ export default function MapComponent({
               z-index: 1;
               filter: blur(0.5px);
             "></div>
-          </div>
-          <!-- Lower destination / vehicle info plate -->
-          <div style="background:rgba(255, 255, 255, 0.98);color:#1e293b;font-size:8px;font-weight:700;padding:3.5px 7px;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,0.15);white-space:nowrap;min-width:110px;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2.5px;border:1px solid rgba(226, 232, 240, 0.9);">
-            ${flowHtml}
-            <div style="color:#64748b;font-size:7px;font-weight:500;letter-spacing:-0.1px;">${b.vehicleNo}</div>
           </div>
         </div>
       `;
